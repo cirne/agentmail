@@ -1,0 +1,41 @@
+# Dependencies
+node_modules/
+.bun/
+
+# Build output
+dist/
+build/
+*.compiled
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Local data (never commit email data)
+/data/
+maildir/
+*.db
+*.db-shm
+*.db-wal
+vectors/
+*.eml
+
+# Credentials and secrets
+*.pem
+*.key
+google-credentials.json
+oauth-tokens.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+*.swp
+*.swo
+
+# Logs
+*.log
+logs/
