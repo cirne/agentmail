@@ -48,7 +48,7 @@ zmail search <query> [--from <address>] [--after <date>] [--before <date>]
 zmail status
 zmail stats
 zmail thread <id>
-zmail message <id>
+zmail message <id> [--raw]
 zmail mcp
 ```
 
@@ -61,6 +61,9 @@ zmail search "receipt" --from no_reply@email.apple.com --after 30d \
 
 # 2) Hydrate selected IDs
 zmail message "<message-id>"
+
+# Optional: fetch original raw MIME source
+zmail message "<message-id>" --raw
 ```
 
 ### Schema drift recovery
