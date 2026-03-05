@@ -3,6 +3,9 @@ import type { SearchResult } from "~/lib/types";
 import { embedText } from "./embeddings";
 import { searchVectors } from "./vectors";
 
+export type SearchMode = "auto" | "fts" | "semantic" | "hybrid";
+export type ResolvedSearchMode = "filter" | "fts" | "semantic" | "hybrid";
+
 export interface SearchOptions {
   query?: string;
   limit?: number;
@@ -10,6 +13,21 @@ export interface SearchOptions {
   fromAddress?: string;
   afterDate?: string;
   beforeDate?: string;
+  mode?: SearchMode;
+}
+
+export interface SearchTimings {
+  ftsMs?: number;
+  embedMs?: number;
+  vectorMs?: number;
+  mergeMs?: number;
+  totalMs: number;
+  modeUsed: ResolvedSearchMode;
+}
+
+export interface SearchResultSet {
+  results: SearchResult[];
+  timings: SearchTimings;
 }
 
 /** LIKE pattern for partial match on address or display name (e.g. "donna" -> "%donna%"). */
@@ -133,12 +151,13 @@ function ftsSearch(db: Database, opts: SearchOptions): SearchResult[] {
 /**
  * Semantic/vector search.
  */
-async function vectorSearch(db: Database, opts: SearchOptions): Promise<SearchResult[]> {
+async function vectorSearchFromEmbedding(
+  db: Database,
+  opts: SearchOptions,
+  queryEmbedding: number[]
+): Promise<SearchResult[]> {
   const { query, limit = 20, offset = 0, fromAddress, afterDate, beforeDate } = opts;
   if (!query?.trim()) return [];
-
-  // Embed the query
-  const queryEmbedding = await embedText(query);
 
   // Search LanceDB for similar messages
   const vectorResults = await searchVectors(queryEmbedding, limit + offset + 50); // Get extra for filtering
@@ -199,6 +218,65 @@ async function vectorSearch(db: Database, opts: SearchOptions): Promise<SearchRe
   return sorted.map(({ bodyText, ...rest }) => rest);
 }
 
+async function vectorSearch(db: Database, opts: SearchOptions): Promise<SearchResult[]> {
+  const { query } = opts;
+  if (!query?.trim()) return [];
+  const queryEmbedding = await embedText(query);
+  return vectorSearchFromEmbedding(db, opts, queryEmbedding);
+}
+
+interface VectorSearchRun {
+  results: SearchResult[];
+  embedMs: number;
+  vectorMs: number;
+}
+
+async function vectorSearchWithTimings(
+  db: Database,
+  opts: SearchOptions
+): Promise<VectorSearchRun> {
+  const { query } = opts;
+  if (!query?.trim()) {
+    return { results: [], embedMs: 0, vectorMs: 0 };
+  }
+
+  const embedStart = Date.now();
+  const queryEmbedding = await embedText(query);
+  const embedMs = Date.now() - embedStart;
+
+  const vectorStart = Date.now();
+  const results = await vectorSearchFromEmbedding(db, opts, queryEmbedding);
+  const vectorMs = Date.now() - vectorStart;
+
+  return { results, embedMs, vectorMs };
+}
+
+function resolveAutoMode(opts: SearchOptions): ResolvedSearchMode {
+  const { query, fromAddress, afterDate, beforeDate } = opts;
+  if (!query?.trim()) return "filter";
+
+  if (fromAddress || afterDate || beforeDate) return "fts";
+
+  const q = query.trim();
+  const tokenCount = q.split(/\s+/).filter(Boolean).length;
+  const looksLikeEmail = /@/.test(q);
+  const looksLikeDate = /^\d{4}-\d{2}-\d{2}$/.test(q);
+  const looksLikeId = /(^<[^>]+>$)|([A-Za-z0-9._%+-]+\/[A-Za-z0-9._%+-]+)/.test(q);
+
+  if (looksLikeEmail || looksLikeDate || looksLikeId || tokenCount <= 4) {
+    return "fts";
+  }
+
+  return "hybrid";
+}
+
+function resolveMode(opts: SearchOptions): ResolvedSearchMode {
+  if (!opts.query?.trim()) return "filter";
+  if (!opts.mode) return resolveAutoMode(opts);
+  if (opts.mode === "auto") return resolveAutoMode(opts);
+  return opts.mode;
+}
+
 /**
  * Generate a simple text snippet for semantic search results.
  * Finds the first occurrence of query terms (case-insensitive) and extracts surrounding context.
@@ -248,33 +326,68 @@ function generateSnippet(text: string, query: string, contextLength: number = 10
 }
 
 /**
- * Unified search function that always uses hybrid mode (FTS5 + semantic RRF).
+ * Unified search function with mode selection.
  * For filter-only queries (no query text), returns plain SQL results.
  */
 export async function search(db: Database, opts: SearchOptions): Promise<SearchResult[]> {
+  const result = await searchWithMeta(db, opts);
+  return result.results;
+}
+
+export async function searchWithMeta(
+  db: Database,
+  opts: SearchOptions
+): Promise<SearchResultSet> {
+  const startedAt = Date.now();
   const { query, limit = 20, offset = 0 } = opts;
   const hasFilters = !!(opts.fromAddress || opts.afterDate || opts.beforeDate);
+  const modeUsed = resolveMode(opts);
+  const timings: SearchTimings = {
+    totalMs: 0,
+    modeUsed,
+  };
 
-  // Filter-only path: no query text, just WHERE clauses
   if (!query?.trim() && hasFilters) {
-    return filterOnlySearch(db, opts);
+    const results = filterOnlySearch(db, opts);
+    timings.totalMs = Date.now() - startedAt;
+    return { results, timings };
   }
 
-  // If no query and no filters, return empty
   if (!query?.trim()) {
-    return [];
+    timings.totalMs = Date.now() - startedAt;
+    return { results: [], timings };
   }
 
-  // Always hybrid: FTS + semantic, merged via RRF
-  const [ftsResults, semanticResults] = await Promise.all([
-    Promise.resolve(ftsSearch(db, opts)), // FTS is synchronous
-    vectorSearch(db, opts),
-  ]);
+  if (modeUsed === "fts") {
+    const ftsStart = Date.now();
+    const results = ftsSearch(db, opts);
+    timings.ftsMs = Date.now() - ftsStart;
+    timings.totalMs = Date.now() - startedAt;
+    return { results, timings };
+  }
+
+  if (modeUsed === "semantic") {
+    const semantic = await vectorSearchWithTimings(db, opts);
+    timings.embedMs = semantic.embedMs;
+    timings.vectorMs = semantic.vectorMs;
+    timings.totalMs = Date.now() - startedAt;
+    return { results: semantic.results, timings };
+  }
+
+  const semanticPromise = vectorSearchWithTimings(db, opts);
+  const ftsStart = Date.now();
+  const ftsResults = ftsSearch(db, opts);
+  timings.ftsMs = Date.now() - ftsStart;
+  const semantic = await semanticPromise;
+  timings.embedMs = semantic.embedMs;
+  timings.vectorMs = semantic.vectorMs;
+  const semanticResults = semantic.results;
 
   // Create maps for RRF scoring
   const ftsRankMap = new Map(ftsResults.map((r, idx) => [r.messageId, idx + 1]));
   const semanticRankMap = new Map(semanticResults.map((r, idx) => [r.messageId, idx + 1]));
 
+  const mergeStart = Date.now();
   // Combine and deduplicate by messageId
   const combined = new Map<string, SearchResult & { rrfScore: number }>();
 
@@ -302,8 +415,11 @@ export async function search(db: Database, opts: SearchOptions): Promise<SearchR
     .sort((a, b) => b.rrfScore - a.rrfScore)
     .slice(offset, offset + limit);
 
+  timings.mergeMs = Date.now() - mergeStart;
+  timings.totalMs = Date.now() - startedAt;
+
   // Remove rrfScore from final results
-  return sorted.map(({ rrfScore, ...rest }) => rest);
+  return { results: sorted.map(({ rrfScore, ...rest }) => rest), timings };
 }
 
 // Legacy exports for backwards compatibility (deprecated, will be removed)
@@ -312,5 +428,6 @@ export async function semanticSearch(db: Database, opts: SearchOptions): Promise
 }
 
 export async function hybridSearch(db: Database, opts: SearchOptions): Promise<SearchResult[]> {
-  return search(db, opts);
+  const result = await searchWithMeta(db, { ...opts, mode: "hybrid" });
+  return result.results;
 }
