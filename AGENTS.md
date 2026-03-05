@@ -87,3 +87,15 @@ Canonical sync behavior: [`.env.example`](.env.example) (SYNC_MAILBOX, SYNC_EXCL
 ## Environment variables
 
 Canonical list and descriptions: [`.env.example`](.env.example). Summary: `IMAP_*`, `SYNC_FROM_DATE`, `SYNC_MAILBOX`, `SYNC_EXCLUDE_LABELS`, `GOOGLE_*`, `AUTH_SECRET`, `PORT`, `DATA_DIR`, optional `OPENAI_API_KEY`.
+
+## Cursor Cloud specific instructions
+
+- **Bun is not pre-installed** on the VM. The update script installs it from `bun.sh/install` and then runs `bun install`. Bun's binary is at `~/.bun/bin/bun`; the update script exports `PATH` accordingly.
+- **`.env` must exist** before running the app. Copy from `.env.example`: `cp .env.example .env`. IMAP credentials (`IMAP_USER`, `IMAP_PASSWORD`) are injected as environment secrets; the `.env` file's placeholder values are overridden by env vars at runtime.
+- **`bun run dev`** starts the Hono web server on port 3000 **and** kicks off a background IMAP sync using `SYNC_FROM_DATE` (default: 1 year). To sync only recent mail use the CLI: `bun run src/index.ts sync --since 7d`.
+- **Lint/typecheck:** `bun run lint` (alias for `tsc --noEmit`). No ESLint — only TypeScript strict checking.
+- **Tests:** `bun test` — runs 66 tests across 7 files (schema, config, search, web routes, sync parsing, embeddings, indexing).
+- **Build:** `bun run build` — compiles to `dist/zmail` native binary.
+- **DB reset:** `rm -rf data/` then re-run. See `.cursor/skills/db-dev/SKILL.md`. No migrations exist.
+- **Semantic search** requires `OPENAI_API_KEY`. Without it the app works in FTS-only mode.
+- The web UI uses HTMX; no npm frontend build step is needed.
