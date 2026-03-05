@@ -1,10 +1,12 @@
-import { connect, type Connection, type Table } from "@lancedb/lancedb";
+import { connect, Index, type Connection, type Table } from "@lancedb/lancedb";
 import { mkdirSync } from "fs";
 import { config } from "~/lib/config";
+import { logger } from "~/lib/logger";
 
 const TABLE_NAME = "message_embeddings";
+const INDEX_THRESHOLD = 10_000;
 
-interface EmbeddingRow extends Record<string, unknown> {
+export interface EmbeddingRow extends Record<string, unknown> {
   messageId: string;
   embedding: number[];
   subject: string;
@@ -15,9 +17,6 @@ interface EmbeddingRow extends Record<string, unknown> {
 let db: Connection | null = null;
 let table: Table | null = null;
 
-/**
- * Get or create the LanceDB connection and ensure the vectors directory exists.
- */
 async function getVectorDb(): Promise<Connection> {
   if (!db) {
     mkdirSync(config.vectorsPath, { recursive: true });
@@ -26,10 +25,6 @@ async function getVectorDb(): Promise<Connection> {
   return db;
 }
 
-/**
- * Get or create the message_embeddings table.
- * Creates the table with the schema if it doesn't exist.
- */
 async function getTable(): Promise<Table | null> {
   if (table) return table;
   const vectorDb = await getVectorDb();
@@ -38,68 +33,64 @@ async function getTable(): Promise<Table | null> {
     table = await vectorDb.openTable(TABLE_NAME);
     return table;
   }
-  // Table doesn't exist yet - return null (caller should handle this)
   return null;
 }
 
 /**
- * Upsert an embedding for a message.
- * If the messageId already exists, replaces it; otherwise inserts.
+ * Append a batch of embeddings. Append-only — no per-row delete.
+ * SQLite embedding_state is the authority on what's indexed; duplicates
+ * in LanceDB are harmless since search results join back to SQLite.
  */
-export async function upsertEmbedding(
-  messageId: string,
-  embedding: number[],
-  subject: string,
-  fromAddress: string,
-  date: string
-): Promise<void> {
+export async function addEmbeddingsBatch(rows: EmbeddingRow[]): Promise<void> {
+  if (rows.length === 0) return;
   let tbl = await getTable();
   if (!tbl) {
-    // Create table with first row
     const vectorDb = await getVectorDb();
-    const row: EmbeddingRow = {
-      messageId,
-      embedding,
-      subject,
-      fromAddress,
-      date,
-    };
-    tbl = await vectorDb.createTable(TABLE_NAME, [row]);
+    tbl = await vectorDb.createTable(TABLE_NAME, rows);
     table = tbl;
     return;
   }
-  const row: EmbeddingRow = {
-    messageId,
-    embedding,
-    subject,
-    fromAddress,
-    date,
-  };
-  // LanceDB doesn't have native upsert, so we delete then insert
-  await tbl.delete(`messageId = '${messageId.replace(/'/g, "''")}'`);
-  await tbl.add([row]);
+  await tbl.add(rows);
+}
+
+/**
+ * Build an IVF_PQ ANN index on the embedding column if one doesn't exist
+ * and the table has enough rows to benefit. Safe to call repeatedly.
+ */
+export async function ensureIndex(): Promise<void> {
+  const tbl = await getTable();
+  if (!tbl) return;
+
+  const indices = await tbl.listIndices();
+  const hasVectorIndex = indices.some(
+    (idx) => idx.columns && idx.columns.includes("embedding"),
+  );
+  if (hasVectorIndex) return;
+
+  const count = await tbl.countRows();
+  if (count < INDEX_THRESHOLD) return;
+
+  logger.info("Building ANN index on LanceDB", { rows: count });
+  await tbl.createIndex("embedding", {
+    config: Index.ivfPq({ distanceType: "cosine" }),
+  });
+  logger.info("ANN index built");
 }
 
 /**
  * Search for similar messages using k-nearest neighbors.
- * Returns messageIds ordered by similarity (most similar first).
+ * Uses ANN index if available, falls back to brute-force.
  */
 export async function searchVectors(
   queryEmbedding: number[],
-  limit: number = 20
+  limit: number = 20,
 ): Promise<Array<{ messageId: string; score: number }>> {
   const tbl = await getTable();
-  if (!tbl) {
-    // No embeddings yet
-    return [];
-  }
-  const results = await tbl
-    .search(queryEmbedding)
-    .limit(limit)
-    .toArray();
+  if (!tbl) return [];
+  const results = await tbl.search(queryEmbedding).limit(limit).toArray();
   return results.map((r: any) => ({
     messageId: r.messageId as string,
-    score: r._distance ? 1 / (1 + r._distance) : 0, // Convert distance to similarity score
+    score: r._distance ? 1 / (1 + r._distance) : 0,
   }));
 }
 
@@ -107,9 +98,14 @@ export async function searchVectors(
  * Check if an embedding exists for a given messageId.
  * Uses SQLite embedding_state as the source of truth.
  */
-export function hasEmbedding(db: import("bun:sqlite").Database, messageId: string): boolean {
+export function hasEmbedding(
+  db: import("bun:sqlite").Database,
+  messageId: string,
+): boolean {
   const row = db
-    .query("SELECT 1 FROM messages WHERE message_id = ? AND embedding_state = 'done'")
+    .query(
+      "SELECT 1 FROM messages WHERE message_id = ? AND embedding_state = 'done'",
+    )
     .get(messageId);
   return !!row;
 }

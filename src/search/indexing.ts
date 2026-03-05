@@ -12,7 +12,7 @@ import { logger } from "~/lib/logger";
 import { config } from "~/lib/config";
 import { acquireLock, releaseLock } from "~/lib/process-lock";
 import { embedBatch, prepareTextForEmbedding } from "./embeddings";
-import { upsertEmbedding } from "./vectors";
+import { addEmbeddingsBatch, ensureIndex, type EmbeddingRow } from "./vectors";
 
 export interface IndexingResult {
   indexed: number;
@@ -91,59 +91,46 @@ export function resetStaleClaims(db: Database): number {
 }
 
 /**
- * Process a single batch: embed via OpenAI, upsert to LanceDB, update SQLite.
- * Returns { indexed, failed } counts for this batch.
+ * Process a single batch: embed via OpenAI, batch-insert to LanceDB, update SQLite.
  */
 async function processBatch(
   db: Database,
-  batch: MessageRow[]
+  batch: MessageRow[],
 ): Promise<{ indexed: number; failed: number }> {
-  let indexed = 0;
-  let failed = 0;
-
-  const texts = batch.map((m) => prepareTextForEmbedding(m.subject, m.body_text));
+  const texts = batch.map((m) =>
+    prepareTextForEmbedding(m.subject, m.body_text),
+  );
 
   try {
     const embeddings = await embedBatch(texts);
 
+    const rows: EmbeddingRow[] = [];
     for (let i = 0; i < batch.length; i++) {
-      try {
-        await upsertEmbedding(
-          batch[i].message_id,
-          embeddings[i],
-          batch[i].subject,
-          batch[i].from_address,
-          batch[i].date
-        );
-        db.run(
-          `UPDATE messages SET embedding_state = 'done' WHERE message_id = ?`,
-          [batch[i].message_id]
-        );
-        indexed++;
-      } catch (err) {
-        logger.warn("Failed to upsert embedding", {
-          messageId: batch[i].message_id,
-          error: String(err),
-        });
-        db.run(
-          `UPDATE messages SET embedding_state = 'failed' WHERE message_id = ?`,
-          [batch[i].message_id]
-        );
-        failed++;
-      }
+      rows.push({
+        messageId: batch[i].message_id,
+        embedding: embeddings[i],
+        subject: batch[i].subject,
+        fromAddress: batch[i].from_address,
+        date: batch[i].date,
+      });
     }
+
+    await addEmbeddingsBatch(rows);
+
+    const ids = batch.map((m) => m.id).join(",");
+    db.run(
+      `UPDATE messages SET embedding_state = 'done' WHERE id IN (${ids})`,
+    );
+
+    return { indexed: batch.length, failed: 0 };
   } catch (err) {
     logger.error("Embedding batch failed", { error: String(err) });
-    for (const msg of batch) {
-      db.run(
-        `UPDATE messages SET embedding_state = 'failed' WHERE message_id = ?`,
-        [msg.message_id]
-      );
-      failed++;
-    }
+    const ids = batch.map((m) => m.id).join(",");
+    db.run(
+      `UPDATE messages SET embedding_state = 'failed' WHERE id IN (${ids})`,
+    );
+    return { indexed: 0, failed: batch.length };
   }
-
-  return { indexed, failed };
 }
 
 /**
@@ -250,14 +237,21 @@ export async function indexMessages(): Promise<IndexingResult> {
     await Promise.all(inFlight);
   }
 
-  // Final status update
+  if (totalIndexed > 0) {
+    try {
+      await ensureIndex();
+    } catch (err) {
+      logger.warn("Failed to build ANN index", { error: String(err) });
+    }
+  }
+
   db.run(
     `UPDATE indexing_status SET
       indexed_so_far = ?,
       failed = ?,
       completed_at = datetime('now')
     WHERE id = 1`,
-    [totalIndexed, totalFailed]
+    [totalIndexed, totalFailed],
   );
 
   releaseLock(db, "indexing_status");

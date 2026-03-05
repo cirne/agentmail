@@ -46,8 +46,13 @@ bun run lint         # tsc --noEmit (no ESLint)
 bun test             # run test suite
 ```
 
-## Cursor Cloud specific instructions
+## Env Varialbles
+first check existing environmetnt for required variables, which are:
 
-- **Bun is not pre-installed.** The update script installs it from `bun.sh/install` and runs `bun install`. Binary is at `~/.bun/bin/bun`.
-- **Do NOT create or copy a `.env` file.** All required environment variables are already set in the environment. A local `.env` would shadow them with placeholder values.
-- **Semantic search** requires `OPENAI_API_KEY`. Without it the app works in FTS-only mode.
+```
+IMAP_USER=you@gmail.com
+IMAP_PASSWORD=your-16-char-app-password
+OPENAI_API_KEY=sk-...
+```
+
+if one or more are not specified you will need to setup a .env file (see .env.example)
