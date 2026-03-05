@@ -67,6 +67,21 @@ Add:
 
 This helps agent planners choose faster modes dynamically.
 
+### 6) Reuse provider-native labels before inventing new taxonomy
+
+For category-oriented workflows (e.g., `invoice`, `delivery`, `travel`, `news`), treat existing provider metadata as the first signal:
+
+- Gmail labels/tags (via `X-GM-LABELS`)
+- folder/system labels (Inbox, Sent, Promotions, etc.)
+
+Then add a normalized category layer as **additive metadata**, not a replacement for provider labels:
+
+- preserve original labels for fidelity and portability
+- map provider labels/terms into canonical categories where possible
+- allow classifier- or rule-derived categories when no provider label exists
+
+This keeps the first iteration lightweight while preserving a path to cross-provider category search.
+
 ## Implementation plan
 
 1. Extend `SearchOptions` and CLI argument parser with `detail`, `mode`, `fields`, `cursor`, `timings`.
@@ -77,6 +92,7 @@ This helps agent planners choose faster modes dynamically.
 6. Document recommended agent pattern:
    - `search --detail headers --fields ... --limit N`
    - then `message` / `thread` on selected IDs only.
+7. For phase-2 category features, bootstrap from provider-native labels first, then add canonical category mapping.
 
 ## What stays the same
 
