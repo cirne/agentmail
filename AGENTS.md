@@ -16,6 +16,7 @@ The goal is not another email client. The goal is to make email a tool-accessibl
 
 - [`docs/VISION.md`](docs/VISION.md) — product vision and principles
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — all technical decisions with rationale (read this before making architectural choices)
+- [`docs/OPPORTUNITIES.md`](docs/OPPORTUNITIES.md) — product improvement ideas from real usage
 
 ## Tech stack
 

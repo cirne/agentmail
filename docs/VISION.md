@@ -2,6 +2,9 @@
 ## Vision
 
 > Architectural decisions and the technical design log live in [ARCHITECTURE.md](./ARCHITECTURE.md).
+> Competitive positioning and strategic differentiation live in [STRATEGY.md](./STRATEGY.md).
+> Unit economics and cost modeling live in [COGS.md](./COGS.md).
+> Product improvement opportunities live in [OPPORTUNITIES.md](./OPPORTUNITIES.md).
 
 ### Summary
 

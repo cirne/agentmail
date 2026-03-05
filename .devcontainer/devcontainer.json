@@ -1,0 +1,11 @@
+{
+  "name": "zmail",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "postCreateCommand": "bun install",
+  "forwardPorts": [3000],
+  "remoteEnv": {
+    "DATA_DIR": "./data"
+  }
+}
