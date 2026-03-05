@@ -5,8 +5,13 @@ import { getDb } from "~/db";
 import { startMcpServer } from "~/mcp";
 import { logger } from "~/lib/logger";
 import { parseSinceToDate } from "~/sync/parse-since";
+import { config } from "~/lib/config";
+import { htmlToMarkdown, normalizePlainTextToMarkdown } from "~/lib/content-normalize";
+import { parseRawMessage } from "~/sync/parse-message";
 import type { SearchResult } from "~/lib/types";
 import type { Database } from "bun:sqlite";
+import { readFileSync } from "fs";
+import { join } from "path";
 
 const [, , command, ...args] = process.argv;
 
@@ -282,6 +287,110 @@ function serializeJsonPayload(
   );
 }
 
+interface MessageRow {
+  id: number;
+  message_id: string;
+  thread_id: string;
+  folder: string;
+  uid: number;
+  labels: string;
+  from_address: string;
+  from_name: string | null;
+  to_addresses: string;
+  cc_addresses: string;
+  subject: string;
+  date: string;
+  body_text: string;
+  raw_path: string;
+  synced_at: string;
+  embedding_state: string;
+}
+
+function parseRawFlag(rawArgs: string[], usage: string): { id: string; raw: boolean } {
+  let id: string | undefined;
+  let raw = false;
+
+  for (const arg of rawArgs) {
+    if (arg === "--raw") {
+      raw = true;
+      continue;
+    }
+    if (arg === "--help") {
+      console.error(usage);
+      process.exit(0);
+    }
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown flag: ${arg}`);
+    }
+    if (id) {
+      throw new Error("Too many positional arguments.");
+    }
+    id = arg;
+  }
+
+  if (!id) {
+    throw new Error(`Usage: ${usage}`);
+  }
+
+  return { id, raw };
+}
+
+function readRawEmail(rawPath: string): Buffer | null {
+  if (!rawPath) return null;
+  const absPath = join(config.maildirPath, rawPath);
+  try {
+    return readFileSync(absPath);
+  } catch {
+    return null;
+  }
+}
+
+async function formatMessageForOutput(message: MessageRow, raw: boolean): Promise<Record<string, unknown>> {
+  if (raw) {
+    const rawEmail = readRawEmail(message.raw_path);
+    return {
+      ...message,
+      content: {
+        format: "raw",
+        source: "eml",
+        eml: rawEmail ? rawEmail.toString("utf8") : null,
+      },
+    };
+  }
+
+  const { body_text, ...rest } = message;
+  let markdown = normalizePlainTextToMarkdown(body_text ?? "");
+  let source: "body_text" | "html" | "text" | "empty" = markdown ? "body_text" : "empty";
+
+  if (!markdown && message.raw_path) {
+    const rawEmail = readRawEmail(message.raw_path);
+    if (rawEmail) {
+      try {
+        const parsed = await parseRawMessage(rawEmail);
+        if (parsed.bodyHtml) {
+          markdown = htmlToMarkdown(parsed.bodyHtml);
+          if (markdown) source = "html";
+        }
+        if (!markdown && parsed.bodyText) {
+          markdown = normalizePlainTextToMarkdown(parsed.bodyText);
+          if (markdown) source = "text";
+        }
+      } catch {
+        // fall through to empty content
+      }
+    }
+  }
+
+  return {
+    ...rest,
+    content: {
+      format: "markdown",
+      source,
+      markdown,
+    },
+  };
+}
+
 async function main() {
   switch (command) {
     case "sync": {
@@ -414,30 +523,42 @@ async function main() {
     }
 
     case "thread": {
-      const threadId = args[0];
-      if (!threadId) {
-        console.error("Usage: zmail thread <thread_id>");
+      let parsed;
+      try {
+        parsed = parseRawFlag(args, "zmail thread <thread_id> [--raw]");
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
         process.exit(1);
       }
+
       const db = getDb();
       const messages = db
         .query("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
-        .all(threadId);
-      console.log(JSON.stringify(messages, null, 2));
+        .all(parsed.id) as MessageRow[];
+      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, parsed.raw)));
+      console.log(JSON.stringify(shaped, null, 2));
       break;
     }
 
     case "message": {
-      const messageId = args[0];
-      if (!messageId) {
-        console.error("Usage: zmail message <message_id>");
+      let parsed;
+      try {
+        parsed = parseRawFlag(args, "zmail message <message_id> [--raw]");
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
         process.exit(1);
       }
+
       const db = getDb();
       const message = db
         .query("SELECT * FROM messages WHERE message_id = ?")
-        .get(messageId);
-      console.log(JSON.stringify(message, null, 2));
+        .get(parsed.id) as MessageRow | undefined;
+      if (!message) {
+        console.log("null");
+        break;
+      }
+      const shaped = await formatMessageForOutput(message, parsed.raw);
+      console.log(JSON.stringify(shaped, null, 2));
       break;
     }
 
@@ -532,8 +653,8 @@ Usage:
   zmail search <query> [flags]    Search email (see --help for flags)
   zmail status                    Show sync and indexing status
   zmail stats                     Show database statistics
-  zmail thread <id>               Fetch full thread (returns JSON)
-  zmail message <id>              Fetch single message (returns JSON)
+  zmail thread <id> [--raw]       Fetch thread (Markdown by default; raw .eml with --raw)
+  zmail message <id> [--raw]      Fetch message (Markdown by default; raw .eml with --raw)
   zmail mcp                       Start MCP server (stdio)
 `);
       if (command) {
