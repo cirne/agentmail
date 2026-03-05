@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import type { Database } from "bun:sqlite";
 import { createTestDb, insertTestMessage } from "~/db/test-helpers";
-import { search } from "./index";
+import { search, searchWithMeta } from "./index";
 
 describe("search", () => {
   let db: Database;
@@ -183,5 +183,20 @@ describe("search", () => {
     const results = await search(db, { fromAddress: "alice" });
     expect(results.length).toBe(2);
     expect(results[0].subject).toBe("Newer");
+  });
+
+  it("auto mode resolves to fts for lexical queries", async () => {
+    insertTestMessage(db, { subject: "Invoice from Stripe" });
+    const run = await searchWithMeta(db, { query: "Invoice", mode: "auto" });
+    expect(run.timings.modeUsed).toBe("fts");
+    expect(run.timings.ftsMs).toBeDefined();
+    expect(run.results.length).toBe(1);
+  });
+
+  it("filter-only path reports filter mode", async () => {
+    insertTestMessage(db, { fromAddress: "alice@example.com", subject: "Hello" });
+    const run = await searchWithMeta(db, { fromAddress: "alice" });
+    expect(run.timings.modeUsed).toBe("filter");
+    expect(run.results.length).toBe(1);
   });
 });

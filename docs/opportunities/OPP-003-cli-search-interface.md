@@ -94,6 +94,30 @@ This keeps the first iteration lightweight while preserving a path to cross-prov
    - then `message` / `thread` on selected IDs only.
 7. For phase-2 category features, bootstrap from provider-native labels first, then add canonical category mapping.
 
+## Implementation status (current)
+
+Completed in phase 1:
+
+- ✅ `SearchOptions` + CLI parser now support `--detail`, `--mode`, `--fields`, `--timings`.
+- ✅ Search execution supports `auto|fts|semantic|hybrid` (instead of always-hybrid).
+- ✅ Default detail is header-first (`headers`) with stable IDs in output.
+- ✅ Output shaping supports header/snippet/body detail levels.
+- ✅ `--ids-only` supports ultra-cheap shortlist generation.
+- ✅ JSON payload safety now includes byte-capped serialization with explicit `truncated` metadata.
+- ✅ JSON mode applies stricter `--limit` bounds (caps large limits for output stability).
+- ✅ Built-in timings are emitted with machine-readable stage fields (`ftsMs`, `embedMs`, `vectorMs`, `mergeMs`, `totalMs`, `modeUsed`).
+
+Remaining work:
+
+- ⏳ `--cursor` pagination contract is not implemented yet.
+- ⏳ Provider-native label/category workflows are not yet exposed in CLI search filters.
+- ⏳ A dedicated CLI reference page (beyond README snippets) is not yet published.
+
+Notes from manual validation:
+
+- For Apple receipt emails, shortlist + hydrate flow works well with `--detail headers`, `--fields`, `--ids-only`, and `--timings`.
+- `--detail body` currently mirrors `messages.body_text`; HTML-heavy receipts may return empty `body_text`, so total extraction may still require parsing raw `.eml` until richer body extraction is added.
+
 ## What stays the same
 
 - SQLite FTS5 + LanceDB hybrid architecture

@@ -76,12 +76,13 @@ This layout applies to **both Phase 1 and Phase 2 (open source)**. Each user run
 
 **CLI commands:**
 ```
-zmail configure        ← interactive setup (IMAP credentials, sync config)
-zmail sync             ← run / manage background sync daemon
-zmail search <query>   ← full-text search, returns JSON
-zmail thread <id>      ← fetch full thread
-zmail message <id>     ← fetch single message
-zmail mcp              ← start MCP server
+zmail sync [--since <spec>]     ← sync + concurrent indexing
+zmail search <query> [flags]    ← header-first search with mode/detail controls
+zmail status                    ← sync/indexing/search readiness
+zmail stats                     ← DB stats (volume + top senders/folders)
+zmail thread <id>               ← fetch full thread JSON
+zmail message <id>              ← fetch single message JSON
+zmail mcp                       ← start MCP server (stdio)
 ```
 
 **Rationale:** Agents like Claude Code and OpenClaw can invoke shell commands directly. A subprocess call to `zmail search` is faster than an MCP HTTP round-trip, requires no running server, and has no port management. The CLI returns structured JSON so agents can consume output directly.
@@ -418,7 +419,7 @@ This replaces timestamp-based staleness detection. PID checks are instantaneous 
 
 **Progressive availability:** Synced messages are immediately available for FTS5/keyword search and direct fetch. Semantic search becomes available progressively as the indexer catches up — like a database serving queries while building an index in the background.
 
-**Always-hybrid search.** Search always runs FTS5 and semantic search in parallel, merging results via Reciprocal Rank Fusion (RRF). There are no separate search "modes." `OPENAI_API_KEY` is required. Messages that haven't been indexed yet are still findable via FTS5; they just don't contribute to the semantic half of the ranking.
+**Mode-aware search.** Search supports `auto|fts|semantic|hybrid`. `auto` selects a fast lexical path for clear metadata/keyword intent and uses hybrid for broader semantic intent. Hybrid still uses FTS5 + semantic search with Reciprocal Rank Fusion (RRF). Messages that have not been embedded remain discoverable through FTS.
 
 **Observability:**
 - Both subsystems track progress in the DB (`sync_summary`, `indexing_status`).
@@ -429,6 +430,16 @@ This replaces timestamp-based staleness detection. PID checks are instantaneous 
 **No standalone indexing command.** There is no `zmail index` or backfill tool. `zmail sync` is the only entry point for data ingestion and indexing — one command, one process.
 
 **Rationale:** Embedding via an external API (OpenAI) adds ~50–100ms latency per message. Running this inline during sync would make sync API-bound instead of bandwidth-bound, violating ADR-016. Async-pipelined indexing lets each subsystem optimize for its own bottleneck while keeping the execution model simple: one thread, one process, no IPC.
+
+---
+
+### ADR-021: Schema Drift Handling — Detect and Rebuild Guidance
+
+**Decision:** On DB open, the app performs a schema-drift preflight that checks required columns on existing tables. If required columns are missing, startup fails with a clear remediation message and recommends a full local data rebuild (`rm -rf data/` + resync).
+
+**Rationale:** This project intentionally avoids in-app migrations for existing DBs. `CREATE TABLE IF NOT EXISTS` keeps fresh bootstraps simple but does not mutate older tables. Drift detection prevents opaque runtime SQLite errors (for example missing `messages.embedding_state`) and gives a deterministic recovery path.
+
+**Result:** Fresh environments bootstrap directly from source schema, while stale local DBs fail fast with actionable rebuild instructions instead of partial runtime failures.
 
 ---
 

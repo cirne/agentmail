@@ -1,12 +1,286 @@
 import { runSync } from "~/sync";
-import { search } from "~/search";
+import { searchWithMeta, type SearchMode } from "~/search";
 import { indexMessages } from "~/search/indexing";
 import { getDb } from "~/db";
 import { startMcpServer } from "~/mcp";
 import { logger } from "~/lib/logger";
 import { parseSinceToDate } from "~/sync/parse-since";
+import type { SearchResult } from "~/lib/types";
+import type { Database } from "bun:sqlite";
 
 const [, , command, ...args] = process.argv;
+
+type SearchDetail = "headers" | "snippet" | "body";
+type SearchField =
+  | "messageId"
+  | "threadId"
+  | "date"
+  | "fromAddress"
+  | "fromName"
+  | "subject"
+  | "rank"
+  | "snippet"
+  | "body";
+
+const VALID_MODES = new Set<SearchMode>(["auto", "fts", "semantic", "hybrid"]);
+const VALID_DETAILS = new Set<SearchDetail>(["headers", "snippet", "body"]);
+const VALID_FIELDS = new Set<SearchField>([
+  "messageId",
+  "threadId",
+  "date",
+  "fromAddress",
+  "fromName",
+  "subject",
+  "rank",
+  "snippet",
+  "body",
+]);
+const DEFAULT_HEADER_FIELDS: SearchField[] = [
+  "messageId",
+  "threadId",
+  "date",
+  "fromAddress",
+  "fromName",
+  "subject",
+  "rank",
+];
+const JSON_LIMIT_CAP = 100;
+const JSON_BYTE_CAP = 64 * 1024;
+
+interface ParsedSearchArgs {
+  query: string;
+  fromAddress?: string;
+  afterDate?: string;
+  beforeDate?: string;
+  limit?: number;
+  mode: SearchMode;
+  detail: SearchDetail;
+  fields?: SearchField[];
+  forceJson: boolean;
+  idsOnly: boolean;
+  timings: boolean;
+}
+
+function searchUsage() {
+  console.error("Usage: zmail search <query> [flags]");
+  console.error("  --from <address>   filter by sender email address");
+  console.error("  --after <date>     filter by date (ISO YYYY-MM-DD or relative: 7d, 2w, 1m)");
+  console.error("  --before <date>    filter by date (ISO YYYY-MM-DD or relative: 7d, 2w, 1m)");
+  console.error("  --limit <n>        max results (default: 20)");
+  console.error("  --mode <mode>      auto | fts | semantic | hybrid (default: auto)");
+  console.error("  --detail <level>   headers | snippet | body (default: headers)");
+  console.error("  --fields <csv>     projection fields, e.g. messageId,subject,date");
+  console.error("  --ids-only         return only message IDs");
+  console.error("  --timings          include machine-readable search timings");
+  console.error("  --json             force JSON output (default: table for TTY, JSON when piped)");
+}
+
+function parseDateFlag(raw: string, flagName: "--after" | "--before"): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+  try {
+    return parseSinceToDate(raw);
+  } catch {
+    throw new Error(
+      `Invalid ${flagName} date: "${raw}". Use ISO date (YYYY-MM-DD) or relative (7d, 2w, 1m).`
+    );
+  }
+}
+
+function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
+  const parsed: ParsedSearchArgs = {
+    query: "",
+    mode: "auto",
+    detail: "headers",
+    forceJson: false,
+    idsOnly: false,
+    timings: false,
+  };
+
+  const queryParts: string[] = [];
+
+  for (let i = 0; i < rawArgs.length; i++) {
+    const arg = rawArgs[i];
+    const next = rawArgs[i + 1];
+    const readValue = (flag: string): string => {
+      if (!next || next.startsWith("-")) {
+        throw new Error(`Missing value for ${flag}`);
+      }
+      i++;
+      return next;
+    };
+
+    if (arg === "--help") {
+      searchUsage();
+      process.exit(0);
+    }
+    if (arg === "--json") {
+      parsed.forceJson = true;
+      continue;
+    }
+    if (arg === "--ids-only") {
+      parsed.idsOnly = true;
+      continue;
+    }
+    if (arg === "--timings") {
+      parsed.timings = true;
+      continue;
+    }
+    if (arg === "--from") {
+      parsed.fromAddress = readValue(arg);
+      continue;
+    }
+    if (arg === "--after") {
+      parsed.afterDate = parseDateFlag(readValue(arg), "--after");
+      continue;
+    }
+    if (arg === "--before") {
+      parsed.beforeDate = parseDateFlag(readValue(arg), "--before");
+      continue;
+    }
+    if (arg === "--limit") {
+      const rawLimit = readValue(arg);
+      const limit = Number.parseInt(rawLimit, 10);
+      if (!Number.isFinite(limit) || limit <= 0) {
+        throw new Error(`Invalid --limit: "${rawLimit}". Must be a positive number.`);
+      }
+      parsed.limit = limit;
+      continue;
+    }
+    if (arg === "--mode") {
+      const mode = readValue(arg) as SearchMode;
+      if (!VALID_MODES.has(mode)) {
+        throw new Error(`Invalid --mode: "${mode}". Use auto, fts, semantic, or hybrid.`);
+      }
+      parsed.mode = mode;
+      continue;
+    }
+    if (arg === "--detail") {
+      const detail = readValue(arg) as SearchDetail;
+      if (!VALID_DETAILS.has(detail)) {
+        throw new Error(`Invalid --detail: "${detail}". Use headers, snippet, or body.`);
+      }
+      parsed.detail = detail;
+      continue;
+    }
+    if (arg === "--fields") {
+      const fieldsRaw = readValue(arg);
+      const fields = fieldsRaw
+        .split(",")
+        .map((f) => f.trim())
+        .filter(Boolean) as SearchField[];
+      if (fields.length === 0) {
+        throw new Error("--fields must include at least one field.");
+      }
+      for (const field of fields) {
+        if (!VALID_FIELDS.has(field)) {
+          throw new Error(`Invalid field in --fields: "${field}".`);
+        }
+      }
+      parsed.fields = fields;
+      continue;
+    }
+
+    if (arg.startsWith("-")) {
+      throw new Error(`Unknown flag: ${arg}`);
+    }
+    queryParts.push(arg);
+  }
+
+  parsed.query = queryParts.join(" ").trim();
+  const hasFilters = !!(parsed.fromAddress || parsed.afterDate || parsed.beforeDate);
+  if (!parsed.query && !hasFilters) {
+    throw new Error("Provide a query and/or filters (--from, --after, --before).");
+  }
+
+  return parsed;
+}
+
+function resolveDetail(detail: SearchDetail, fields?: SearchField[]): SearchDetail {
+  if (fields?.includes("body")) return "body";
+  if (fields?.includes("snippet") && detail === "headers") return "snippet";
+  return detail;
+}
+
+function defaultFieldsForDetail(detail: SearchDetail): SearchField[] {
+  if (detail === "body") return [...DEFAULT_HEADER_FIELDS, "snippet", "body"];
+  if (detail === "snippet") return [...DEFAULT_HEADER_FIELDS, "snippet"];
+  return DEFAULT_HEADER_FIELDS;
+}
+
+function hydrateBodies(db: Database, results: SearchResult[]): Array<SearchResult & { body: string }> {
+  if (results.length === 0) return [];
+  const ids = results.map((r) => r.messageId);
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .query(
+      `SELECT message_id AS messageId, body_text AS body FROM messages WHERE message_id IN (${placeholders})`
+    )
+    .all(...ids) as Array<{ messageId: string; body: string }>;
+  const bodyByMessageId = new Map(rows.map((row) => [row.messageId, row.body]));
+  return results.map((result) => ({
+    ...result,
+    body: bodyByMessageId.get(result.messageId) ?? "",
+  }));
+}
+
+function projectResult(
+  row: SearchResult & { body?: string },
+  detail: SearchDetail,
+  fields?: SearchField[]
+): Record<string, unknown> {
+  const selected = new Set<SearchField>(fields?.length ? fields : defaultFieldsForDetail(detail));
+  // Preserve stable IDs for shortlist -> hydrate workflows.
+  selected.add("messageId");
+  selected.add("threadId");
+
+  const projected: Record<string, unknown> = {};
+  for (const field of selected) {
+    const value = row[field];
+    if (value !== undefined) {
+      projected[field] = value;
+    }
+  }
+  return projected;
+}
+
+function serializeJsonPayload(
+  rows: Array<Record<string, unknown> | string>,
+  timings?: object
+): string {
+  const total = rows.length;
+  for (let includeCount = total; includeCount >= 0; includeCount--) {
+    const visible = rows.slice(0, includeCount);
+    const truncated = includeCount < total;
+    const payload =
+      truncated || timings
+        ? {
+            results: visible,
+            truncated,
+            totalMatched: total,
+            returned: visible.length,
+            ...(timings ? { timings } : {}),
+          }
+        : visible;
+    const json = JSON.stringify(payload, null, 2);
+    if (Buffer.byteLength(json, "utf8") <= JSON_BYTE_CAP) {
+      return json;
+    }
+  }
+
+  return JSON.stringify(
+    {
+      results: [],
+      truncated: true,
+      totalMatched: total,
+      returned: 0,
+      ...(timings ? { timings } : {}),
+    },
+    null,
+    2
+  );
+}
 
 async function main() {
   switch (command) {
@@ -61,144 +335,79 @@ async function main() {
     }
 
     case "search": {
-      // Parse flags: --from, --after, --before, --limit
-      const fromIdx = args.indexOf("--from");
-      const afterIdx = args.indexOf("--after");
-      const beforeIdx = args.indexOf("--before");
-      const limitIdx = args.indexOf("--limit");
-      const jsonIdx = args.indexOf("--json");
-
-      const fromAddress = fromIdx >= 0 ? args[fromIdx + 1] : undefined;
-      const afterRaw = afterIdx >= 0 ? args[afterIdx + 1] : undefined;
-      const beforeRaw = beforeIdx >= 0 ? args[beforeIdx + 1] : undefined;
-      const limitRaw = limitIdx >= 0 ? args[limitIdx + 1] : undefined;
-
-      // Validate flag values
-      if (fromIdx >= 0 && (!fromAddress || fromAddress.startsWith("-"))) {
-        console.error("Usage: zmail search <query> [flags]");
-        console.error("  --from      filter by sender email address");
-        console.error("  --after     filter by date (ISO YYYY-MM-DD or relative: 7d, 2w, 1m)");
-        console.error("  --before    filter by date (ISO YYYY-MM-DD or relative: 7d, 2w, 1m)");
-        console.error("  --limit     max results (default: 20)");
-        console.error("  --json      force JSON output (default: table for TTY, JSON when piped)");
-        process.exit(1);
-      }
-      if (afterIdx >= 0 && (!afterRaw || afterRaw.startsWith("-"))) {
-        console.error("Usage: zmail search <query> [--from <address>] [--after <date>] [--before <date>] [--limit <n>] [--json]");
-        process.exit(1);
-      }
-      if (beforeIdx >= 0 && (!beforeRaw || beforeRaw.startsWith("-"))) {
-        console.error("Usage: zmail search <query> [--from <address>] [--after <date>] [--before <date>] [--limit <n>] [--json]");
-        process.exit(1);
-      }
-      if (limitIdx >= 0 && (!limitRaw || limitRaw.startsWith("-"))) {
-        console.error("Usage: zmail search <query> [--from <address>] [--after <date>] [--before <date>] [--limit <n>] [--json]");
+      let parsed: ParsedSearchArgs;
+      try {
+        parsed = parseSearchArgs(args);
+      } catch (err) {
+        searchUsage();
+        console.error(err instanceof Error ? `\n${err.message}` : String(err));
         process.exit(1);
       }
 
-      // Parse dates (accept ISO YYYY-MM-DD or relative specs like 7d, 2w)
-      let afterDate: string | undefined;
-      let beforeDate: string | undefined;
-      if (afterRaw) {
-        try {
-          // Try relative spec first (7d, 2w, etc.)
-          afterDate = parseSinceToDate(afterRaw);
-        } catch {
-          // If that fails, assume ISO date (YYYY-MM-DD)
-          if (/^\d{4}-\d{2}-\d{2}$/.test(afterRaw)) {
-            afterDate = afterRaw;
-          } else {
-            console.error(`Invalid --after date: "${afterRaw}". Use ISO date (YYYY-MM-DD) or relative (7d, 2w, 1m)`);
-            process.exit(1);
-          }
-        }
-      }
-      if (beforeRaw) {
-        // Support ISO dates (YYYY-MM-DD) or relative specs (7d, 2w, etc.)
-        // For relative, parseSinceToDate gives us "N days ago", which is what we want for --before
-        try {
-          if (/^\d{4}-\d{2}-\d{2}$/.test(beforeRaw)) {
-            beforeDate = beforeRaw;
-          } else {
-            // Relative spec: "7d" means "7 days ago", which is the cutoff date for --before
-            beforeDate = parseSinceToDate(beforeRaw);
-          }
-        } catch (err) {
-          console.error(`Invalid --before date: "${beforeRaw}". Use ISO date (YYYY-MM-DD) or relative (7d, 2w, 1m)`);
-          process.exit(1);
-        }
-      }
-
-      const limit = limitRaw ? parseInt(limitRaw, 10) : undefined;
-      if (limitIdx >= 0 && (isNaN(limit!) || limit! <= 0)) {
-        console.error(`Invalid --limit: "${limitRaw}". Must be a positive number.`);
-        process.exit(1);
-      }
-
-      // Extract query: everything that's not a flag or flag value
-      const flagIndices = new Set<number>();
-      if (fromIdx >= 0) {
-        flagIndices.add(fromIdx);
-        flagIndices.add(fromIdx + 1);
-      }
-      if (afterIdx >= 0) {
-        flagIndices.add(afterIdx);
-        flagIndices.add(afterIdx + 1);
-      }
-      if (beforeIdx >= 0) {
-        flagIndices.add(beforeIdx);
-        flagIndices.add(beforeIdx + 1);
-      }
-      if (limitIdx >= 0) {
-        flagIndices.add(limitIdx);
-        flagIndices.add(limitIdx + 1);
-      }
-      if (jsonIdx >= 0) {
-        flagIndices.add(jsonIdx);
-      }
-
-      const queryParts = args.filter((_, idx) => !flagIndices.has(idx));
-      const query = queryParts.join(" ").trim();
-
-      const hasFilters = !!(fromAddress || afterDate || beforeDate);
-      if (!query && !hasFilters) {
-        console.error("Usage: zmail search <query> [flags]");
-        console.error("Provide a query and/or filters (--from, --after, --before). Run 'zmail search --help' for details.");
-        process.exit(1);
+      const isTty = process.stdout.isTTY;
+      const forceJsonForAdvancedFlags = parsed.idsOnly || parsed.timings || !!parsed.fields?.length;
+      const shouldOutputJson = parsed.forceJson || !isTty || forceJsonForAdvancedFlags;
+      let effectiveLimit = parsed.limit;
+      if (shouldOutputJson && effectiveLimit && effectiveLimit > JSON_LIMIT_CAP) {
+        console.error(
+          `--limit ${effectiveLimit} is too large for JSON mode; capping to ${JSON_LIMIT_CAP} for stable output.`
+        );
+        effectiveLimit = JSON_LIMIT_CAP;
       }
 
       const db = getDb();
-      const results = await search(db, {
-        query,
-        fromAddress,
-        afterDate,
-        beforeDate,
-        limit,
+      const effectiveDetail = resolveDetail(parsed.detail, parsed.fields);
+      const run = await searchWithMeta(db, {
+        query: parsed.query,
+        fromAddress: parsed.fromAddress,
+        afterDate: parsed.afterDate,
+        beforeDate: parsed.beforeDate,
+        limit: effectiveLimit,
+        mode: parsed.mode,
       });
 
-      // Output format: table for TTY, JSON when piped (unless --json is set)
-      const isTty = process.stdout.isTTY;
-      const forceJson = jsonIdx >= 0;
+      let results: Array<SearchResult & { body?: string }> = run.results;
+      if (effectiveDetail === "body") {
+        results = hydrateBodies(db, run.results);
+      }
 
-      if (forceJson || !isTty) {
-        console.log(JSON.stringify(results, null, 2));
+      if (shouldOutputJson) {
+        const rows = parsed.idsOnly
+          ? results.map((r) => r.messageId)
+          : results.map((r) => projectResult(r, effectiveDetail, parsed.fields));
+        const json = serializeJsonPayload(rows, parsed.timings ? run.timings : undefined);
+        console.log(json);
+        break;
+      }
+
+      if (results.length === 0) {
+        console.log("No results found.");
+        break;
+      }
+
+      console.log(`Found ${results.length} result${results.length === 1 ? "" : "s"}:\n`);
+      if (effectiveDetail === "headers") {
+        console.log("  DATE        FROM                 SUBJECT                          MESSAGE ID");
+        console.log("  " + "-".repeat(96));
+        for (const r of results) {
+          const date = r.date.slice(0, 10);
+          const from = (r.fromName ? `${r.fromName} ` : "") + `<${r.fromAddress}>`;
+          const fromShort = from.length > 20 ? from.slice(0, 17) + "..." : from.padEnd(20);
+          const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
+          const idShort = r.messageId.length > 34 ? r.messageId.slice(0, 31) + "..." : r.messageId;
+          console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${idShort}`);
+        }
       } else {
-        // Compact table output
-        if (results.length === 0) {
-          console.log("No results found.");
-        } else {
-          console.log(`Found ${results.length} result${results.length === 1 ? "" : "s"}:\n`);
-          console.log("  DATE        FROM                 SUBJECT                          SNIPPET");
-          console.log("  " + "-".repeat(80));
-          for (const r of results) {
-            const date = r.date.slice(0, 10);
-            const from = (r.fromName ? `${r.fromName} ` : "") + `<${r.fromAddress}>`;
-            const fromShort = from.length > 20 ? from.slice(0, 17) + "..." : from.padEnd(20);
-            const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
-            const snippetClean = r.snippet.replace(/<[^>]+>/g, "").trim();
-            const snippetShort = snippetClean.length > 30 ? snippetClean.slice(0, 27) + "..." : snippetClean;
-            console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}`);
-          }
+        console.log("  DATE        FROM                 SUBJECT                          SNIPPET");
+        console.log("  " + "-".repeat(80));
+        for (const r of results) {
+          const date = r.date.slice(0, 10);
+          const from = (r.fromName ? `${r.fromName} ` : "") + `<${r.fromAddress}>`;
+          const fromShort = from.length > 20 ? from.slice(0, 17) + "..." : from.padEnd(20);
+          const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
+          const snippetClean = r.snippet.replace(/<[^>]+>/g, "").trim();
+          const snippetShort = snippetClean.length > 30 ? snippetClean.slice(0, 27) + "..." : snippetClean;
+          console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}`);
         }
       }
       break;
@@ -247,7 +456,6 @@ async function main() {
         indexed_so_far: number;
         failed: number;
         started_at: string | null;
-        last_updated_at: string | null;
         completed_at: string | null;
       };
 

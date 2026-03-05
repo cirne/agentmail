@@ -77,6 +77,14 @@ describe("database schema", () => {
       expect(names).toContain("owner_pid");
       expect(names).toContain("is_running");
     });
+
+    it("messages has embedding_state column", () => {
+      const cols = db
+        .query("PRAGMA table_info(messages)")
+        .all() as { name: string }[];
+      const names = cols.map((c) => c.name);
+      expect(names).toContain("embedding_state");
+    });
   });
 
   describe("messages", () => {

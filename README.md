@@ -6,47 +6,71 @@ Modern email systems are human-first — designed around inbox browsing and manu
 
 ## What it does
 
-- Syncs email from Gmail (and any IMAP provider) to a local indexed store
-- Exposes a native CLI and MCP server for agent tool access
-- Enables natural language queries over your full email history and attachments
-- Extracts and indexes attachment content (PDF, DOCX, XLSX, and more)
+- Syncs email from IMAP (Gmail-first) into local storage (`data/maildir`, `data/zmail.db`, `data/vectors`)
+- Indexes for FTS + semantic retrieval and exposes CLI + MCP interfaces
+- Supports agent-optimized shortlist → hydrate workflows via CLI search controls
 
-```bash
-zmail search "contract from kirsten last month"
-zmail thread th_8473
-zmail attachments read att_291   # returns PDF content as markdown
-```
+## Quick start
 
-## Quick start (local hello world)
-
-**What’s in place today:** Config (env), SQLite DB + schema + FTS5, CLI (`sync` / `search` / `thread` / `message` / `mcp`), web UI (Hono), MCP server (stdio when you run `zmail mcp`), and sync/provider scaffolding. **IMAP sync is not yet implemented** — `bun run sync` only logs; no mail is fetched until the sync engine is built.
-
-1. **Install and env**
+1. **Install + env**
    ```bash
    bun install
    cp .env.example .env
    ```
 
-2. **Gmail app password**  
-   Use a [Gmail app password](https://support.google.com/accounts/answer/185833) (not an OAuth API key). In `.env`:
+2. **Set required credentials in `.env`**
    ```bash
    IMAP_USER=your@gmail.com
-   IMAP_PASSWORD=xxxx-xxxx-xxxx-xxxx   # 16-char app password
+   IMAP_PASSWORD=xxxx-xxxx-xxxx-xxxx
+   OPENAI_API_KEY=sk-...
    ```
-   Leave `IMAP_HOST=imap.gmail.com` and `IMAP_PORT=993` as in `.env.example`.
+   Use a [Gmail app password](https://support.google.com/accounts/answer/185833) for `IMAP_PASSWORD`.
 
-3. **Run**
+3. **Sync + index (example: last 7 days)**
    ```bash
-   bun run dev      # web UI at http://localhost:3000 + background sync (stub)
-   # or
-   bun run sync     # run sync only (stub)
+   bun run src/index.ts sync --since 7d
    ```
-   CLI (against empty DB until sync is implemented):
+
+4. **Search (header-first default)**
    ```bash
-   bun run src/cli/index.ts search "hello"
-   bun run src/cli/index.ts thread some-id
+   bun run src/index.ts search "apple receipt" --after 30d --json
    ```
-   Or build and run the binary: `bun run build` then `./dist/zmail search "hello"`.
+
+## CLI
+
+```bash
+zmail sync [--since <spec>]
+zmail search <query> [--from <address>] [--after <date>] [--before <date>]
+                  [--mode auto|fts|semantic|hybrid]
+                  [--detail headers|snippet|body]
+                  [--fields <csv>] [--ids-only] [--timings]
+                  [--limit <n>] [--json]
+zmail status
+zmail stats
+zmail thread <id>
+zmail message <id>
+zmail mcp
+```
+
+### Recommended agent retrieval pattern
+
+```bash
+# 1) Fast shortlist
+zmail search "receipt" --from no_reply@email.apple.com --after 30d \
+  --detail headers --fields messageId,date,subject --ids-only --json
+
+# 2) Hydrate selected IDs
+zmail message "<message-id>"
+```
+
+### Schema drift recovery
+
+zmail intentionally does not run automatic migrations on existing local DBs. If startup reports schema drift, rebuild local data and resync:
+
+```bash
+rm -rf data/
+bun run src/index.ts sync --since 7d
+```
 
 ## Architecture
 
@@ -54,7 +78,7 @@ Built with TypeScript + Bun. All data stored locally on a persistent volume — 
 
 ## Status
 
-Early development. IMAP sync is stubbed; DB, CLI, web, and MCP are in place. Not yet ready for general use.
+Active development. Core sync/index/search flows are working; CLI search interface is being expanded for agent-first workflows.
 
 ## License
 
