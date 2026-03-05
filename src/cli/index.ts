@@ -8,12 +8,13 @@ import { config } from "~/lib/config";
 import { logger } from "~/lib/logger";
 import { parseSinceToDate } from "~/sync/parse-since";
 import { config } from "~/lib/config";
-import { htmlToMarkdown, normalizePlainTextToMarkdown } from "~/lib/content-normalize";
+import { htmlToMarkdown } from "~/lib/content-normalize";
 import { parseRawMessage } from "~/sync/parse-message";
 import type { SearchResult } from "~/lib/types";
 import type { Database } from "bun:sqlite";
 import { readFileSync } from "fs";
 import { join } from "path";
+import { formatMessageLlmFriendly } from "~/cli/format-message";
 
 const [, , command, ...args] = process.argv;
 
@@ -446,21 +447,24 @@ async function formatMessageForOutput(message: MessageRow, raw: boolean): Promis
   }
 
   const { body_text, ...rest } = message;
-  let markdown = normalizePlainTextToMarkdown(body_text ?? "");
-  let source: "body_text" | "html" | "text" | "empty" = markdown ? "body_text" : "empty";
+  let body = (body_text ?? "").trim();
+  let source: "body_text" | "html" | "text" | "empty" = body ? "body_text" : "empty";
 
-  if (!markdown && message.raw_path) {
+  if (!body && message.raw_path) {
     const rawEmail = readRawEmail(message.raw_path);
     if (rawEmail) {
       try {
         const parsed = await parseRawMessage(rawEmail);
         if (parsed.bodyHtml) {
-          markdown = htmlToMarkdown(parsed.bodyHtml);
-          if (markdown) source = "html";
+          const markdown = htmlToMarkdown(parsed.bodyHtml);
+          if (markdown) {
+            body = markdown;
+            source = "html";
+          }
         }
-        if (!markdown && parsed.bodyText) {
-          markdown = normalizePlainTextToMarkdown(parsed.bodyText);
-          if (markdown) source = "text";
+        if (!body && parsed.bodyText) {
+          body = (parsed.bodyText ?? "").trim();
+          if (body) source = "text";
         }
       } catch {
         // fall through to empty content
@@ -471,9 +475,9 @@ async function formatMessageForOutput(message: MessageRow, raw: boolean): Promis
   return {
     ...rest,
     content: {
-      format: "markdown",
+      format: source === "html" ? "markdown" : "text",
       source,
-      markdown,
+      markdown: body,
     },
   };
 }
@@ -689,7 +693,7 @@ async function main() {
         break;
       }
       const shaped = await formatMessageForOutput(message, parsed.raw);
-      console.log(JSON.stringify(shaped, null, 2));
+      console.log(formatMessageLlmFriendly(message, shaped));
       break;
     }
 
