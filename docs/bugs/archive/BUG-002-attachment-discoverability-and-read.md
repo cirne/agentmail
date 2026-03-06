@@ -1,8 +1,13 @@
 # BUG-002: Attachment Discoverability and Read — Agent-Reported
 
-**Status: Open.**
+**Status: Fixed.** (2026-03-06)
 
 **Design lens:** [Agent-first](../../VISION.md) — when an agent tries to get attachment content (e.g. Excel as markdown/CSV), the path from "found the email" to "got the extracted content" should be discoverable from help and behavior.
+
+**Fixed by:**
+- Updated `formatMessageLlmFriendly` to show attachment summary (count, filenames, extraction status) and hints for retrieving attachments
+- Added attachment commands to `CLI_USAGE` constant so `zmail --help` shows them
+- Added comprehensive test coverage for attachment display
 
 **Reported context:** Agent (Claude) on macOS; task was retrieve Excel spreadsheets from NetJets billing emails (flight activity for Green Longhorn Air LLC). Agent used search → read → thread; never discovered `zmail attachment list` / `zmail attachment read`.
 

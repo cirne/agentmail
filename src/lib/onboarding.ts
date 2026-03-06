@@ -20,6 +20,8 @@ Usage:
   zmail stats                     Show database statistics
   zmail thread <id> [--raw]       Fetch thread (Markdown by default; raw .eml with --raw)
   zmail read <id> [--raw]         Read a message (or: zmail message <id>)
+  zmail attachment list <message_id>   List attachments (use message_id from search)
+  zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
   zmail mcp                       Start MCP server (stdio)
 
 Agent interfaces:

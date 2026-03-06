@@ -134,4 +134,131 @@ describe("formatMessageLlmFriendly", () => {
       expect(out).toMatch(/\n\nContent \(original: HTML\)\n---\nConverted/);
     });
   });
+
+  describe("attachments", () => {
+    it("shows attachment summary when attachments are present", () => {
+      const out = formatMessageLlmFriendly(msg(), {
+        content: { source: "body_text", markdown: "Hello" },
+        attachments: [
+          {
+            id: 1,
+            filename: "document.pdf",
+            mimeType: "application/pdf",
+            size: 1024,
+            extracted: false,
+          },
+          {
+            id: 2,
+            filename: "spreadsheet.xlsx",
+            mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            size: 2048,
+            extracted: true,
+          },
+        ],
+      });
+      expect(out).toContain("Attachments (2, 1 extracted):");
+      expect(out).toContain("- document.pdf (application/pdf)");
+      expect(out).toContain("- spreadsheet.xlsx (application/vnd.openxmlformats-officedocument.spreadsheetml.sheet) [extracted]");
+      expect(out).toContain('To list attachments: zmail attachment list "<id@example.com>"');
+      expect(out).toContain('To read attachment: zmail attachment read "<id@example.com>" <index>|<filename>');
+    });
+
+    it("shows attachment summary without extracted count when none are extracted", () => {
+      const out = formatMessageLlmFriendly(msg(), {
+        content: { source: "body_text", markdown: "Hello" },
+        attachments: [
+          {
+            id: 1,
+            filename: "image.png",
+            mimeType: "image/png",
+            size: 512,
+            extracted: false,
+          },
+        ],
+      });
+      expect(out).toContain("Attachments (1):");
+      expect(out).toContain("- image.png (image/png)");
+      expect(out).not.toContain("[extracted]");
+    });
+
+    it("does not show attachment section when no attachments", () => {
+      const out = formatMessageLlmFriendly(msg(), {
+        content: { source: "body_text", markdown: "Hello" },
+        attachments: [],
+      });
+      expect(out).not.toContain("Attachments");
+      expect(out).not.toContain("To list attachments");
+      expect(out).not.toContain("To read attachment");
+    });
+
+    it("does not show attachment section when attachments field is missing", () => {
+      const out = formatMessageLlmFriendly(msg(), {
+        content: { source: "body_text", markdown: "Hello" },
+      });
+      expect(out).not.toContain("Attachments");
+      expect(out).not.toContain("To list attachments");
+      expect(out).not.toContain("To read attachment");
+    });
+
+    it("shows all attachments as extracted when all are extracted", () => {
+      const out = formatMessageLlmFriendly(msg(), {
+        content: { source: "body_text", markdown: "Hello" },
+        attachments: [
+          {
+            id: 1,
+            filename: "doc1.pdf",
+            mimeType: "application/pdf",
+            size: 1024,
+            extracted: true,
+          },
+          {
+            id: 2,
+            filename: "doc2.pdf",
+            mimeType: "application/pdf",
+            size: 2048,
+            extracted: true,
+          },
+        ],
+      });
+      expect(out).toContain("Attachments (2, 2 extracted):");
+      expect(out).toContain("- doc1.pdf (application/pdf) [extracted]");
+      expect(out).toContain("- doc2.pdf (application/pdf) [extracted]");
+    });
+
+    it("places attachment section before body content", () => {
+      const out = formatMessageLlmFriendly(msg(), {
+        content: { source: "body_text", markdown: "Message body here" },
+        attachments: [
+          {
+            id: 1,
+            filename: "file.txt",
+            mimeType: "text/plain",
+            size: 100,
+            extracted: false,
+          },
+        ],
+      });
+      const attachmentIndex = out.indexOf("Attachments");
+      const bodyIndex = out.indexOf("---");
+      expect(attachmentIndex).toBeLessThan(bodyIndex);
+      expect(out).toContain("Message body here");
+    });
+
+    it("handles message_id with spaces in attachment commands", () => {
+      const out = formatMessageLlmFriendly(msg({ message_id: "<id with spaces@example.com>" }), {
+        content: { source: "body_text", markdown: "Hello" },
+        attachments: [
+          {
+            id: 1,
+            filename: "file.txt",
+            mimeType: "text/plain",
+            size: 100,
+            extracted: false,
+          },
+        ],
+      });
+      expect(out).toContain('To list attachments: zmail attachment list "<id with spaces@example.com>"');
+      expect(out).toContain('To read attachment: zmail attachment read "<id with spaces@example.com>" <index>|<filename>');
+    });
+  });
 });
