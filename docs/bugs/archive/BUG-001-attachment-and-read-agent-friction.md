@@ -49,7 +49,7 @@ An agent (Claude) was asked to find an email from `billing@netjets.com` and down
 
 ### 4. PDF extraction in compiled binary — resolved
 
-- **Resolution:** [OPP-007](../../opportunities/OPP-007-packaging-npm-homebrew.md) moved distribution to Node.js; the compiled binary is no longer shipped. Install via `curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash` (or `npm run install-cli` for a dev wrapper). PDF extraction works in the supported runtime.
+- **Resolution:** [OPP-007](../../opportunities/archive/OPP-007-packaging-npm-homebrew.md) moved distribution to Node.js; the compiled binary is no longer shipped. Install via `curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash` (or `npm run install-cli` for a dev wrapper). PDF extraction works in the supported runtime.
 
 ---
 

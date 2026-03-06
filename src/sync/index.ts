@@ -8,6 +8,7 @@ import { acquireLock, releaseLock } from "~/lib/process-lock";
 import { parseRawMessage } from "./parse-message";
 import { parseSinceToDate } from "./parse-since";
 import { createFileLogger, generateSyncLogFilename, type FileLogger } from "~/lib/file-logger";
+import { withTimer } from "~/lib/timer";
 
 /** Mailbox to sync: All Mail for Gmail (per ADR-011), INBOX for others. */
 function getSyncMailbox(host: string): string {
@@ -33,7 +34,9 @@ export interface SyncResult {
   logPath: string;
 }
 
-const BATCH_SIZE = 50;
+// Batch sizes: smaller for forward sync (incremental), larger for backward sync (backfill)
+const BATCH_SIZE_FORWARD = 50;  // Small incremental updates
+const BATCH_SIZE_BACKWARD = 300; // Large backfill operations
 
 function ensureMaildir() {
   const base = config.maildirPath;
@@ -100,9 +103,29 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
   const fileLogger = createFileLogger(logFilename);
   
   // Notify caller of log path immediately (useful for background execution)
+  // Print synchronously to stdout so it appears even when run in background
   if (options?.onLogPath) {
+    // Use process.stdout.write with sync flag to ensure immediate output
+    process.stdout.write(`Sync log: ${fileLogger.logPath}\n`);
     options.onLogPath(fileLogger.logPath);
   }
+  
+  // Phase timing instrumentation
+  const phaseTimings: Record<string, number> = {};
+  const phaseMs = (label: string): void => {
+    const elapsed = Date.now() - startTime;
+    phaseTimings[label] = elapsed;
+    fileLogger.info("Phase", { phase: label, elapsedMs: elapsed });
+  };
+  
+  // Timer helper configured with sync logger
+  const timer = <T>(
+    label: string,
+    fn: () => Promise<T>,
+    options?: { logSlow?: number; logLevel?: 'debug' | 'info' | 'warn' }
+  ) => withTimer(label, fn, { logger: fileLogger, ...options });
+  
+  phaseMs("runSync_entry");
   
   const imap = requireImapConfig();
   if (!imap.user || !imap.password) {
@@ -114,20 +137,65 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
   const fromDate = parseSinceToDate(sinceSpec);
   fileLogger.info("Sync starting", { user: imap.user, fromDate });
 
-  ensureMaildir();
+  // Pre-check: if sync is already running, skip connect entirely
   const db = getDb();
+  const syncRunningCheck = db.prepare("SELECT is_running FROM sync_summary WHERE id = 1").get() as
+    | { is_running: number }
+    | undefined;
+  const isRunning = syncRunningCheck?.is_running === 1;
+  
+  if (isRunning) {
+    fileLogger.info("Sync already running, exiting");
+    const durationMs = Date.now() - startTime;
+    phaseMs("runSync_exit_early");
+    fileLogger.close();
+    return {
+      synced: 0,
+      messagesFetched: 0,
+      bytesDownloaded: 0,
+      durationMs,
+      bandwidthBytesPerSec: 0,
+      messagesPerMinute: 0,
+      logPath: fileLogger.logPath,
+    };
+  }
+
+  ensureMaildir();
 
   const sinceDate = new Date(fromDate + "T00:00:00Z");
   if (isNaN(sinceDate.getTime())) {
     throw new Error(`Invalid from date: ${fromDate}. Use --since 7d, 5w, 3m, 2y or set DEFAULT_SYNC_SINCE env var.`);
   }
 
+  // Parallelize connect with lock acquisition
+  const client = new ImapFlow({
+    host: imap.host,
+    port: imap.port,
+    secure: imap.port === 993,
+    auth: { user: imap.user, pass: imap.password },
+    logger: false, // Keep sync output minimal; our logger reports start/complete/count
+    connectionTimeout: 10000, // 10s to establish connection
+    // NOTE: do not set socketTimeout — causes a segfault in Bun v1.1.38 on TLS sockets.
+    // Use JS-level Promise.race timeout around fetchAll instead (see below).
+  });
+  
+  phaseMs("connect_called");
+  const connectStartMs = Date.now() - startTime;
+  
+  // Start connect in parallel with lock acquisition
+  const connectPromise = client.connect();
+  const lockStartMs = Date.now() - startTime;
+  
   // Acquire lock with PID-based ownership
   const lockResult = acquireLock(db, "sync_summary", process.pid);
+  const lockDoneMs = Date.now() - startTime;
+  phaseMs("lock_acquired");
+  
   if (!lockResult.acquired) {
     fileLogger.info("Sync already running, exiting");
-    fileLogger.close();
     const durationMs = Date.now() - startTime;
+    phaseMs("runSync_exit_early");
+    fileLogger.close();
     return {
       synced: 0,
       messagesFetched: 0,
@@ -143,39 +211,138 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     // and message dedup prevents re-inserts
     fileLogger.info("Recovered from crashed sync, resuming from last checkpoint");
   }
-
-  const client = new ImapFlow({
+  
+  // Wait for connect to complete
+  await connectPromise;
+  const connectDoneMs = Date.now() - startTime;
+  phaseMs("connect_resolved");
+  fileLogger.info("IMAP connected", { 
     host: imap.host,
-    port: imap.port,
-    secure: imap.port === 993,
-    auth: { user: imap.user, pass: imap.password },
-    logger: false, // Keep sync output minimal; our logger reports start/complete/count
-    connectionTimeout: 10000, // 10s to establish connection
-    // NOTE: do not set socketTimeout — causes a segfault in Bun v1.1.38 on TLS sockets.
-    // Use JS-level Promise.race timeout around fetchAll instead (see below).
+    connectStartMs,
+    connectDoneMs,
+    lockStartMs,
+    lockDoneMs,
+    overlapMs: Math.max(0, connectDoneMs - lockDoneMs),
   });
+  
+  // Check TLS session resumption (Step 7)
+  try {
+    const socket = (client as any).socket;
+    if (socket && typeof socket.getSession === 'function') {
+      const session = socket.getSession();
+      fileLogger.info("TLS session", { sessionReused: session != null });
+    } else if (socket && typeof socket.isSessionReused === 'function') {
+      fileLogger.info("TLS session", { sessionReused: socket.isSessionReused() });
+    }
+  } catch (err) {
+    // Ignore errors accessing internal socket
+  }
 
   try {
-    await client.connect();
-    fileLogger.info("IMAP connected", { host: imap.host });
-
     const mailbox = config.sync.mailbox || getSyncMailbox(imap.host);
-  const excludeLabels = config.sync.excludeLabels; // lowercase
-    const lock = await client.getMailboxLock(mailbox);
+    const excludeLabels = config.sync.excludeLabels; // lowercase
+    
+    // Step 2: STATUS check before SELECT
+    // Read sync_state first to check if we can early-exit
+    const stateRow = db.prepare("SELECT uidvalidity, last_uid FROM sync_state WHERE folder = ?").get(mailbox) as
+      | { uidvalidity: number | bigint; last_uid: number | bigint }
+      | undefined;
+    const state = stateRow ? {
+      uidvalidity: Number(stateRow.uidvalidity),
+      last_uid: Number(stateRow.last_uid),
+    } : undefined;
+    
+    // Call STATUS before acquiring mailbox lock
+      let statusResult: Awaited<ReturnType<typeof client.status>> | null = null;
+    try {
+      const { result, durationMs: statusRoundTripMs } = await timer(
+        "STATUS",
+        () => client.status(mailbox, { messages: true, uidNext: true, uidValidity: true })
+      );
+      statusResult = result;
+      phaseMs("status_resolved");
+      
+      if (!statusResult) {
+        fileLogger.warn("STATUS returned null, skipping early exit check");
+      } else {
+        // Convert BigInt to Number for logging (JSON.stringify can't serialize BigInt)
+        const uidNextNum = statusResult.uidNext ? Number(statusResult.uidNext) : undefined;
+        const uidValidityNum = statusResult.uidValidity ? Number(statusResult.uidValidity) : undefined;
+        
+        fileLogger.info("STATUS response", {
+          statusRoundTripMs,
+          uidNext: uidNextNum,
+          uidValidity: uidValidityNum,
+          lastKnownUid: state?.last_uid ?? 0,
+          delta: uidNextNum ? uidNextNum - (state?.last_uid ?? 0) - 1 : undefined,
+        });
+        
+        // Early exit if no new messages (only for forward sync - backward sync needs to search for older messages)
+        const direction = options?.direction ?? 'forward';
+        // Convert BigInt to Number for comparison
+        const statusUidNextNum = statusResult.uidNext ? Number(statusResult.uidNext) : undefined;
+        const statusUidValidityNum = statusResult.uidValidity ? Number(statusResult.uidValidity) : undefined;
+        
+        fileLogger.info("Early exit check", {
+          direction,
+          hasState: !!state,
+          statusUidNext: statusUidNextNum,
+          statusUidValidity: statusUidValidityNum,
+          stateUidValidity: state?.uidvalidity,
+          stateLastUid: state?.last_uid,
+          uidValidityMatch: state && statusUidValidityNum === state.uidvalidity,
+          shouldEarlyExit: direction === 'forward' && state && statusUidNextNum && statusUidValidityNum === state.uidvalidity && statusUidNextNum - 1 <= state.last_uid,
+        });
+        
+        // Only early exit for forward sync (backward sync needs to search for older messages)
+        if (direction === 'forward' && state && statusUidNextNum && statusUidValidityNum === state.uidvalidity) {
+          if (statusUidNextNum - 1 <= state.last_uid) {
+            db.exec("UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1");
+            releaseLock(db, "sync_summary");
+            const durationMs = Date.now() - startTime;
+            phaseMs("runSync_exit_early");
+            fileLogger.info("Early exit: no new messages", { elapsedMs: durationMs });
+          const result: SyncResult = {
+            synced: 0,
+            messagesFetched: 0,
+            bytesDownloaded: 0,
+            durationMs,
+            bandwidthBytesPerSec: 0,
+            messagesPerMinute: 0,
+            logPath: fileLogger.logPath,
+          };
+          logSyncMetrics(fileLogger, result);
+          // Emit phase summary
+          fileLogger.info("Phase summary", {
+            phase: "summary",
+            ...phaseTimings,
+            totalMs: durationMs,
+          });
+          fileLogger.close();
+          return result;
+          }
+        }
+      }
+    } catch (err) {
+      // STATUS may not be supported or may fail - log and continue
+      fileLogger.warn("STATUS command failed, continuing with EXAMINE", { error: String(err) });
+    }
+    
+    // Use EXAMINE (read-only) instead of SELECT since we never modify messages
+    // EXAMINE is faster for Gmail's All Mail folder as it doesn't need to materialize write locks
+    const { result: lock, durationMs: examineMs } = await timer(
+      "EXAMINE",
+      () => client.getMailboxLock(mailbox, { readOnly: true })
+    );
+    phaseMs("examine_resolved");
+    fileLogger.info("Mailbox opened (EXAMINE)", { examineMs });
     try {
       const mailboxObj = client.mailbox;
       const uidvalidity = mailboxObj && typeof mailboxObj === "object" ? Number(mailboxObj.uidValidity ?? 0) : 0;
       
       // Incremental sync (ADR-003): use UID range search when we have a checkpoint
       // This avoids fetching all UIDs since a date and filtering client-side
-      const stateRow = db.prepare("SELECT uidvalidity, last_uid FROM sync_state WHERE folder = ?").get(mailbox) as
-        | { uidvalidity: number | bigint; last_uid: number | bigint }
-        | undefined;
-      // Normalize to numbers (SQLite may return BigInt)
-      const state = stateRow ? {
-        uidvalidity: Number(stateRow.uidvalidity),
-        last_uid: Number(stateRow.last_uid),
-      } : undefined;
+      // Note: state was already read above for STATUS check, reuse it
       
       const direction = options?.direction ?? 'forward';
       let searchQuery: { since?: Date; uid?: string; before?: Date };
@@ -185,7 +352,11 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         // Forward sync (refresh): use UID range search for new messages
         // UID range 'N:*' means "UIDs >= N", so we use last_uid + 1 to get UIDs > last_uid
         searchQuery = { uid: `${state.last_uid + 1}:*` };
-        const searchResult = await client.search(searchQuery, { uid: true });
+        const { result: searchResult } = await timer(
+          "search",
+          () => client.search(searchQuery, { uid: true })
+        );
+        phaseMs("search_resolved");
         uids = Array.isArray(searchResult) ? searchResult : [];
         fileLogger.info("Forward sync (new messages)", { folder: mailbox, newUids: uids.length, lastUid: state.last_uid });
       } else {
@@ -265,7 +436,11 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         } else {
           searchQuery = { since: effectiveSinceDate };
         }
-        const searchResult = await client.search(searchQuery, { uid: true });
+        const { result: searchResult } = await timer(
+          "search",
+          () => client.search(searchQuery, { uid: true })
+        );
+        phaseMs("search_resolved");
         uids = Array.isArray(searchResult) ? searchResult : [];
         if (direction === 'backward') {
           fileLogger.info("Backward sync (filling gaps)", {
@@ -309,7 +484,11 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
                 since: sinceDate,
                 before: dayBeforeOldest,
               } as { since: Date; before: Date };
-              const searchResult = await client.search(searchQuery, { uid: true });
+              const { result: searchResult } = await timer(
+                "search",
+                () => client.search(searchQuery, { uid: true })
+              );
+              phaseMs("search_resolved");
               uids = Array.isArray(searchResult) ? searchResult : [];
             } else {
               // Day before oldest is before requested date - nothing more to sync
@@ -344,6 +523,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         db.exec("UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1");
         releaseLock(db, "sync_summary");
         const durationMs = Date.now() - startTime;
+        phaseMs("runSync_exit");
         const result: SyncResult = {
           synced: 0,
           messagesFetched: 0,
@@ -354,6 +534,12 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           logPath: fileLogger.logPath,
         };
         logSyncMetrics(fileLogger, result);
+        // Emit phase summary
+        fileLogger.info("Phase summary", {
+          phase: "summary",
+          ...phaseTimings,
+          totalMs: durationMs,
+        });
         fileLogger.close();
         return result;
       }
@@ -368,39 +554,89 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       // Starts from the last known checkpoint (may be 0 on first run).
       let checkpointUid = state && state.uidvalidity === uidvalidity ? (state.last_uid ?? 0) : 0;
 
-      for (let i = 0; i < uids.length; i += BATCH_SIZE) {
-        const batch = uids.slice(i, i + BATCH_SIZE);
-        const batchNum = Math.floor(i / BATCH_SIZE) + 1;
-        const totalBatches = Math.ceil(uids.length / BATCH_SIZE);
-        fileLogger.info("fetchAll start", {
-          batch: `${batchNum}/${totalBatches}`,
-          uids: batch.length,
-          uidRange: `${batch[0]}..${batch[batch.length - 1]}`,
-        });
-        const fetchStart = Date.now();
-        let fetchTimeoutId: ReturnType<typeof setTimeout> | undefined;
-        const messages = await Promise.race([
-          client.fetchAll(batch, { envelope: true, source: true, labels: true }, { uid: true }),
-          new Promise<never>((_, reject) => {
-            fetchTimeoutId = setTimeout(() => {
-              reject(new Error(`fetchAll timed out after 30s (batch ${batchNum}/${totalBatches}, ${batch.length} UIDs)`));
-            }, 30_000);
-          }),
-        ]);
-        clearTimeout(fetchTimeoutId);
-        const fetchDuration = Date.now() - fetchStart;
-        fileLogger.info("fetchAll done", {
-          batch: `${batchNum}/${totalBatches}`,
-          messages: messages.length,
-          elapsedMs: fetchDuration,
-        });
-
+      // Use larger batch size for backward sync (backfill) to reduce IMAP round-trips
+      const batchSize = direction === 'backward' ? BATCH_SIZE_BACKWARD : BATCH_SIZE_FORWARD;
+      // Use fetchAll() for backward sync - guarantees no gaps/duplicates with explicit UID arrays
+      // Pipelining (fetch() async generator) had issues with sequence set parsing causing duplicate fetches
+      const usePipelining = false; // Disabled: fetchAll() is simpler and more reliable
+      
+      for (let i = 0; i < uids.length; i += batchSize) {
+        const batch = uids.slice(i, i + batchSize);
+        const batchNum = Math.floor(i / batchSize) + 1;
+        const totalBatches = Math.ceil(uids.length / batchSize);
+        
         let batchDuplicates = 0;
         let batchNew = 0;
+        let batchMessagesProcessed = 0;
         
-        for (const msg of messages) {
+        if (usePipelining) {
+          // Pipeline: use async generator to process messages as they arrive
+          // This overlaps fetch with parse/insert, improving throughput
+          fileLogger.info("fetch start (pipelined)", {
+            batch: `${batchNum}/${totalBatches}`,
+            uids: batch.length,
+            uidRange: `${batch[0]}..${batch[batch.length - 1]}`,
+          });
+          const batchStart = Date.now();
+          // Use comma-separated UID sequence set to fetch only requested UIDs (no gaps)
+          // IMAP sequence sets support comma-separated values: "123,456,789"
+          const uidSequenceSet = batch.join(',');
+          
+          // Use fetch() async generator for pipelining with explicit UID list
+          // This avoids fetching gaps/unwanted messages that a range would include
+          for await (const msg of client.fetch(uidSequenceSet, { envelope: true, source: true, labels: true }, { uid: true })) {
+            batchMessagesProcessed++;
+            const result = await processMessage(msg);
+            if (result.isDuplicate) batchDuplicates++;
+            if (result.isNew) batchNew++;
+          }
+          
+          const batchDuration = Date.now() - batchStart;
+          fileLogger.info("fetch done (pipelined)", {
+            batch: `${batchNum}/${totalBatches}`,
+            messages: batchMessagesProcessed,
+            elapsedMs: batchDuration,
+            duplicates: batchDuplicates,
+            new: batchNew,
+          });
+        } else {
+          // Non-pipelined: fetch all, then process (better for small forward sync batches)
+          fileLogger.info("fetchAll start", {
+            batch: `${batchNum}/${totalBatches}`,
+            uids: batch.length,
+            uidRange: `${batch[0]}..${batch[batch.length - 1]}`,
+          });
+          const fetchStart = Date.now();
+          let fetchTimeoutId: ReturnType<typeof setTimeout> | undefined;
+          const messages = await Promise.race([
+            client.fetchAll(batch, { envelope: true, source: true, labels: true }, { uid: true }),
+            new Promise<never>((_, reject) => {
+              fetchTimeoutId = setTimeout(() => {
+                reject(new Error(`fetchAll timed out after 30s (batch ${batchNum}/${totalBatches}, ${batch.length} UIDs)`));
+              }, 30_000);
+            }),
+          ]);
+          clearTimeout(fetchTimeoutId);
+          const fetchDuration = Date.now() - fetchStart;
+          fileLogger.info("fetchAll done", {
+            batch: `${batchNum}/${totalBatches}`,
+            messages: messages.length,
+            elapsedMs: fetchDuration,
+          });
+
+          for (const msg of messages) {
+            const result = await processMessage(msg);
+            if (result.isDuplicate) batchDuplicates++;
+            if (result.isNew) batchNew++;
+          }
+        }
+        
+        // Helper function to process a single message
+        async function processMessage(msg: any): Promise<{ isDuplicate: boolean; isNew: boolean }> {
           const raw = msg.source;
-          if (!raw || !Buffer.isBuffer(raw)) continue;
+          if (!raw || !Buffer.isBuffer(raw)) {
+            return { isDuplicate: false, isNew: false };
+          }
 
           messagesFetched++;
           bytesDownloaded += Buffer.byteLength(raw);
@@ -409,47 +645,62 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           const labelsArr = [...labelSet];
           const hasExcluded = excludeLabels.length > 0 && labelsArr.some((l) => excludeLabels.includes(String(l).toLowerCase()));
           if (hasExcluded) {
-            continue; // Trash, Spam, etc. — skip storing (still counted in messagesFetched/bytesDownloaded)
+            return { isDuplicate: false, isNew: false }; // Trash, Spam, etc. — skip storing (still counted in messagesFetched/bytesDownloaded)
           }
 
           const uid = msg.uid;
           let parsed;
           try {
             // Hard 5s timeout: a stuck parser never blocks the full sync.
-            parsed = await Promise.race([
-              parseRawMessage(Buffer.from(raw)),
-              new Promise<never>((_, reject) =>
-                setTimeout(() => reject(new Error("parse timeout")), 5_000)
-              ),
-            ]);
+            const { result, durationMs: parseMs } = await timer(
+              "parse",
+              () => Promise.race([
+                parseRawMessage(Buffer.from(raw)),
+                new Promise<never>((_, reject) =>
+                  setTimeout(() => reject(new Error("parse timeout")), 5_000)
+                ),
+              ]),
+              { logSlow: 500, logLevel: 'debug' }
+            );
+            parsed = result;
+            if (parseMs > 500) {
+              fileLogger.debug("Slow parse", { uid, parseMs, bytes: Buffer.byteLength(raw) });
+            }
           } catch (err) {
             fileLogger.warn("Parse failed, skipping message", { uid, bytes: Buffer.byteLength(raw), error: String(err) });
-            continue;
+            return { isDuplicate: false, isNew: false };
           }
 
-          const duplicateCheckStart = Date.now();
-          const existing = db.prepare("SELECT 1 FROM messages WHERE message_id = ?").get(parsed.messageId);
-          const duplicateCheckDuration = Date.now() - duplicateCheckStart;
+          const { result: existing, durationMs: duplicateCheckDuration } = await timer(
+            "duplicate_check",
+            async () => db.prepare("SELECT 1 FROM messages WHERE message_id = ?").get(parsed.messageId)
+          );
           
           if (existing) {
-            batchDuplicates++;
             fileLogger.debug("Skipping duplicate", {
               uid,
               messageId: parsed.messageId,
               date: parsed.date,
               checkDurationMs: duplicateCheckDuration,
             });
-            continue; // Already in DB; skip write and insert (saves disk I/O and avoids overwriting)
+            return { isDuplicate: true, isNew: false }; // Already in DB; skip write and insert (saves disk I/O and avoids overwriting)
           }
-          
-          batchNew++;
           
           synced++; // Increment before logging so order is accurate
 
           const filename = safeFilename(uid, parsed.messageId);
           const relPath = join("cur", filename);
           const absPath = join(config.maildirPath, relPath);
-          writeFileSync(absPath, raw, "binary");
+          const { durationMs: writeMs } = await timer(
+            "disk_write",
+            async () => {
+              writeFileSync(absPath, raw, "binary");
+            },
+            { logSlow: 100, logLevel: 'debug' }
+          );
+          if (writeMs > 100) {
+            fileLogger.debug("Slow disk write", { uid, writeMs, bytes: Buffer.byteLength(raw) });
+          }
 
           const threadId = parsed.messageId;
           const labelsJson = JSON.stringify(labelsArr);
@@ -500,6 +751,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           // synced++ moved earlier (before logging)
           if (!earliestDate || parsed.date < earliestDate) earliestDate = parsed.date;
           if (!latestDate || parsed.date > latestDate) latestDate = parsed.date;
+          
+          return { isDuplicate: false, isNew: true };
         }
         
         // Log progress every 100 messages or at batch boundaries
@@ -518,11 +771,19 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         const batchMaxUid = Math.max(...batch);
         if (batchMaxUid > checkpointUid) {
           checkpointUid = batchMaxUid;
-          db.prepare(
-            "INSERT OR REPLACE INTO sync_state (folder, uidvalidity, last_uid) VALUES (?, ?, ?)"
-          ).run(mailbox, uidvalidity, checkpointUid);
+          await timer(
+            "batch_checkpoint",
+            async () => {
+              db.prepare(
+                "INSERT OR REPLACE INTO sync_state (folder, uidvalidity, last_uid) VALUES (?, ?, ?)"
+              ).run(mailbox, uidvalidity, checkpointUid);
+            }
+          );
+          phaseMs("batch_checkpoint_committed");
         }
       }
+      
+      phaseMs("all_batches_complete");
 
       db.prepare(
         `UPDATE sync_summary SET
@@ -546,6 +807,15 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         logPath: fileLogger.logPath,
       };
       logSyncMetrics(fileLogger, result);
+      
+      // Emit phase summary
+      phaseMs("runSync_exit");
+      fileLogger.info("Phase summary", {
+        phase: "summary",
+        ...phaseTimings,
+        totalMs: durationMs,
+      });
+      
       fileLogger.close();
 
       return result;

@@ -13,6 +13,7 @@ import { config } from "~/lib/config";
 import { acquireLock, releaseLock } from "~/lib/process-lock";
 import { embedBatch, prepareTextForEmbedding } from "./embeddings";
 import { addEmbeddingsBatch, ensureIndex, type EmbeddingRow } from "./vectors";
+import { withTimer } from "~/lib/timer";
 
 export interface IndexingResult {
   indexed: number;
@@ -31,7 +32,7 @@ function getConcurrency(): number {
     const count = parseInt(envValue, 10);
     if (!isNaN(count) && count > 0) return count;
   }
-  return 2;
+  return 5; // Increased from 2 to 5 for better throughput (OPP-010)
 }
 
 export interface MessageRow {
@@ -97,13 +98,17 @@ async function processBatch(
   db: SqliteDatabase,
   batch: MessageRow[],
 ): Promise<{ indexed: number; failed: number }> {
+  const batchStartMs = Date.now();
   const texts = batch.map((m) =>
     prepareTextForEmbedding(m.subject, m.body_text),
   );
 
   let embeddingsAdded = false;
   try {
-    const embeddings = await embedBatch(texts);
+    const { result: embeddings, durationMs: embedMs } = await withTimer(
+      "embed",
+      () => embedBatch(texts)
+    );
 
     const rows: EmbeddingRow[] = [];
     for (let i = 0; i < batch.length; i++) {
@@ -116,15 +121,32 @@ async function processBatch(
       });
     }
 
-    await addEmbeddingsBatch(rows);
+    const { durationMs: addEmbeddingsMs } = await withTimer(
+      "add_embeddings",
+      () => addEmbeddingsBatch(rows)
+    );
     embeddingsAdded = true;
 
     // Use parameterized query instead of string interpolation
     const ids = batch.map((m) => m.id);
     const placeholders = ids.map(() => "?").join(",");
-    db.prepare(
-      `UPDATE messages SET embedding_state = 'done' WHERE id IN (${placeholders})`
-    ).run(...ids);
+    const { durationMs: ftsUpdateMs } = await withTimer(
+      "fts_update",
+      async () => {
+        db.prepare(
+          `UPDATE messages SET embedding_state = 'done' WHERE id IN (${placeholders})`
+        ).run(...ids);
+      }
+    );
+    
+    const batchMs = Date.now() - batchStartMs;
+    logger.debug("Batch processed", {
+      batchSize: batch.length,
+      embedMs,
+      addEmbeddingsMs,
+      ftsUpdateMs,
+      totalBatchMs: batchMs,
+    });
 
     return { indexed: batch.length, failed: 0 };
   } catch (err) {
@@ -231,7 +253,7 @@ export async function indexMessages(options?: {
   );
 
   const concurrency = getConcurrency();
-  logger.info("Indexing started", { concurrency });
+  logger.info("Indexing started", { concurrency, batchSize: BATCH_SIZE });
 
   // Track when sync signals it's done inserting messages.
   // If no signal is provided (standalone indexing), treat sync as already done.
@@ -263,6 +285,12 @@ export async function indexMessages(options?: {
       }
 
       emptyPolls = 0;
+      
+      logger.debug("Batch start", {
+        concurrency,
+        inFlight: inFlight.size,
+        batchSize: batch.length,
+      });
 
       const batchPromise = batchFn(db, batch).then((result) => {
         totalIndexed += result.indexed;

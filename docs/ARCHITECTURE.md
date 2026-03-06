@@ -52,6 +52,8 @@ This layout applies to **both Phase 1 and Phase 2 (open source)**. Each user run
 
 ### ADR-003: IMAP Sync Resumption via UID Checkpointing
 
+**See also:** [SYNC.md](./SYNC.md) — Current sync implementation and optimization history.
+
 **Decision:** Sync state is tracked per folder as `{ folder, uidvalidity, last_uid }`. Two distinct sync modes optimize for different use cases:
 
 1. **Forward sync (`zmail refresh`):** Uses UID range search (`UID ${last_uid + 1}:*`) to fetch only new messages since last sync. Efficient for frequent updates.
@@ -153,7 +155,7 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 ### ADR-008: Language & Runtime — TypeScript + Node.js
 
-**Decision:** TypeScript on Node.js 20+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/OPP-007-packaging-npm-homebrew.md)).
+**Decision:** TypeScript on Node.js 20+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/archive/OPP-007-packaging-npm-homebrew.md)).
 
 **Rationale:**
 - Node.js is ubiquitous; no separate runtime (Bun) required. Aligns with OpenClaw/Claude Code (`npm i -g`).
@@ -338,6 +340,8 @@ Single Bun process
 
 ### ADR-016: Sync Performance — Bandwidth-Bound as Goal
 
+**See also:** [SYNC.md](./SYNC.md) — Performance optimizations and current bottlenecks.
+
 **Decision:** Sync speed is of paramount importance. The target is to saturate I/O: the sync pipeline should be limited by available network bandwidth (or disk throughput when writing), not by CPU, concurrency limits, or unnecessary serialization. If IMAP sync is not bound by available bandwidth, it has room for improvement.
 
 **Rationale:** Users with large mailboxes need backfill and incremental sync to finish as fast as the provider and link allow. Being bandwidth-bound means we have eliminated avoidable bottlenecks (e.g. single-connection fetch, one-at-a-time parsing, blocking on index writes). This principle guides choices around parallel fetch, connection reuse, pipelining, and batching so that the only remaining limit is physics — how much data the network and disk can move.
@@ -347,6 +351,8 @@ Single Bun process
 ---
 
 ### ADR-017: Sync Design — Priority, Batching, and Backoff
+
+**See also:** [SYNC.md](./SYNC.md) — Current batching implementation and performance results.
 
 **Decision:** Sync is timestamp- and folder-priority focused, avoids chatty-protocol slowdowns, and uses smart backoff when the provider complains.
 
@@ -406,6 +412,8 @@ We do **not** introduce async job IDs or a job queue for sync unless we later ne
 ---
 
 ### ADR-020: Sync and Indexing — Concurrent, Single-Threaded, Resilient
+
+**See also:** [SYNC.md](./SYNC.md) — Detailed sync implementation, optimization history, and performance analysis.
 
 **Decision:** `zmail sync` and `zmail refresh` are the user-facing sync commands. Both launch sync and indexing concurrently via `Promise.all` in a single thread:
 

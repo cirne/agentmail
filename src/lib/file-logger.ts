@@ -32,7 +32,7 @@ export function createFileLogger(filename: string): FileLogger {
   mkdirSync(logsDir, { recursive: true });
 
   const logPath = join(logsDir, `${filename}.log`);
-  const stream: WriteStream = createWriteStream(logPath, { flags: "a" });
+  const stream: WriteStream = createWriteStream(logPath, { flags: "a", autoClose: false });
 
   function write(level: Level, msg: string, data?: Record<string, unknown>) {
     if (LEVELS[level] < LEVELS[minLevel]) return;
@@ -43,6 +43,7 @@ export function createFileLogger(filename: string): FileLogger {
       ? `${prefix} ${msg} ${JSON.stringify(data)}\n`
       : `${prefix} ${msg}\n`;
 
+    // Write to stream - Node.js will buffer, but we ensure flush on close
     stream.write(line);
   }
 
@@ -53,7 +54,10 @@ export function createFileLogger(filename: string): FileLogger {
     warn: (msg: string, data?: Record<string, unknown>) => write("warn", msg, data),
     error: (msg: string, data?: Record<string, unknown>) => write("error", msg, data),
     close: () => {
-      stream.end();
+      // Ensure all pending writes are flushed before closing
+      stream.end(() => {
+        // Stream closed callback - all data is now written
+      });
     },
   };
 }

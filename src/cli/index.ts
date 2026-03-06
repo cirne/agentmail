@@ -4,7 +4,7 @@ import { who } from "~/search/who";
 import { indexMessages } from "~/search/indexing";
 import { getDb } from "~/db";
 import { startMcpServer } from "~/mcp";
-import { config } from "~/lib/config";
+import { config, requireImapConfig } from "~/lib/config";
 import { logger } from "~/lib/logger";
 import { parseSinceToDate } from "~/sync/parse-since";
 import { htmlToMarkdown } from "~/lib/content-normalize";
@@ -15,6 +15,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 import { formatMessageLlmFriendly } from "~/cli/format-message";
 import { extractAndCache } from "~/attachments";
+import { ImapFlow } from "imapflow";
 
 // When invoked as "tsx index.ts -- <cmd>", argv[2] is "--" and argv[3] is the command
 const rest = process.argv.slice(2);
@@ -642,8 +643,9 @@ async function main() {
       if (since) syncOptions.since = since;
       
       // Print log path immediately when sync starts (useful for background execution)
-      syncOptions.onLogPath = (logPath: string) => {
-        console.log(`Sync log: ${logPath}`);
+      // Note: sync/index.ts already prints this synchronously, but we keep the callback for API consistency
+      syncOptions.onLogPath = (_logPath: string) => {
+        // Already printed by sync/index.ts
       };
 
       const syncPromise = runSync(syncOptions).then((result) => {
@@ -882,8 +884,9 @@ async function main() {
       };
       
       // Print log path immediately when sync starts (useful for background execution)
-      syncOptions.onLogPath = (logPath: string) => {
-        console.log(`Sync log: ${logPath}`);
+      // Note: sync/index.ts already prints this synchronously, but we keep the callback for API consistency
+      syncOptions.onLogPath = (_logPath: string) => {
+        // Already printed by sync/index.ts
       };
 
       const syncPromise = runSync(syncOptions).then((result) => {
@@ -986,6 +989,72 @@ async function main() {
         const latest = dateRange.latest.slice(0, 10);
         console.log(`Range:     ${earliest} .. ${latest}`);
       }
+
+      // Compare with server using STATUS
+      try {
+        const imap = requireImapConfig();
+        if (imap.user && imap.password) {
+          const mailbox = config.sync.mailbox || (imap.host.toLowerCase().includes("gmail") ? "[Gmail]/All Mail" : "INBOX");
+          
+          const client = new ImapFlow({
+            host: imap.host,
+            port: imap.port,
+            secure: imap.port === 993,
+            auth: { user: imap.user, pass: imap.password },
+            logger: false,
+          });
+
+          try {
+            await client.connect();
+            
+            const statusResult = await client.status(mailbox, { messages: true, uidNext: true, uidValidity: true });
+            const serverMessages = statusResult.messages ?? 0;
+            const serverUidNext = statusResult.uidNext ? Number(statusResult.uidNext) : undefined;
+            const serverUidValidity = statusResult.uidValidity ? Number(statusResult.uidValidity) : undefined;
+            
+            // Get local sync state
+            const syncState = db.prepare("SELECT uidvalidity, last_uid FROM sync_state WHERE folder = ?").get(mailbox) as
+              | { uidvalidity: number | bigint; last_uid: number | bigint }
+              | undefined;
+            
+            const localMessages = messagesCount.count;
+            const localLastUid = syncState ? Number(syncState.last_uid) : undefined;
+            const localUidValidity = syncState ? Number(syncState.uidvalidity) : undefined;
+            
+            console.log("");
+            console.log("Server comparison:");
+            console.log(`  Server:   ${serverMessages} messages, UIDNEXT=${serverUidNext ?? 'unknown'}, UIDVALIDITY=${serverUidValidity ?? 'unknown'}`);
+            console.log(`  Local:    ${localMessages} messages, last_uid=${localLastUid ?? 'none'}, UIDVALIDITY=${localUidValidity ?? 'none'}`);
+            
+            if (serverUidNext && localLastUid && serverUidValidity === localUidValidity) {
+              const missing = serverUidNext - localLastUid - 1;
+              if (missing > 0) {
+                console.log(`  Missing:  ${missing} new message(s) (UIDs ${localLastUid + 1}..${serverUidNext - 1})`);
+              } else {
+                console.log(`  Status:   Up to date (no new messages)`);
+              }
+            } else if (serverUidValidity !== localUidValidity) {
+              console.log(`  Warning:  UIDVALIDITY mismatch - mailbox may have been reset`);
+            }
+            
+            // Calculate how far back we go
+            if (dateRange.earliest) {
+              const earliestDate = new Date(dateRange.earliest);
+              const now = new Date();
+              const daysAgo = Math.floor((now.getTime() - earliestDate.getTime()) / (1000 * 60 * 60 * 24));
+              const yearsAgo = (daysAgo / 365).toFixed(1);
+              console.log(`  Coverage: Goes back ${daysAgo} days (${yearsAgo} years) to ${dateRange.earliest.slice(0, 10)}`);
+            }
+            
+            client.close();
+          } catch (err) {
+            logger.warn("Failed to check server status", { error: String(err) });
+          }
+        }
+      } catch (err) {
+        // IMAP not configured or connection failed - skip server comparison
+      }
+      
       break;
     }
 
