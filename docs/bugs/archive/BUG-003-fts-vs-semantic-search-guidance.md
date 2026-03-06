@@ -1,8 +1,8 @@
 # BUG-003: FTS vs Semantic Search Guidance — Agent-Reported
 
-**Note:** This bug was superseded by [OPP-008](../opportunities/OPP-008-simplify-search-modes.md), which simplified the interface by making hybrid the default and removing mode selection complexity entirely.
+**Status:** Superseded by [OPP-008](../opportunities/archive/OPP-008-simplify-search-modes.md)
 
-**Status:** Fixed.
+**Note:** This bug was originally fixed by adding help text and hints for mode selection. However, [OPP-008](../opportunities/archive/OPP-008-simplify-search-modes.md) provided a better solution by simplifying the interface entirely — making hybrid the default and removing mode selection complexity. The original fix is now obsolete.
 
 **Design lens:** [Agent-first](../../VISION.md) — agents need clear guidance on when to use FTS vs semantic search. The `--mode` flag exists (OPP-003) but lacks discoverability and usage guidance, leading to suboptimal search choices and frustration.
 

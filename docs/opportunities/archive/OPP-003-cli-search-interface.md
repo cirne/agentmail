@@ -2,7 +2,7 @@
 
 **Status: Implemented (archived).** Core deliverables are in place; optional work (cursor pagination, provider labels) remains.
 
-**Note:** Mode selection was simplified in [OPP-008](../OPP-008-simplify-search-modes.md) — hybrid is now the default, with `--fts` flag for FTS-only search.
+**Note:** Mode selection was simplified in [OPP-008](OPP-008-simplify-search-modes.md) — hybrid is now the default, with `--fts` flag for FTS-only search. The `--mode` flag has been removed.
 
 **Problem:** The current CLI search interface is optimized for "return rich snippets now" rather than "help an agent iterate quickly." In real agent workflows, this causes unnecessary latency, oversized payloads, and brittle post-processing.
 

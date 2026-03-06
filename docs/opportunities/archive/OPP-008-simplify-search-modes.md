@@ -1,5 +1,7 @@
 # OPP-008: Simplify Search Modes — Make Hybrid Default, Remove Mode Flag
 
+**Status:** Implemented (2026-03-06)
+
 **Problem:** The current `--mode` flag (`fts`, `semantic`, `hybrid`) forces callers to understand search internals. Agents don't know which mode to pick and default to FTS, missing semantic matches. The hint system teaches the wrong lesson — users shouldn't need to think about modes. There's no scenario where `--mode semantic` alone is better than hybrid (hybrid includes semantic). "Hybrid" is implementation jargon, not a user concept.
 
 **Example:** Testing showed that every query that used hybrid got better or equal results vs FTS-only:

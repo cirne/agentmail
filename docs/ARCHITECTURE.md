@@ -87,7 +87,7 @@ This layout applies to **both Phase 1 and Phase 2 (open source)**. Each user run
 ```
 zmail sync [--since <spec>]     ← Initial sync: fill gaps going backward (e.g. --since 7d, 5w, 3m, 2y)
 zmail refresh                    ← Refresh: fetch new messages since last sync (frequent updates)
-zmail search <query> [flags]    ← header-first search with mode/detail controls
+zmail search <query> [flags]    ← hybrid search (semantic + FTS) by default; use --fts for FTS-only
                                   Query supports inline operators: from:, to:, subject:, after:, before:
                                   Example: zmail search "from:alice@example.com invoice OR receipt"
 zmail who <query> [flags]        ← find people by address or display name (sent/received/mentioned counts)

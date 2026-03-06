@@ -14,8 +14,8 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 
 | Feedback File | Date Processed | Action | Related ID |
 |---|---|---|---|
-| `ux-semantic-search-guidance.md` | 2026-03-06 | Created bug | [BUG-003](bugs/archive/BUG-003-fts-vs-semantic-search-guidance.md) — Fixed 2026-03-06 |
-| `ux-simplify-search-modes.md` | 2026-03-06 | Created opportunity | [OPP-008](opportunities/OPP-008-simplify-search-modes.md) |
+| `ux-semantic-search-guidance.md` | 2026-03-06 | Created bug | [BUG-003](bugs/archive/BUG-003-fts-vs-semantic-search-guidance.md) — Superseded by OPP-008 |
+| `ux-simplify-search-modes.md` | 2026-03-06 | Created opportunity | [OPP-008](opportunities/archive/OPP-008-simplify-search-modes.md) — Implemented 2026-03-06 |
 
 ---
 
