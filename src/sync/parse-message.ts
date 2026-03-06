@@ -30,7 +30,22 @@ export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
   const email = await PostalMime.parse(copy.buffer);
 
   const messageId = email.messageId ?? `<unknown-${Date.now()}@local>`;
-  const date = email.date ? new Date(email.date).toISOString() : new Date().toISOString();
+
+  // Reject obviously invalid dates (malformed headers, far-future typos). Store sane range only.
+  const MIN_DATE_MS = new Date("1980-01-01T00:00:00.000Z").getTime();
+  const MAX_DATE_MS = Date.now() + 24 * 60 * 60 * 1000; // now + 1 day (allow small clock skew)
+  let date: string;
+  if (email.date) {
+    const d = new Date(email.date);
+    const t = d.getTime();
+    if (Number.isNaN(t) || t < MIN_DATE_MS || t > MAX_DATE_MS) {
+      date = new Date().toISOString();
+    } else {
+      date = d.toISOString();
+    }
+  } else {
+    date = new Date().toISOString();
+  }
 
   // Extract attachments, filtering out inline images (disposition: "inline" or related: true)
   // These are embedded in HTML body, not user-facing attachments

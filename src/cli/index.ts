@@ -869,24 +869,40 @@ async function main() {
       // Indexing status - always use messages table as source of truth
       const totalIndexed = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'done'").get() as { count: number };
       const totalFailed = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'failed'").get() as { count: number };
+      const pendingCount = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'pending'").get() as { count: number };
       
       if (indexStatus.is_running) {
-        const elapsed = indexStatus.started_at
-          ? Math.round((Date.now() - new Date(indexStatus.started_at).getTime()) / 1000)
+        // SQLite datetime('now') is UTC but has no 'Z'; parse as UTC to avoid negative elapsed (local-time parse)
+        const startedMs = indexStatus.started_at
+          ? (indexStatus.started_at.includes("Z") || indexStatus.started_at.includes("+")
+              ? new Date(indexStatus.started_at).getTime()
+              : new Date(indexStatus.started_at.replace(" ", "T") + "Z").getTime())
           : 0;
-        // During active indexing, show progress from indexing_status and failures from messages table
-        console.log(`Indexing:  running (${indexStatus.indexed_so_far}/${indexStatus.total_to_index} indexed${totalFailed.count > 0 ? `, ${totalFailed.count} failed` : ''}, ${elapsed}s elapsed)`);
+        const elapsed = startedMs ? Math.round((Date.now() - startedMs) / 1000) : 0;
+        // total_to_index can be 0 when sync+index start together (pending was 0 at start); use live total for display
+        const displayTotal = Math.max(indexStatus.total_to_index, indexStatus.indexed_so_far + pendingCount.count);
+        console.log(`Indexing:  running (${indexStatus.indexed_so_far}/${displayTotal} indexed${totalFailed.count > 0 ? `, ${totalFailed.count} failed` : ''}, ${elapsed}s elapsed)`);
       } else if (indexStatus.completed_at) {
         console.log(`Indexing:  idle (last: ${indexStatus.completed_at.slice(0, 10)}, ${totalIndexed.count} indexed${totalFailed.count > 0 ? `, ${totalFailed.count} failed` : ''})`);
       } else {
         console.log(`Indexing:  never run`);
       }
 
-      // Search readiness
-      const ftsCount = syncStatus.total_messages;
-      // For semantic count, we check what's been indexed (total, not just last run)
+      // Search readiness: use live counts (sync_summary.total_messages only updates when sync completes)
+      const messagesCount = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+      const ftsCount = messagesCount.count;
       const semanticCount = totalIndexed.count;
       console.log(`Search:    FTS ready (${ftsCount}) | Semantic ready (${semanticCount})`);
+
+      const dateRange = db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages").get() as {
+        earliest: string | null;
+        latest: string | null;
+      };
+      if (dateRange.earliest && dateRange.latest) {
+        const earliest = dateRange.earliest.slice(0, 10);
+        const latest = dateRange.latest.slice(0, 10);
+        console.log(`Range:     ${earliest} .. ${latest}`);
+      }
       break;
     }
 
@@ -925,7 +941,7 @@ async function main() {
     case "attachments": {
       if (args.length === 0) {
         console.error("Usage: zmail attachment list <message_id>");
-        console.error("       zmail attachment read <attachment_id> [--raw]");
+        console.error("       zmail attachment read <message_id> <index_or_filename> [--raw]");
         process.exit(1);
       }
 
@@ -956,15 +972,18 @@ async function main() {
         const isTty = process.stdout.isTTY;
         const shouldOutputJson = !isTty || args.includes("--json");
 
+        const quotedMsgId = messageId.includes(" ") ? `"${messageId}"` : messageId;
         if (shouldOutputJson) {
           console.log(
             JSON.stringify(
-              attachments.map((a) => ({
-                id: a.id,
+              attachments.map((a, i) => ({
+                index: i + 1,
                 filename: a.filename,
                 mimeType: a.mime_type,
                 size: a.size,
                 extracted: a.extracted_text !== null,
+                readCommand: `zmail attachment read ${quotedMsgId} ${i + 1}`,
+                readCommandByFilename: `zmail attachment read ${quotedMsgId} "${a.filename.replace(/"/g, '\\"')}"`,
               })),
               null,
               2
@@ -976,9 +995,10 @@ async function main() {
             break;
           }
           console.log(`Attachments for ${messageId}:\n`);
-          console.log("  ID    FILENAME".padEnd(50) + "  MIME TYPE".padEnd(40) + "  SIZE      EXTRACTED");
+          console.log("  #    FILENAME".padEnd(50) + "  MIME TYPE".padEnd(40) + "  SIZE      EXTRACTED");
           console.log("  " + "-".repeat(110));
-          for (const att of attachments) {
+          for (let i = 0; i < attachments.length; i++) {
+            const att = attachments[i];
             const sizeStr =
               att.size >= 1024 * 1024
                 ? `${(att.size / (1024 * 1024)).toFixed(2)} MB`
@@ -987,40 +1007,50 @@ async function main() {
                   : `${att.size} B`;
             const filenameShort = att.filename.length > 40 ? att.filename.slice(0, 37) + "..." : att.filename.padEnd(40);
             const mimeShort = att.mime_type.length > 38 ? att.mime_type.slice(0, 35) + "..." : att.mime_type.padEnd(38);
-            console.log(`  ${String(att.id).padStart(4)}  ${filenameShort}  ${mimeShort}  ${sizeStr.padStart(9)}  ${att.extracted_text !== null ? "yes" : "no"}`);
+            console.log(`  ${String(i + 1).padStart(4)}  ${filenameShort}  ${mimeShort}  ${sizeStr.padStart(9)}  ${att.extracted_text !== null ? "yes" : "no"}`);
           }
+          console.log("\nTo read an attachment (extracted text/CSV to stdout):");
+          console.log(`  zmail attachment read <message_id> <index>   # index 1-${attachments.length}`);
+          console.log(`  zmail attachment read <message_id> "<filename>"`);
+          console.log(`  Example: zmail attachment read ${quotedMsgId} 1`);
+          console.log("To get raw bytes: add --raw");
         }
       } else if (subcommand === "read") {
-        const attachmentIdRaw = args[1];
-        if (!attachmentIdRaw) {
-          console.error("Usage: zmail attachment read <attachment_id> [--raw]");
-          process.exit(1);
-        }
-
-        const attachmentId = Number.parseInt(attachmentIdRaw, 10);
-        if (!Number.isFinite(attachmentId) || attachmentId <= 0) {
-          console.error(`Invalid attachment ID: "${attachmentIdRaw}". Must be a positive number.`);
-          process.exit(1);
-        }
-
         const raw = args.includes("--raw");
+        const readArgs = args.filter((a) => a !== "--raw");
+        const messageIdArg = readArgs[1];
+        const indexOrFilename = readArgs[2];
+        if (!messageIdArg || indexOrFilename === undefined) {
+          console.error("Usage: zmail attachment read <message_id> <index_or_filename> [--raw]");
+          process.exit(1);
+        }
 
         const db = getDb();
-        const attachment = db
-          .prepare("SELECT id, message_id, filename, mime_type, size, stored_path FROM attachments WHERE id = ?")
-          .get(attachmentId) as
-          | {
-              id: number;
-              message_id: string;
-              filename: string;
-              mime_type: string;
-              size: number;
-              stored_path: string;
-            }
-          | undefined;
-
+        const messageId = normalizeMessageId(messageIdArg);
+        const list = db
+          .prepare(
+            `SELECT id, message_id, filename, mime_type, size, stored_path
+             FROM attachments WHERE message_id = ? ORDER BY filename`
+          )
+          .all(messageId) as Array<{
+          id: number;
+          message_id: string;
+          filename: string;
+          mime_type: string;
+          size: number;
+          stored_path: string;
+        }>;
+        if (list.length === 0) {
+          console.error(`No attachments found for message.`);
+          process.exit(1);
+        }
+        const indexNum = Number.parseInt(indexOrFilename, 10);
+        const attachment =
+          Number.isFinite(indexNum) && indexNum >= 1 && indexNum <= list.length
+            ? list[indexNum - 1]
+            : list.find((a) => a.filename === indexOrFilename);
         if (!attachment) {
-          console.error(`Attachment ${attachmentId} not found.`);
+          console.error(`No attachment "${indexOrFilename}" in this message. Use index 1-${list.length} or exact filename.`);
           process.exit(1);
         }
 
@@ -1048,7 +1078,7 @@ async function main() {
       } else {
         console.error(`Unknown subcommand: ${subcommand}`);
         console.error("Usage: zmail attachment list <message_id>");
-        console.error("       zmail attachment read <attachment_id> [--raw]");
+        console.error("       zmail attachment read <message_id> <index_or_filename> [--raw]");
         process.exit(1);
       }
       break;
@@ -1076,8 +1106,8 @@ Usage:
   zmail stats                      Show database statistics
   zmail read <id> [--raw]          Read a message (or: zmail message <id>)
   zmail thread <id> [--raw]        Fetch thread (Markdown by default; raw .eml with --raw)
-  zmail attachment list <id>       List attachments for a message
-  zmail attachment read <id>       Read/extract attachment (markdown/CSV by default; --raw for binary)
+  zmail attachment list <message_id>   List attachments (use message_id from search)
+  zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
   zmail mcp                        Start MCP server (stdio)
 
 Run 'zmail setup' for setup instructions.
