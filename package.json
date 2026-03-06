@@ -16,7 +16,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=22"
+    "node": ">=20"
   },
   "bin": {
     "zmail": "dist/index.js"

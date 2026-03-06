@@ -153,7 +153,7 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 ### ADR-008: Language & Runtime — TypeScript + Node.js
 
-**Decision:** TypeScript on Node.js 22+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/OPP-007-packaging-npm-homebrew.md)).
+**Decision:** TypeScript on Node.js 20+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/OPP-007-packaging-npm-homebrew.md)).
 
 **Rationale:**
 - Node.js is ubiquitous; no separate runtime (Bun) required. Aligns with OpenClaw/Claude Code (`npm i -g`).

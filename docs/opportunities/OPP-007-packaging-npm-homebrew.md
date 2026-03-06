@@ -1,6 +1,6 @@
 # OPP-007: Packaging and Distribution — npm, Homebrew, Ditching the Binary
 
-**Status: Implemented.** Runtime is Node.js 22+; distributed via public npm as `@cirne/zmail`; dev uses `tsx`. See AGENTS.md and ARCHITECTURE.md ADR-008.
+**Status: Implemented.** Runtime is Node.js 20+; distributed via public npm as `@cirne/zmail`; dev uses `tsx`. See AGENTS.md and ARCHITECTURE.md ADR-008.
 
 **Package name:** `@cirne/zmail` (scoped). The unscoped name `zmail` is already taken on npm (old package, ~3 weekly downloads). Packages are published to public npm. Install via `npm i -g @cirne/zmail` (no authentication required).
 
@@ -19,13 +19,13 @@
 - Publish to npm with a `bin` that points to a script with shebang `#!/usr/bin/env bun`.
 - User runs `npm i -g @cirne/zmail` or `bun install -g @cirne/zmail`; when they run `zmail`, the OS invokes Bun with that script.
 - **Pros:** No compile step → avoids binary-only bugs; same codebase as dev; familiar install for the audience.
-- **Cons:** User must have **Bun** installed and on PATH. Node version only matters for the npm client (e.g. Node 22+); runtime is Bun. *(Historical option — not chosen)*
+- **Cons:** User must have **Bun** installed and on PATH. Node version only matters for the npm client (e.g. Node 20+); runtime is Bun. *(Historical option — not chosen)*
 
 ### 2. npm i -g (run with Node) — recommended
 
 - Port the app to run on **Node**: replace Bun-only APIs, distribute via npm with `#!/usr/bin/env node` (or run compiled JS).
 - User runs `npm i -g @cirne/zmail`; only Node is required (no Bun).
-- **Pros:** Single runtime that virtually every dev has; aligns with OpenClaw (`npm i -g openclaw`, Node 22+), Claude Code (`npm i -g claude`, Node 18+); no binary build at all. *(Chosen option)*
+- **Pros:** Single runtime that virtually every dev has; aligns with OpenClaw (`npm i -g openclaw`, Node 20+), Claude Code (`npm i -g claude`, Node 18+); no binary build at all. *(Chosen option)*
 - **Cons:** One-time port (see below). Slightly slower cold start than a native binary (usually negligible for CLI tool-use).
 
 ### 3. Homebrew
@@ -125,7 +125,7 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 ```
 
 The script:
-- Checks for Node.js 22+ requirement
+- Checks for Node.js 20+ requirement
 - Installs `@cirne/zmail` globally from npm (no authentication required)
 - Verifies installation and provides PATH guidance if needed
 

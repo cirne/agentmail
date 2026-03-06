@@ -112,7 +112,7 @@ zmail sync --since 7d
 
 ## Architecture
 
-Built with TypeScript + Node.js 22+. All data stored locally on a persistent volume — no cloud sync service, no third-party access to your email. 
+Built with TypeScript + Node.js 20+. All data stored locally on a persistent volume — no cloud sync service, no third-party access to your email. 
 
 **Documentation:**
 - [`AGENTS.md`](AGENTS.md) — single source of truth for installation, commands, and development

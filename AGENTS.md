@@ -1,6 +1,6 @@
 # zmail — Agent Guide
 
-**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 22+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/OPP-007-packaging-npm-homebrew.md)).
+**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/OPP-007-packaging-npm-homebrew.md)).
 
 **Quick install:**
 ```bash
@@ -23,7 +23,7 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 
 ## Tech stack
 
-Node.js 22+, TypeScript, SQLite (`better-sqlite3`), FTS5, LanceDB, imapflow. Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
+Node.js 20+, TypeScript, SQLite (`better-sqlite3`), FTS5, LanceDB, imapflow. Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
 
 ## Project structure
 

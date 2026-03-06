@@ -32,7 +32,7 @@
 
 ### 1. Install the CLI
 
-- **From npm:** `npm i -g zmail` (Node.js 22+). Canonical install; no binary download required.
+- **From npm:** `npm i -g zmail` (Node.js 20+). Canonical install; no binary download required.
 - **From repo:** `npm run install-cli` installs a wrapper to `~/.local/bin` that runs source via `npx tsx`; or `npm run build` then `npm i -g .` for a global install from the built package.
 
 ### 2. Account setup
