@@ -72,10 +72,15 @@ zmail status
 zmail stats
 zmail read <id> [--raw]         # or zmail message <id>
 zmail thread <id> [--raw]
-zmail mcp
+zmail mcp                        # Start MCP server (stdio)
 ```
 
 Query can use inline operators: `from:`, `to:`, `subject:`, `after:`, `before:` (e.g. `zmail search "from:alice@example.com invoice OR receipt"`).
+
+### Agent interfaces
+
+- **CLI**: Use for direct subprocess calls. Fast for one-off queries, returns JSON with `--json` flag.
+- **MCP**: Use for persistent tool-based integration. Run `zmail mcp` to start stdio server. See [`docs/MCP.md`](docs/MCP.md) for details.
 
 ### Recommended agent retrieval pattern
 

@@ -582,10 +582,15 @@ async function main() {
       const syncDone = new Promise<void>((resolve) => { resolveSyncDone = resolve; });
 
       // Sync always goes backward (fills gaps from most recent backward)
-      const syncOptions: { since?: string; direction: 'backward' } = {
+      const syncOptions: { since?: string; direction: 'backward'; onLogPath?: (logPath: string) => void } = {
         direction: 'backward',
       };
       if (since) syncOptions.since = since;
+      
+      // Print log path immediately when sync starts (useful for background execution)
+      syncOptions.onLogPath = (logPath: string) => {
+        console.log(`Sync log: ${logPath}`);
+      };
 
       const syncPromise = runSync(syncOptions).then((result) => {
         resolveSyncDone();
@@ -596,6 +601,7 @@ async function main() {
       // Wait for both to complete
       const [syncResult, indexResult] = await Promise.all([syncPromise, indexPromise]);
 
+      // Log path already printed at start via onLogPath callback
       if (syncResult) {
         const sec = (syncResult.durationMs / 1000).toFixed(2);
         const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
@@ -800,8 +806,13 @@ async function main() {
       const syncDone = new Promise<void>((resolve) => { resolveSyncDone = resolve; });
 
       // Refresh always goes forward (fetches new messages since last sync)
-      const syncOptions: { direction: 'forward' } = {
+      const syncOptions: { direction: 'forward'; onLogPath?: (logPath: string) => void } = {
         direction: 'forward',
+      };
+      
+      // Print log path immediately when sync starts (useful for background execution)
+      syncOptions.onLogPath = (logPath: string) => {
+        console.log(`Sync log: ${logPath}`);
       };
 
       const syncPromise = runSync(syncOptions).then((result) => {
@@ -813,6 +824,7 @@ async function main() {
       // Wait for both to complete
       const [syncResult, indexResult] = await Promise.all([syncPromise, indexPromise]);
 
+      // Log path already printed at start via onLogPath callback
       if (syncResult) {
         const sec = (syncResult.durationMs / 1000).toFixed(2);
         const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
@@ -1109,6 +1121,10 @@ Usage:
   zmail attachment list <message_id>   List attachments (use message_id from search)
   zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
   zmail mcp                        Start MCP server (stdio)
+
+Agent interfaces:
+  CLI (this): Use for direct subprocess calls. Fast for one-off queries, returns JSON with --json flag.
+  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. See docs/MCP.md.
 
 Run 'zmail setup' for setup instructions.
 `);

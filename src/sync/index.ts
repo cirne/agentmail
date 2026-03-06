@@ -4,10 +4,10 @@ import { fileURLToPath } from "url";
 import { ImapFlow } from "imapflow";
 import { config, requireImapConfig } from "~/lib/config";
 import { getDb } from "~/db";
-import { logger } from "~/lib/logger";
 import { acquireLock, releaseLock } from "~/lib/process-lock";
 import { parseRawMessage } from "./parse-message";
 import { parseSinceToDate } from "./parse-since";
+import { createFileLogger, generateSyncLogFilename, type FileLogger } from "~/lib/file-logger";
 
 /** Mailbox to sync: All Mail for Gmail (per ADR-011), INBOX for others. */
 function getSyncMailbox(host: string): string {
@@ -19,6 +19,8 @@ export interface SyncOptions {
   since?: string;
   /** Sync direction: 'forward' (newest first, for updates) or 'backward' (oldest first, for backfill). Default: 'forward' */
   direction?: 'forward' | 'backward';
+  /** Optional callback invoked immediately when log file is created, before sync starts */
+  onLogPath?: (logPath: string) => void;
 }
 
 export interface SyncResult {
@@ -28,6 +30,7 @@ export interface SyncResult {
   durationMs: number;
   bandwidthBytesPerSec: number;
   messagesPerMinute: number;
+  logPath: string;
 }
 
 const BATCH_SIZE = 50;
@@ -71,8 +74,8 @@ function formatBytes(n: number): string {
   return n + " B";
 }
 
-function logSyncMetrics(r: SyncResult): void {
-  logger.info("Sync complete", {
+function logSyncMetrics(fileLogger: FileLogger, r: SyncResult): void {
+  fileLogger.info("Sync complete", {
     synced: r.synced,
     messagesFetched: r.messagesFetched,
     bytesDownloaded: r.bytesDownloaded,
@@ -84,21 +87,32 @@ function logSyncMetrics(r: SyncResult): void {
   const durationSec = (r.durationMs / 1000).toFixed(2);
   const bandwidth = formatBytes(r.bandwidthBytesPerSec) + "/s";
   const throughput = Math.round(r.messagesPerMinute) + " msg/min";
-  logger.info("Sync metrics", {
+  fileLogger.info("Sync metrics", {
     summary: `${r.synced} new, ${r.messagesFetched} fetched | ${formatBytes(r.bytesDownloaded)} down | ${bandwidth} | ${throughput} | ${durationSec}s`,
   });
 }
 
 export async function runSync(options?: SyncOptions): Promise<SyncResult> {
   const startTime = Date.now();
+  
+  // Create file logger for this sync run
+  const logFilename = generateSyncLogFilename();
+  const fileLogger = createFileLogger(logFilename);
+  
+  // Notify caller of log path immediately (useful for background execution)
+  if (options?.onLogPath) {
+    options.onLogPath(fileLogger.logPath);
+  }
+  
   const imap = requireImapConfig();
   if (!imap.user || !imap.password) {
+    fileLogger.close();
     throw new Error("IMAP_USER and IMAP_PASSWORD are required for sync. Set them in .env");
   }
 
   const sinceSpec = options?.since ?? config.sync.defaultSince;
   const fromDate = parseSinceToDate(sinceSpec);
-  logger.info("Sync starting", { user: imap.user, fromDate });
+  fileLogger.info("Sync starting", { user: imap.user, fromDate });
 
   ensureMaildir();
   const db = getDb();
@@ -111,7 +125,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
   // Acquire lock with PID-based ownership
   const lockResult = acquireLock(db, "sync_summary", process.pid);
   if (!lockResult.acquired) {
-    logger.info("Sync already running, exiting");
+    fileLogger.info("Sync already running, exiting");
+    fileLogger.close();
     const durationMs = Date.now() - startTime;
     return {
       synced: 0,
@@ -120,12 +135,13 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       durationMs,
       bandwidthBytesPerSec: 0,
       messagesPerMinute: 0,
+      logPath: fileLogger.logPath,
     };
   }
   if (lockResult.takenOver) {
     // Partial work is safe: sync_state.last_uid is correct,
     // and message dedup prevents re-inserts
-    logger.info("Recovered from crashed sync, resuming from last checkpoint");
+    fileLogger.info("Recovered from crashed sync, resuming from last checkpoint");
   }
 
   const client = new ImapFlow({
@@ -141,7 +157,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
 
   try {
     await client.connect();
-    logger.info("IMAP connected", { host: imap.host });
+    fileLogger.info("IMAP connected", { host: imap.host });
 
     const mailbox = config.sync.mailbox || getSyncMailbox(imap.host);
   const excludeLabels = config.sync.excludeLabels; // lowercase
@@ -171,7 +187,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         searchQuery = { uid: `${state.last_uid + 1}:*` };
         const searchResult = await client.search(searchQuery, { uid: true });
         uids = Array.isArray(searchResult) ? searchResult : [];
-        logger.info("Forward sync (new messages)", { folder: mailbox, newUids: uids.length, lastUid: state.last_uid });
+        fileLogger.info("Forward sync (new messages)", { folder: mailbox, newUids: uids.length, lastUid: state.last_uid });
       } else {
         // Backward sync (continue syncing) or initial sync: use date-based search
         // For backward sync, resume from the oldest already-synced message to avoid re-checking everything
@@ -207,7 +223,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
                   // Search for messages in the date range, but we'll filter UIDs after getting results
                   searchQuery = { since: effectiveSinceDate };
                   
-                  logger.info("Resuming backward sync from oldest synced date with UID filtering", {
+                  fileLogger.info("Resuming backward sync from oldest synced date with UID filtering", {
                     requestedSince: fromDate,
                     oldestSynced: oldestDateStr,
                     resumingFrom: effectiveSinceDateStr,
@@ -217,7 +233,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
                 } else {
                   searchQuery = { since: effectiveSinceDate };
                   
-                  logger.info("Resuming backward sync from oldest synced date", {
+                  fileLogger.info("Resuming backward sync from oldest synced date", {
                     requestedSince: fromDate,
                     oldestSynced: oldestDateStr,
                     resumingFrom: effectiveSinceDateStr,
@@ -234,7 +250,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
               } else {
                 // Oldest synced is before requested date - use requested date
                 searchQuery = { since: effectiveSinceDate };
-                logger.info("Syncing from requested date", {
+                fileLogger.info("Syncing from requested date", {
                   requestedSince: fromDate,
                   oldestSynced: oldestDateStr,
                 });
@@ -252,14 +268,14 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         const searchResult = await client.search(searchQuery, { uid: true });
         uids = Array.isArray(searchResult) ? searchResult : [];
         if (direction === 'backward') {
-          logger.info("Backward sync (filling gaps)", {
+          fileLogger.info("Backward sync (filling gaps)", {
             folder: mailbox,
             count: uids.length,
             since: effectiveSinceDateStr,
             requestedSince: fromDate,
           });
         } else {
-          logger.info("Messages to sync", { folder: mailbox, count: uids.length, since: fromDate });
+          fileLogger.info("Messages to sync", { folder: mailbox, count: uids.length, since: fromDate });
         }
       }
       
@@ -282,7 +298,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
             
             // Only search before if it's still within the requested range
             if (dayBeforeOldest >= sinceDate) {
-              logger.info("All messages from this day already synced - searching before oldest synced date", {
+              fileLogger.info("All messages from this day already synced - searching before oldest synced date", {
                 oldestSynced: oldestSynced.oldest_date.slice(0, 10),
                 searchingBefore: dayBeforeOldest.toISOString().slice(0, 10),
                 skippedUids: uids.length,
@@ -297,7 +313,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
               uids = Array.isArray(searchResult) ? searchResult : [];
             } else {
               // Day before oldest is before requested date - nothing more to sync
-              logger.info("All messages from requested date range already synced", {
+              fileLogger.info("All messages from requested date range already synced", {
                 oldestSynced: oldestSynced.oldest_date.slice(0, 10),
                 requestedSince: fromDate,
               });
@@ -311,7 +327,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           const filtered = beforeFilter - uids.length;
           
           if (filtered > 0) {
-            logger.info("Filtered UIDs using last_uid checkpoint", {
+            fileLogger.info("Filtered UIDs using last_uid checkpoint", {
               beforeFilter,
               afterFilter: uids.length,
               filtered,
@@ -335,8 +351,10 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           durationMs,
           bandwidthBytesPerSec: 0,
           messagesPerMinute: 0,
+          logPath: fileLogger.logPath,
         };
-        logSyncMetrics(result);
+        logSyncMetrics(fileLogger, result);
+        fileLogger.close();
         return result;
       }
 
@@ -354,7 +372,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         const batch = uids.slice(i, i + BATCH_SIZE);
         const batchNum = Math.floor(i / BATCH_SIZE) + 1;
         const totalBatches = Math.ceil(uids.length / BATCH_SIZE);
-        logger.info("fetchAll start", {
+        fileLogger.info("fetchAll start", {
           batch: `${batchNum}/${totalBatches}`,
           uids: batch.length,
           uidRange: `${batch[0]}..${batch[batch.length - 1]}`,
@@ -371,7 +389,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         ]);
         clearTimeout(fetchTimeoutId);
         const fetchDuration = Date.now() - fetchStart;
-        logger.info("fetchAll done", {
+        fileLogger.info("fetchAll done", {
           batch: `${batchNum}/${totalBatches}`,
           messages: messages.length,
           elapsedMs: fetchDuration,
@@ -405,7 +423,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
               ),
             ]);
           } catch (err) {
-            logger.warn("Parse failed, skipping message", { uid, bytes: Buffer.byteLength(raw), error: String(err) });
+            fileLogger.warn("Parse failed, skipping message", { uid, bytes: Buffer.byteLength(raw), error: String(err) });
             continue;
           }
 
@@ -415,7 +433,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           
           if (existing) {
             batchDuplicates++;
-            logger.debug("Skipping duplicate", {
+            fileLogger.debug("Skipping duplicate", {
               uid,
               messageId: parsed.messageId,
               date: parsed.date,
@@ -486,7 +504,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         
         // Log progress every 100 messages or at batch boundaries
         if (synced % 100 === 0 && synced > 0) {
-          logger.info("Sync progress", {
+          fileLogger.info("Sync progress", {
             synced,
             messagesFetched,
             duplicates: batchDuplicates,
@@ -525,8 +543,10 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         durationMs,
         bandwidthBytesPerSec: durationSec > 0 ? bytesDownloaded / durationSec : 0,
         messagesPerMinute: durationSec > 0 ? (messagesFetched / durationSec) * 60 : 0,
+        logPath: fileLogger.logPath,
       };
-      logSyncMetrics(result);
+      logSyncMetrics(fileLogger, result);
+      fileLogger.close();
 
       return result;
     } finally {
@@ -534,7 +554,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     }
   } catch (err) {
     releaseLock(db, "sync_summary");
-    logger.error("Sync failed", { error: String(err) });
+    fileLogger.error("Sync failed", { error: String(err) });
+    fileLogger.close();
     throw err;
   } finally {
     // Force-close the connection. On a stalled/timed-out socket, logout hangs
@@ -546,7 +567,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] && resolve(process.argv[1]) === resolve(__filename)) {
   runSync().catch((err) => {
-    logger.error(err instanceof Error ? err.message : String(err));
+    console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   });
 }

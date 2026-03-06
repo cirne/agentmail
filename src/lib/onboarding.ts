@@ -21,4 +21,8 @@ Usage:
   zmail thread <id> [--raw]       Fetch thread (Markdown by default; raw .eml with --raw)
   zmail read <id> [--raw]         Read a message (or: zmail message <id>)
   zmail mcp                       Start MCP server (stdio)
+
+Agent interfaces:
+  CLI (this): Use for direct subprocess calls. Fast for one-off queries, returns JSON with --json flag.
+  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. See docs/MCP.md.
 `;

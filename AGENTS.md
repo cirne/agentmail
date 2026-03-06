@@ -10,6 +10,7 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 ## Key documents
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical decisions and rationale (**read before making storage, sync, or interface decisions**)
+- [`docs/MCP.md`](docs/MCP.md) — MCP server interface documentation (**read for agent integration**)
 - [`docs/VISION.md`](docs/VISION.md) — product vision
 - [`docs/OPPORTUNITIES.md`](docs/OPPORTUNITIES.md) — product improvement ideas
 
@@ -52,6 +53,23 @@ npm run lint         # tsc --noEmit (no ESLint)
 npm test             # vitest run
 ```
 
+### Sync logging and background execution
+
+**Recommended:** Run sync in the background for long-running syncs. Each sync run writes a log file to `{ZMAIL_HOME}/logs/sync-{date}-{time}.log`:
+
+```bash
+# Run sync in background
+zmail sync --since 1y &
+
+# Check sync status
+zmail status
+
+# Inspect the latest log (stdout shows log path)
+tail -f ~/.zmail/logs/sync-*.log
+```
+
+The CLI prints the log file path to stdout (e.g., `Sync log: ~/.zmail/logs/sync-20250306-143022.log`) so agents can tail/inspect it. Verbose logging goes to the file, not stdout, making background execution clean.
+
 **Using `zmail` from the repo:** `npm run zmail -- <command> [args]` (the `--` is required so args reach the CLI). Or: `npx tsx src/index.ts -- <command> [args]`.
 
 **Using `zmail` from another directory:** Run `npm run install-cli` from the repo once. That installs a wrapper at `~/.local/bin/zmail` (or `ZMAIL_INSTALL_DIR`) that runs `npx tsx <repo>/src/index.ts -- "$@"`. Ensure that dir is on your PATH. Or install globally: `npm i -g .` (requires `npm run build` first).
@@ -67,6 +85,24 @@ zmail attachment read <attachment_id> --raw  # output raw binary (pipe to file)
 Supported formats: PDF, DOCX, XLSX, HTML, CSV, TXT. Extraction happens on first read and is cached in the DB.
 
 **CLI help and onboarding (no env required):** `zmail --help`, `zmail -h`, `zmail help` show usage; `zmail setup` runs interactive setup. If any command fails due to missing config, the CLI prints "No config found. Run 'zmail setup' first."
+
+## Agent interfaces: CLI vs MCP
+
+zmail provides two interfaces for agents, both accessing the same SQLite index:
+
+**CLI (command-line):**
+- Use for direct subprocess calls from agents
+- Fast for one-off queries (no persistent connection overhead)
+- Returns structured JSON with `--json` flag
+- Best for: one-time searches, status checks, simple workflows
+
+**MCP (Model Context Protocol):**
+- Use for persistent tool-based integration
+- Run `zmail mcp` to start stdio server
+- Better for iterative workflows with multiple tool calls
+- Best for: agents with MCP support, complex multi-step queries, tool-based integrations
+
+See [`docs/MCP.md`](docs/MCP.md) for MCP server documentation and tool reference.
 
 ## Configuration
 
