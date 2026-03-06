@@ -95,6 +95,9 @@ function searchUsage() {
   console.error("  --ids-only         return only message IDs");
   console.error("  --timings          include machine-readable search timings");
   console.error("  --json             force JSON output (default: table for TTY, JSON when piped)");
+  console.error("");
+  console.error("Search results include attachment counts. For document-related queries,");
+  console.error("check attachments with: zmail attachment list <message_id>");
 }
 
 interface ParsedWhoArgs {
@@ -332,8 +335,42 @@ function hydrateBodies(db: SqliteDatabase, results: SearchResult[]): Array<Searc
   }));
 }
 
+interface AttachmentMetadata {
+  count: number;
+  types: string[];
+}
+
+function hydrateAttachmentMetadata(
+  db: SqliteDatabase,
+  results: SearchResult[]
+): Map<string, AttachmentMetadata> {
+  if (results.length === 0) return new Map();
+  const ids = results.map((r) => r.messageId);
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT message_id, COUNT(*) as count, GROUP_CONCAT(DISTINCT mime_type) as types
+       FROM attachments WHERE message_id IN (${placeholders}) GROUP BY message_id`
+    )
+    .all(...ids) as Array<{ message_id: string; count: number; types: string | null }>;
+  
+  const metadataByMessageId = new Map<string, AttachmentMetadata>();
+  for (const row of rows) {
+    const types = row.types ? row.types.split(",").map(t => {
+      // Extract file extension from mime type (e.g., "application/pdf" -> "pdf")
+      const parts = t.split("/");
+      return parts.length > 1 ? parts[1] : t;
+    }) : [];
+    metadataByMessageId.set(row.message_id, {
+      count: row.count,
+      types: [...new Set(types)], // deduplicate
+    });
+  }
+  return metadataByMessageId;
+}
+
 function projectResult(
-  row: SearchResult & { body?: string },
+  row: SearchResult & { body?: string; attachments?: AttachmentMetadata },
   detail: SearchDetail,
   fields?: SearchField[]
 ): Record<string, unknown> {
@@ -349,6 +386,15 @@ function projectResult(
       projected[field] = value;
     }
   }
+  
+  // Always include attachment metadata if available (not filtered by fields)
+  if (row.attachments && row.attachments.count > 0) {
+    projected.attachments = row.attachments.count;
+    if (row.attachments.types.length > 0) {
+      projected.attachmentTypes = row.attachments.types;
+    }
+  }
+  
   return projected;
 }
 
@@ -357,15 +403,34 @@ function getSearchHint(
   resultCount: number,
   totalMatched: number,
   limit?: number,
-  meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean }
+  meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean },
+  attachmentCount?: number
 ): string | undefined {
   const words = query.trim().split(/\s+/).filter(Boolean);
   const isSingleWord = words.length === 1;
   const isVagueWord = isSingleWord && ["important", "urgent", "meeting", "email", "message", "document", "file"].includes(words[0].toLowerCase());
+  
+  // Document-related keywords that suggest attachments might be relevant
+  const documentKeywords = ["contract", "agreement", "invoice", "receipt", "document", "attachment", "pdf", "file", "signed", "executed", "proposal", "quote", "estimate"];
+  const queryLower = query.toLowerCase();
+  const hasDocumentKeywords = documentKeywords.some(keyword => queryLower.includes(keyword));
 
   // No results hint
   if (resultCount === 0) {
     return "No results found. Try broader terms or check spelling.";
+  }
+
+  // Attachment-aware hint for document-related searches
+  if (attachmentCount !== undefined && attachmentCount > 0 && hasDocumentKeywords) {
+    const attachmentHint = attachmentCount === 1
+      ? `💡 Found 1 message with attachments. Use: zmail attachment list <message_id>`
+      : `💡 Found ${attachmentCount} messages with attachments. Use: zmail attachment list <message_id>`;
+    
+    // If we have truncated results hint, combine them
+    if (totalMatched > resultCount && totalMatched > (limit ?? 20)) {
+      return `${attachmentHint}\nShowing ${resultCount} of ${totalMatched} matches. Use --limit to see more.`;
+    }
+    return attachmentHint;
   }
 
   // Truncated results hint (only show if we have more results than displayed)
@@ -380,7 +445,10 @@ function getSearchHint(
 
   // Single-word query that's not a common vague word
   if (isSingleWord && words[0].length > 2 && !isVagueWord) {
-    return "Tip: Narrow results with from:name or subject:keyword";
+    const hint = hasDocumentKeywords
+      ? "Tip: Check for attachments with: zmail attachment list <message_id>"
+      : "Tip: Narrow results with from:name or subject:keyword";
+    return hint;
   }
 
   // Query has exact keyword feel (short, no spaces, or contains quotes)
@@ -405,10 +473,11 @@ function serializeJsonPayload(
   query?: string,
   resultCount?: number,
   limit?: number,
-  meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean }
+  meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean },
+  attachmentCount?: number
 ): string {
   const total = rows.length;
-  const hint = query ? getSearchHint(query, resultCount ?? total, total, limit, meta) : undefined;
+  const hint = query ? getSearchHint(query, resultCount ?? total, total, limit, meta, attachmentCount) : undefined;
   
   for (let includeCount = total; includeCount >= 0; includeCount--) {
     const visible = rows.slice(0, includeCount);
@@ -715,10 +784,18 @@ async function main() {
         fts: parsed.fts,
       });
 
-      let results: Array<SearchResult & { body?: string }> = run.results;
+      let results: Array<SearchResult & { body?: string; attachments?: AttachmentMetadata }> = run.results;
       if (effectiveDetail === "body") {
         results = hydrateBodies(db, run.results);
       }
+
+      // Hydrate attachment metadata for all results
+      const attachmentMetadata = hydrateAttachmentMetadata(db, run.results);
+      results = results.map((r) => ({
+        ...r,
+        attachments: attachmentMetadata.get(r.messageId),
+      }));
+      const messagesWithAttachments = Array.from(attachmentMetadata.values()).filter(meta => meta.count > 0).length;
 
       if (shouldOutputJson) {
         const rows = parsed.idsOnly
@@ -730,7 +807,8 @@ async function main() {
           parsed.query,
           results.length,
           effectiveLimit,
-          run._meta
+          run._meta,
+          messagesWithAttachments
         );
         console.log(json);
         break;
@@ -738,7 +816,7 @@ async function main() {
 
       if (results.length === 0) {
         console.log("No results found.");
-        const hint = getSearchHint(parsed.query, 0, 0, effectiveLimit, run._meta);
+        const hint = getSearchHint(parsed.query, 0, 0, effectiveLimit, run._meta, 0);
         if (hint) {
           console.log(`\n${hint}`);
         }
@@ -755,7 +833,10 @@ async function main() {
           const fromShort = from.length > 20 ? from.slice(0, 17) + "..." : from.padEnd(20);
           const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
           const idShort = r.messageId.length > 34 ? r.messageId.slice(0, 31) + "..." : r.messageId;
-          console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${idShort}`);
+          const attachmentIndicator = r.attachments && r.attachments.count > 0 
+            ? ` 📎${r.attachments.count}` 
+            : "";
+          console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${idShort}${attachmentIndicator}`);
         }
       } else {
         console.log("  DATE        FROM                 SUBJECT                          SNIPPET");
@@ -767,12 +848,15 @@ async function main() {
           const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
           const snippetClean = r.snippet.replace(/<[^>]+>/g, "").trim();
           const snippetShort = snippetClean.length > 30 ? snippetClean.slice(0, 27) + "..." : snippetClean;
-          console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}`);
+          const attachmentIndicator = r.attachments && r.attachments.count > 0 
+            ? ` 📎${r.attachments.count}` 
+            : "";
+          console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}${attachmentIndicator}`);
         }
       }
       
       // Show actionable hints after results (only in TTY, not JSON)
-      const hint = getSearchHint(parsed.query, results.length, results.length, effectiveLimit, run._meta);
+      const hint = getSearchHint(parsed.query, results.length, results.length, effectiveLimit, run._meta, messagesWithAttachments);
       if (hint) {
         console.log(`\n${hint}`);
       }

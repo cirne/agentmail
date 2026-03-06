@@ -125,6 +125,8 @@ See [`docs/MCP.md`](docs/MCP.md) for MCP server documentation and tool reference
 
 Search uses hybrid (semantic + FTS) by default for comprehensive results. Use `--fts` for exact keyword matching only.
 
+Search results include attachment metadata (count and file types) in JSON output, and visual indicators (📎) in formatted table output. For document-related queries (contract, invoice, receipt, etc.), hints suggest checking attachments with `zmail attachment list <message_id>`.
+
 ## Configuration
 
 zmail stores configuration in `~/.zmail/` (or `$ZMAIL_HOME` if set):

@@ -43,6 +43,8 @@ Search emails using hybrid search (semantic + FTS5) by default. Returns matching
 
 **Returns:** JSON array of message objects with `message_id`, `from`, `to`, `subject`, `date`, `snippet`, etc.
 
+**Note:** CLI search results include attachment metadata (`attachments` count and `attachmentTypes` array). MCP `search_mail` currently returns basic message fields; use `list_attachments` tool to check for attachments.
+
 **Example:**
 ```json
 {
