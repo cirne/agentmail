@@ -10,7 +10,9 @@
     "install-cli": "tsx scripts/install-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "publish:alpha": "bash scripts/publish.sh latest",
+    "publish:beta": "bash scripts/publish.sh beta"
   },
   "type": "module",
   "engines": { "node": ">=22" },
