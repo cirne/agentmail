@@ -116,6 +116,25 @@ The workflow will automatically build, publish to GitHub Packages, and create a 
 
 ---
 
+## Install script
+
+A bash install script (`install.sh`) is available in the repository root for easy installation:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
+```
+
+The script:
+- Checks for Node.js 22+ requirement
+- Configures npm for GitHub Packages (`@cirne:registry`)
+- Guides user through GitHub PAT authentication
+- Installs `@cirne/zmail` globally
+- Verifies installation
+
+This provides a one-command install experience while handling the GitHub Packages authentication flow.
+
+---
+
 ## Version expectations (current)
 
 - **If we stay on Bun (npm package, run with Bun):** “Requires Bun 1.x. Install with `npm i -g @cirne/zmail` (Node 18+ for npm) or `bun install -g @cirne/zmail`.”

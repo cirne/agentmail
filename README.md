@@ -14,7 +14,12 @@ Modern email systems are human-first — designed around inbox browsing and manu
 
 1. **Install**
    ```bash
-   bun install
+   curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
+   ```
+   
+   Or for development:
+   ```bash
+   npm install
    ```
 
 2. **Run interactive setup**
