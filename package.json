@@ -1,6 +1,6 @@
 {
   "name": "@cirne/zmail",
-  "version": "0.1.0",
+  "version": "0.1.0-alpha.20260306.135126",
   "description": "Agent-first email system — sync, index, and search email for AI agents",
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -15,8 +15,12 @@
     "publish:beta": "bash scripts/publish.sh beta"
   },
   "type": "module",
-  "engines": { "node": ">=20" },
-  "bin": { "zmail": "dist/index.js" },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "zmail": "dist/index.js"
+  },
   "dependencies": {
     "@cedrugs/pdf-parse": "^1.0.0",
     "@lancedb/lancedb": "latest",
