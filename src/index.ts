@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 // Main entrypoint — routes to CLI commands or starts sync service.
 // Help and setup are handled here so they work without loading config (no env required).
 
