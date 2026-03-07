@@ -8,7 +8,7 @@ import { who } from "~/search/who";
 import { logger } from "~/lib/logger";
 import { extractAndCache } from "~/attachments";
 import { config } from "~/lib/config";
-import { getStatus } from "~/lib/status";
+import { getStatus, formatTimeAgo } from "~/lib/status";
 
 /**
  * Normalizes a message/thread ID to ensure it's wrapped in angle brackets.
@@ -292,15 +292,24 @@ export function createMcpServer() {
 
   server.tool(
     "get_status",
-    "Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS/semantic counts), and date range of synced messages.",
+    "Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS/semantic counts), date range of synced messages, and freshness (time since latest mail and last sync, human + ISO 8601 duration).",
     {},
     async () => {
       const status = getStatus();
+      const latestMailAgo = formatTimeAgo(status.dateRange?.latest ?? null);
+      const lastSyncAgo = status.sync.isRunning ? null : formatTimeAgo(status.sync.lastSyncAt);
+      const output = {
+        ...status,
+        freshness: {
+          latestMailAgo: latestMailAgo ?? null,
+          lastSyncAgo: lastSyncAgo ?? null,
+        },
+      };
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(status, null, 2),
+            text: JSON.stringify(output, null, 2),
           },
         ],
       };

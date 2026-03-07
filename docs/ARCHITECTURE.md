@@ -483,13 +483,13 @@ This replaces timestamp-based staleness detection. PID checks are instantaneous 
 
 ---
 
-### ADR-021: Schema Drift Handling — Detect and Rebuild Guidance
+### ADR-021: Schema Drift Handling — Auto-Rebuild from Maildir
 
-**Decision:** On DB open, the app performs a schema-drift preflight that checks required columns on existing tables. If required columns are missing, startup fails with a clear remediation message and recommends a full local data rebuild (`rm -rf ~/.zmail/data/` + resync).
+**Decision:** On CLI startup, the app checks `user_version` against the current schema version. If the DB has an older version, the app automatically rebuilds the index from the local maildir cache: deletes the DB and vectors, creates a fresh DB, re-indexes all `.eml` files from `maildir/cur/`, and runs embedding/indexing. No manual resync from IMAP is required.
 
-**Rationale:** This project intentionally avoids in-app migrations for existing DBs. `CREATE TABLE IF NOT EXISTS` keeps fresh bootstraps simple but does not mutate older tables. Drift detection prevents opaque runtime SQLite errors (for example missing `messages.embedding_state`) and gives a deterministic recovery path.
+**Rationale:** This project intentionally avoids in-app migrations for existing DBs. `CREATE TABLE IF NOT EXISTS` keeps fresh bootstraps simple but does not mutate older tables. The raw maildir is the durable artifact (ADR-002); rebuilding from it is faster than re-syncing from IMAP and avoids credential/network dependency during schema upgrades.
 
-**Result:** Fresh environments bootstrap directly from source schema, while stale local DBs fail fast with actionable rebuild instructions instead of partial runtime failures.
+**Result:** Fresh environments bootstrap directly from source schema. Stale local DBs trigger an automatic rebuild from maildir (typically under 20s for moderate mailboxes). If maildir is empty or missing, rebuild completes with 0 messages and the user can run `zmail sync` to fetch from IMAP.
 
 ---
 

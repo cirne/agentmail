@@ -52,6 +52,11 @@ describe("CLI output formats (ADR-022)", () => {
   const originalZmailHome = process.env.ZMAIL_HOME;
   const testHome = join(tmpdir(), "zmail-output-format-test-" + Date.now());
 
+  const baseEnv = (): Record<string, string> => ({
+    ZMAIL_HOME: testHome,
+    ZMAIL_OPENAI_API_KEY: "sk-dummy", // Rebuild/indexing checks for key; dummy avoids throw when no messages
+  });
+
   beforeEach(() => {
     process.env.ZMAIL_HOME = testHome;
     mkdirSync(testHome, { recursive: true });
@@ -84,7 +89,7 @@ describe("CLI output formats (ADR-022)", () => {
   describe("search command", () => {
     it("accepts --text flag without error", async () => {
       // Test that --text flag is parsed correctly (doesn't throw "unknown flag" error)
-      const { stderr } = await runZmail(["search", "test", "--text"], { ZMAIL_HOME: testHome });
+      const { stderr } = await runZmail(["search", "test", "--text"], baseEnv());
       // Should not have "Unknown flag" error
       expect(stderr).not.toContain("Unknown flag: --text");
       // May fail for other reasons (no config, no DB) but flag parsing should work
@@ -93,14 +98,14 @@ describe("CLI output formats (ADR-022)", () => {
     it("--ids-only flag forces JSON output format", async () => {
       // --ids-only should force JSON even without --json flag
       // This is tested by checking that the flag is accepted
-      const { stderr } = await runZmail(["search", "test", "--ids-only"], { ZMAIL_HOME: testHome });
+      const { stderr } = await runZmail(["search", "test", "--ids-only"], baseEnv());
       expect(stderr).not.toContain("Unknown flag");
     });
   });
 
   describe("who command", () => {
     it("defaults to JSON output", async () => {
-      const { stdout } = await runZmail(["who", "test"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["who", "test"], baseEnv());
       expect(isJson(stdout.trim())).toBeTruthy();
       const parsed = JSON.parse(stdout.trim());
       expect(parsed).toHaveProperty("query");
@@ -108,7 +113,7 @@ describe("CLI output formats (ADR-022)", () => {
     });
 
     it("outputs text with --text flag", async () => {
-      const { stdout } = await runZmail(["who", "test", "--text"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["who", "test", "--text"], baseEnv());
       expect(isJson(stdout.trim())).toBeFalsy();
       expect(stdout.includes("No matching people") || stdout.includes("People matching")).toBeTruthy();
     });
@@ -116,14 +121,14 @@ describe("CLI output formats (ADR-022)", () => {
 
   describe("attachment list command", () => {
     it("defaults to JSON output", async () => {
-      const { stdout } = await runZmail(["attachment", "list", "<test@example.com>"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["attachment", "list", "<test@example.com>"], baseEnv());
       expect(isJson(stdout.trim())).toBeTruthy();
       const parsed = JSON.parse(stdout.trim());
       expect(Array.isArray(parsed)).toBeTruthy();
     });
 
     it("outputs text with --text flag", async () => {
-      const { stdout } = await runZmail(["attachment", "list", "<test@example.com>", "--text"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["attachment", "list", "<test@example.com>", "--text"], baseEnv());
       expect(isJson(stdout.trim())).toBeFalsy();
       expect(stdout.includes("No attachments") || stdout.includes("Attachments for")).toBeTruthy();
     });
@@ -131,13 +136,13 @@ describe("CLI output formats (ADR-022)", () => {
 
   describe("thread command", () => {
     it("defaults to text output", async () => {
-      const { stdout } = await runZmail(["thread", "<test@example.com>"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["thread", "<test@example.com>"], baseEnv());
       // With no messages, should output empty or error, but not JSON
       expect(isJson(stdout.trim())).toBeFalsy();
     });
 
     it("outputs JSON with --json flag", async () => {
-      const { stdout } = await runZmail(["thread", "<test@example.com>", "--json"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["thread", "<test@example.com>", "--json"], baseEnv());
       // Even with no results, should be valid JSON (empty array)
       const trimmed = stdout.trim();
       expect(trimmed === "[]" || isJson(trimmed)).toBeTruthy();
@@ -146,13 +151,13 @@ describe("CLI output formats (ADR-022)", () => {
 
   describe("status command", () => {
     it("defaults to text output", async () => {
-      const { stdout } = await runZmail(["status"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["status"], baseEnv());
       expect(isJson(stdout.trim())).toBeFalsy();
       expect(stdout.includes("Sync:") || stdout.includes("Indexing:")).toBeTruthy();
     });
 
     it("outputs JSON with --json flag", async () => {
-      const { stdout } = await runZmail(["status", "--json"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["status", "--json"], baseEnv());
       expect(isJson(stdout.trim())).toBeTruthy();
       const parsed = JSON.parse(stdout.trim());
       expect(parsed).toHaveProperty("sync");
@@ -163,13 +168,13 @@ describe("CLI output formats (ADR-022)", () => {
 
   describe("stats command", () => {
     it("defaults to text output", async () => {
-      const { stdout } = await runZmail(["stats"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["stats"], baseEnv());
       expect(isJson(stdout.trim())).toBeFalsy();
       expect(stdout.includes("Database Statistics") || stdout.includes("Total messages")).toBeTruthy();
     });
 
     it("outputs JSON with --json flag", async () => {
-      const { stdout } = await runZmail(["stats", "--json"], { ZMAIL_HOME: testHome });
+      const { stdout } = await runZmail(["stats", "--json"], baseEnv());
       expect(isJson(stdout.trim())).toBeTruthy();
       const parsed = JSON.parse(stdout.trim());
       expect(parsed).toHaveProperty("totalMessages");
@@ -180,21 +185,21 @@ describe("CLI output formats (ADR-022)", () => {
 
   describe("help text consistency", () => {
     it("search --help mentions --text flag", async () => {
-      const { stderr, exitCode } = await runZmail(["search", "--help"], { ZMAIL_HOME: testHome });
+      const { stderr, exitCode } = await runZmail(["search", "--help"], baseEnv());
       expect(exitCode).toBe(0);
       expect(stderr).toContain("--text");
       expect(stderr).toContain("default: JSON");
     });
 
     it("who --help mentions --text flag", async () => {
-      const { stderr, exitCode } = await runZmail(["who", "--help"], { ZMAIL_HOME: testHome });
+      const { stderr, exitCode } = await runZmail(["who", "--help"], baseEnv());
       expect(exitCode).toBe(0);
       expect(stderr).toContain("--text");
       expect(stderr).toContain("default: JSON");
     });
 
     it("thread --help mentions --json flag", async () => {
-      const { stderr, exitCode } = await runZmail(["thread", "--help"], { ZMAIL_HOME: testHome });
+      const { stderr, exitCode } = await runZmail(["thread", "--help"], baseEnv());
       expect(exitCode).toBe(0);
       expect(stderr).toContain("--json");
       expect(stderr).toContain("default: text");

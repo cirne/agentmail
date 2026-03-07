@@ -3,11 +3,16 @@ import { homedir } from "os";
 import { existsSync, readFileSync } from "fs";
 
 /** Canonical app root: ~/.zmail (cross-platform via os.homedir()). Can be overridden via ZMAIL_HOME env var. */
-export const ZMAIL_HOME = process.env.ZMAIL_HOME || join(homedir(), ".zmail");
+export function getZmailHome(): string {
+  return process.env.ZMAIL_HOME || join(homedir(), ".zmail");
+}
+
+/** Resolved at module load; use getZmailHome() when ZMAIL_HOME may change (e.g. in tests). */
+export const ZMAIL_HOME = getZmailHome();
 
 /** Load .env file from ZMAIL_HOME/.env and merge into process.env. */
 function loadEnvFile() {
-  const envPath = join(ZMAIL_HOME, ".env");
+  const envPath = join(getZmailHome(), ".env");
   if (!existsSync(envPath)) return;
   
   const content = readFileSync(envPath, "utf8");
@@ -47,7 +52,7 @@ interface ConfigJson {
 
 /** Load config.json from ZMAIL_HOME/config.json. Returns empty object if missing. */
 function loadConfigJson(): ConfigJson {
-  const configPath = join(ZMAIL_HOME, "config.json");
+  const configPath = join(getZmailHome(), "config.json");
   if (!existsSync(configPath)) return {};
   
   try {
@@ -93,7 +98,9 @@ export const config = {
   get openai() {
     return { apiKey: getOpenAIKey() };
   },
-  dataDir: join(ZMAIL_HOME, "data"),
+  get dataDir() {
+    return join(getZmailHome(), "data");
+  },
 
   // Derived paths
   get dbPath() {

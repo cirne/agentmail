@@ -1,6 +1,11 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { mkdtempSync, rmSync } from "fs";
+import { join } from "path";
+import { tmpdir } from "os";
 import type { SqliteDatabase } from "./index";
 import { createTestDb, insertTestMessage } from "./test-helpers";
+import { checkSchemaVersion, getDb, closeDb } from "./index";
+import { SCHEMA_VERSION } from "./schema";
 
 describe("database schema", () => {
   let db: SqliteDatabase;
@@ -197,6 +202,57 @@ describe("database schema", () => {
       expect(names).toContain("idx_messages_folder");
       expect(names).toContain("idx_attachments_msg");
       expect(names).toContain("idx_messages_embed_state");
+    });
+  });
+
+  describe("schema version", () => {
+    let tempDir: string;
+    let originalEnv: string | undefined;
+
+    beforeEach(() => {
+      tempDir = mkdtempSync(join(tmpdir(), "zmail-test-"));
+      originalEnv = process.env.ZMAIL_HOME;
+      process.env.ZMAIL_HOME = tempDir;
+      closeDb(); // Close any existing DB connection
+    });
+
+    afterEach(() => {
+      closeDb();
+      if (originalEnv !== undefined) {
+        process.env.ZMAIL_HOME = originalEnv;
+      } else {
+        delete process.env.ZMAIL_HOME;
+      }
+      rmSync(tempDir, { recursive: true, force: true });
+    });
+
+    it("checkSchemaVersion returns false when no DB file exists", () => {
+      expect(checkSchemaVersion()).toBe(false);
+    });
+
+    it("checkSchemaVersion returns false when DB has correct user_version", () => {
+      // Create DB with correct version
+      const db = getDb();
+      const result = db.prepare("PRAGMA user_version").get() as { user_version: number };
+      expect(result.user_version).toBe(SCHEMA_VERSION);
+      closeDb();
+
+      expect(checkSchemaVersion()).toBe(false);
+    });
+
+    it("checkSchemaVersion returns true when DB has lower user_version", () => {
+      // Create DB and set old version
+      const db = getDb();
+      db.exec(`PRAGMA user_version = ${SCHEMA_VERSION - 1}`);
+      closeDb();
+
+      expect(checkSchemaVersion()).toBe(true);
+    });
+
+    it("getDb sets user_version to SCHEMA_VERSION on fresh DB", () => {
+      const db = getDb();
+      const result = db.prepare("PRAGMA user_version").get() as { user_version: number };
+      expect(result.user_version).toBe(SCHEMA_VERSION);
     });
   });
 });

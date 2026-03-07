@@ -9,6 +9,57 @@ import { config, requireImapConfig } from "~/lib/config";
 import { logger } from "~/lib/logger";
 import { ImapFlow } from "imapflow";
 
+export interface TimeAgo {
+  human: string;
+  duration: string; // ISO 8601 duration (P1DT2H30M)
+}
+
+/**
+ * Format time since a given ISO date as human-readable + ISO 8601 duration.
+ * Returns null if no valid date.
+ */
+export function formatTimeAgo(isoDate: string | null): TimeAgo | null {
+  if (!isoDate) return null;
+  const date = isoDate.includes("Z") || isoDate.includes("+")
+    ? new Date(isoDate)
+    : new Date(isoDate.replace(" ", "T") + "Z");
+  const ms = Date.now() - date.getTime();
+  if (ms < 0) return null; // future date
+  const sec = Math.floor(ms / 1000);
+  const min = Math.floor(sec / 60);
+  const hr = Math.floor(min / 60);
+  const day = Math.floor(hr / 24);
+  const week = Math.floor(day / 7);
+  const month = Math.floor(day / 30);
+  const year = Math.floor(day / 365);
+
+  let human: string;
+  let duration: string;
+  if (sec < 60) {
+    human = "just now";
+    duration = "PT0S";
+  } else if (min < 60) {
+    human = `${min}m ago`;
+    duration = `PT${min}M`;
+  } else if (hr < 24) {
+    human = `${hr}h ago`;
+    duration = `PT${hr}H`;
+  } else if (day < 7) {
+    human = `${day}d ago`;
+    duration = `P${day}D`;
+  } else if (week < 4) {
+    human = `${week}w ago`;
+    duration = `P${week}W`;
+  } else if (month < 12) {
+    human = `${month}mo ago`;
+    duration = `P${month * 30}D`; // approximate
+  } else {
+    human = `${year}y ago`;
+    duration = `P${year}Y`;
+  }
+  return { human, duration };
+}
+
 export interface StatusData {
   sync: {
     isRunning: boolean;

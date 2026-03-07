@@ -7,7 +7,7 @@ import { getDb } from "~/db";
 import { acquireLock, releaseLock } from "~/lib/process-lock";
 import { parseRawMessage } from "./parse-message";
 import { parseSinceToDate } from "./parse-since";
-import { createFileLogger, SYNC_LOG_PATH, type FileLogger } from "~/lib/file-logger";
+import { createFileLogger, SYNC_LOG_PATH, setLogger, type FileLogger } from "~/lib/logger";
 import { withTimer } from "~/lib/timer";
 
 /** Mailbox to sync: All Mail for Gmail (per ADR-011), INBOX for others. */
@@ -101,124 +101,131 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
   const syncLogFilename = "sync";
   const fileLogger = createFileLogger(syncLogFilename);
   
-  // Write run separator as the VERY FIRST thing (before any checks, config, etc.)
-  // This ensures even early exits (lock contention, config errors) are clearly delineated
-  fileLogger.writeSeparator(process.pid);
+  // Replace global logger with file logger for this sync operation
+  const restoreLogger = setLogger(fileLogger);
   
-  // Phase timing instrumentation
-  const phaseTimings: Record<string, number> = {};
-  const phaseMs = (label: string): void => {
-    const elapsed = Date.now() - startTime;
-    phaseTimings[label] = elapsed;
-    fileLogger.info("Phase", { phase: label, elapsedMs: elapsed });
-  };
-  
-  // Timer helper configured with sync logger
-  const timer = <T>(
-    label: string,
-    fn: () => Promise<T>,
-    options?: { logSlow?: number; logLevel?: 'debug' | 'info' | 'warn' }
-  ) => withTimer(label, fn, { logger: fileLogger, ...options });
-  
-  phaseMs("runSync_entry");
-  
-  const imap = requireImapConfig();
-  if (!imap.user || !imap.password) {
-    fileLogger.info("Config error: imap.user and imap.password required");
-    fileLogger.close();
-    throw new Error("imap.user and imap.password are required for sync. Run 'zmail setup' or set in ~/.zmail/config.json and .env");
-  }
-
-  const sinceSpec = options?.since ?? config.sync.defaultSince;
-  const fromDate = parseSinceToDate(sinceSpec);
-  fileLogger.info("Sync starting", { user: imap.user, fromDate });
-
-  // Pre-check: if sync is already running, skip connect entirely
-  const db = getDb();
-  
-  // Store target start date and capture current earliest date for progress tracking
-  // This ensures we only count NEW emails synced in this run, not pre-existing ones
-  const currentEarliest = db.prepare("SELECT earliest_synced_date FROM sync_summary WHERE id = 1").get() as
-    | { earliest_synced_date: string | null }
-    | undefined;
-  db.prepare(
-    "UPDATE sync_summary SET target_start_date = ?, sync_start_earliest_date = ? WHERE id = 1"
-  ).run(fromDate, currentEarliest?.earliest_synced_date ?? null);
-  const syncRunningCheck = db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1").get() as
-    | { is_running: number; owner_pid: number | null }
-    | undefined;
-  const isRunning = syncRunningCheck?.is_running === 1;
-  
-  if (isRunning) {
-    fileLogger.info("Sync already running, exiting", { ownerPid: syncRunningCheck.owner_pid });
-    const durationMs = Date.now() - startTime;
-    phaseMs("runSync_exit_early");
-    fileLogger.close();
-    return {
-      synced: 0,
-      messagesFetched: 0,
-      bytesDownloaded: 0,
-      durationMs,
-      bandwidthBytesPerSec: 0,
-      messagesPerMinute: 0,
-      logPath: SYNC_LOG_PATH,
-    };
-  }
-
-  ensureMaildir();
-
-  const sinceDate = new Date(fromDate + "T00:00:00Z");
-  if (isNaN(sinceDate.getTime())) {
-    throw new Error(`Invalid from date: ${fromDate}. Use --since 7d, 5w, 3m, 2y or set sync.defaultSince in config.json.`);
-  }
-
-  // Parallelize connect with lock acquisition
-  const client = new ImapFlow({
-    host: imap.host,
-    port: imap.port,
-    secure: imap.port === 993,
-    auth: { user: imap.user, pass: imap.password },
-    logger: false, // Keep sync output minimal; our logger reports start/complete/count
-    connectionTimeout: 10000, // 10s to establish connection
-    // NOTE: do not set socketTimeout — causes a segfault in Bun v1.1.38 on TLS sockets.
-    // Use JS-level Promise.race timeout around fetchAll instead (see below).
-  });
-  
-  phaseMs("connect_called");
-  const connectStartMs = Date.now() - startTime;
-  
-  // Start connect in parallel with lock acquisition
-  const connectPromise = client.connect();
-  const lockStartMs = Date.now() - startTime;
-  
-  // Acquire lock with PID-based ownership
-  const lockResult = acquireLock(db, "sync_summary", process.pid);
-  const lockDoneMs = Date.now() - startTime;
-  phaseMs("lock_acquired");
-  
-  if (!lockResult.acquired) {
-    fileLogger.info("Sync already running, exiting");
-    const durationMs = Date.now() - startTime;
-    phaseMs("runSync_exit_early");
-    fileLogger.close();
-    return {
-      synced: 0,
-      messagesFetched: 0,
-      bytesDownloaded: 0,
-      durationMs,
-      bandwidthBytesPerSec: 0,
-      messagesPerMinute: 0,
-      logPath: SYNC_LOG_PATH,
-    };
-  }
-  if (lockResult.takenOver) {
-    // Partial work is safe: sync_state.last_uid is correct,
-    // and message dedup prevents re-inserts
-    fileLogger.info("Recovered from crashed sync, resuming from last checkpoint");
-  }
-  
-  // Wait for connect to complete
   try {
+    // Write run separator as the VERY FIRST thing (before any checks, config, etc.)
+    // This ensures even early exits (lock contention, config errors) are clearly delineated
+    fileLogger.writeSeparator(process.pid);
+  
+    // Phase timing instrumentation
+    const phaseTimings: Record<string, number> = {};
+    const phaseMs = (label: string): void => {
+      const elapsed = Date.now() - startTime;
+      phaseTimings[label] = elapsed;
+      fileLogger.info("Phase", { phase: label, elapsedMs: elapsed });
+    };
+    
+    // Timer helper configured with sync logger
+    const timer = <T>(
+      label: string,
+      fn: () => Promise<T>,
+      options?: { logSlow?: number; logLevel?: 'debug' | 'info' | 'warn' }
+    ) => withTimer(label, fn, { logger: fileLogger, ...options });
+    
+    phaseMs("runSync_entry");
+    
+    const imap = requireImapConfig();
+    if (!imap.user || !imap.password) {
+      fileLogger.info("Config error: imap.user and imap.password required");
+      fileLogger.close();
+      restoreLogger();
+      throw new Error("imap.user and imap.password are required for sync. Run 'zmail setup' or set in ~/.zmail/config.json and .env");
+    }
+
+    const sinceSpec = options?.since ?? config.sync.defaultSince;
+    const fromDate = parseSinceToDate(sinceSpec);
+    fileLogger.info("Sync starting", { user: imap.user, fromDate });
+
+    // Pre-check: if sync is already running, skip connect entirely
+    const db = getDb();
+    
+    // Store target start date and capture current earliest date for progress tracking
+    // This ensures we only count NEW emails synced in this run, not pre-existing ones
+    const currentEarliest = db.prepare("SELECT earliest_synced_date FROM sync_summary WHERE id = 1").get() as
+      | { earliest_synced_date: string | null }
+      | undefined;
+    db.prepare(
+      "UPDATE sync_summary SET target_start_date = ?, sync_start_earliest_date = ? WHERE id = 1"
+    ).run(fromDate, currentEarliest?.earliest_synced_date ?? null);
+    const syncRunningCheck = db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1").get() as
+      | { is_running: number; owner_pid: number | null }
+      | undefined;
+    const isRunning = syncRunningCheck?.is_running === 1;
+    
+    if (isRunning) {
+      fileLogger.info("Sync already running, exiting", { ownerPid: syncRunningCheck.owner_pid });
+      const durationMs = Date.now() - startTime;
+      phaseMs("runSync_exit_early");
+      fileLogger.close();
+      restoreLogger();
+      return {
+        synced: 0,
+        messagesFetched: 0,
+        bytesDownloaded: 0,
+        durationMs,
+        bandwidthBytesPerSec: 0,
+        messagesPerMinute: 0,
+        logPath: SYNC_LOG_PATH,
+      };
+    }
+
+    ensureMaildir();
+
+    const sinceDate = new Date(fromDate + "T00:00:00Z");
+    if (isNaN(sinceDate.getTime())) {
+      throw new Error(`Invalid from date: ${fromDate}. Use --since 7d, 5w, 3m, 2y or set sync.defaultSince in config.json.`);
+    }
+
+    // Parallelize connect with lock acquisition
+    const client = new ImapFlow({
+      host: imap.host,
+      port: imap.port,
+      secure: imap.port === 993,
+      auth: { user: imap.user, pass: imap.password },
+      logger: false, // Keep sync output minimal; our logger reports start/complete/count
+      connectionTimeout: 10000, // 10s to establish connection
+      // NOTE: do not set socketTimeout — causes a segfault in Bun v1.1.38 on TLS sockets.
+      // Use JS-level Promise.race timeout around fetchAll instead (see below).
+    });
+    
+    phaseMs("connect_called");
+    const connectStartMs = Date.now() - startTime;
+    
+    // Start connect in parallel with lock acquisition
+    const connectPromise = client.connect();
+    const lockStartMs = Date.now() - startTime;
+    
+    // Acquire lock with PID-based ownership
+    const lockResult = acquireLock(db, "sync_summary", process.pid);
+    const lockDoneMs = Date.now() - startTime;
+    phaseMs("lock_acquired");
+    
+    if (!lockResult.acquired) {
+      fileLogger.info("Sync already running, exiting");
+      const durationMs = Date.now() - startTime;
+      phaseMs("runSync_exit_early");
+      fileLogger.close();
+      restoreLogger();
+      return {
+        synced: 0,
+        messagesFetched: 0,
+        bytesDownloaded: 0,
+        durationMs,
+        bandwidthBytesPerSec: 0,
+        messagesPerMinute: 0,
+        logPath: SYNC_LOG_PATH,
+      };
+    }
+    if (lockResult.takenOver) {
+      // Partial work is safe: sync_state.last_uid is correct,
+      // and message dedup prevents re-inserts
+      fileLogger.info("Recovered from crashed sync, resuming from last checkpoint");
+    }
+    
+    // Wait for connect to complete
+    try {
     await connectPromise;
     const connectDoneMs = Date.now() - startTime;
     phaseMs("connect_resolved");
@@ -239,13 +246,14 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       error: String(err),
       errorMessage: err instanceof Error ? err.message : String(err),
     });
-    releaseLock(db, "sync_summary");
-    fileLogger.close();
-    throw err; // Re-throw so outer catch handles it
-  }
-  
-  // Check TLS session resumption (Step 7)
-  try {
+      releaseLock(db, "sync_summary");
+      fileLogger.close();
+      restoreLogger();
+      throw err; // Re-throw so outer catch handles it
+    }
+    
+    // Check TLS session resumption (Step 7)
+    try {
     const socket = (client as any).socket;
     if (socket && typeof socket.getSession === 'function') {
       const session = socket.getSession();
@@ -253,13 +261,13 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     } else if (socket && typeof socket.isSessionReused === 'function') {
       fileLogger.info("TLS session", { sessionReused: socket.isSessionReused() });
     }
-  } catch (err) {
-    // Ignore errors accessing internal socket
-  }
+    } catch (err) {
+      // Ignore errors accessing internal socket
+    }
 
-  try {
-    const mailbox = config.sync.mailbox || getSyncMailbox(imap.host);
-    const excludeLabels = config.sync.excludeLabels; // lowercase
+    try {
+      const mailbox = config.sync.mailbox || getSyncMailbox(imap.host);
+      const excludeLabels = config.sync.excludeLabels; // lowercase
     
     // Step 2: STATUS check before SELECT
     // Read sync_state first to check if we can early-exit
@@ -271,9 +279,9 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       last_uid: Number(stateRow.last_uid),
     } : undefined;
     
-    // Call STATUS before acquiring mailbox lock
+      // Call STATUS before acquiring mailbox lock
       let statusResult: Awaited<ReturnType<typeof client.status>> | null = null;
-    try {
+      try {
       const { result, durationMs: statusRoundTripMs } = await timer(
         "STATUS",
         () => client.status(mailbox, { messages: true, uidNext: true, uidValidity: true })
@@ -338,25 +346,26 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
             totalMs: durationMs,
           });
           fileLogger.close();
+          restoreLogger();
           return result;
           }
         }
       }
-    } catch (err) {
-      // STATUS may not be supported or may fail - log and continue
-      fileLogger.warn("STATUS command failed, continuing with EXAMINE", { error: String(err) });
-    }
-    
-    // Use EXAMINE (read-only) instead of SELECT since we never modify messages
-    // EXAMINE is faster for Gmail's All Mail folder as it doesn't need to materialize write locks
-    const { result: lock, durationMs: examineMs } = await timer(
-      "EXAMINE",
-      () => client.getMailboxLock(mailbox, { readOnly: true })
-    );
-    phaseMs("examine_resolved");
-    fileLogger.info("Mailbox opened (EXAMINE)", { examineMs });
-    try {
-      const mailboxObj = client.mailbox;
+      } catch (err) {
+        // STATUS may not be supported or may fail - log and continue
+        fileLogger.warn("STATUS command failed, continuing with EXAMINE", { error: String(err) });
+      }
+      
+      // Use EXAMINE (read-only) instead of SELECT since we never modify messages
+      // EXAMINE is faster for Gmail's All Mail folder as it doesn't need to materialize write locks
+      const { result: lock, durationMs: examineMs } = await timer(
+        "EXAMINE",
+        () => client.getMailboxLock(mailbox, { readOnly: true })
+      );
+      phaseMs("examine_resolved");
+      fileLogger.info("Mailbox opened (EXAMINE)", { examineMs });
+      try {
+        const mailboxObj = client.mailbox;
       const uidvalidity = mailboxObj && typeof mailboxObj === "object" ? Number(mailboxObj.uidValidity ?? 0) : 0;
       
       // Incremental sync (ADR-003): use UID range search when we have a checkpoint
@@ -560,6 +569,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           totalMs: durationMs,
         });
         fileLogger.close();
+        restoreLogger();
         return result;
       }
 
@@ -578,6 +588,130 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       // Use fetchAll() for backward sync - guarantees no gaps/duplicates with explicit UID arrays
       // Pipelining (fetch() async generator) had issues with sequence set parsing causing duplicate fetches
       const usePipelining = false; // Disabled: fetchAll() is simpler and more reliable
+      
+      // Helper function to process a single message (declared before loop so it can be used in both branches)
+      const processMessage = async (msg: any): Promise<{ isDuplicate: boolean; isNew: boolean }> => {
+        const raw = msg.source;
+        if (!raw || !Buffer.isBuffer(raw)) {
+          return { isDuplicate: false, isNew: false };
+        }
+
+        messagesFetched++;
+        bytesDownloaded += Buffer.byteLength(raw);
+
+        const labelSet = msg.labels != null ? (msg.labels instanceof Set ? msg.labels : new Set(msg.labels as string[])) : new Set<string>();
+        const labelsArr = [...labelSet];
+        const hasExcluded = excludeLabels.length > 0 && labelsArr.some((l) => excludeLabels.includes(String(l).toLowerCase()));
+        if (hasExcluded) {
+          return { isDuplicate: false, isNew: false }; // Trash, Spam, etc. — skip storing (still counted in messagesFetched/bytesDownloaded)
+        }
+
+        const uid = msg.uid;
+        let parsed;
+        try {
+          // Hard 5s timeout: a stuck parser never blocks the full sync.
+          const { result, durationMs: parseMs } = await timer(
+            "parse",
+            () => Promise.race([
+              parseRawMessage(Buffer.from(raw)),
+              new Promise<never>((_, reject) =>
+                setTimeout(() => reject(new Error("parse timeout")), 5_000)
+              ),
+            ]),
+            { logSlow: 500, logLevel: 'debug' }
+          );
+          parsed = result;
+          if (parseMs > 500) {
+            fileLogger.debug("Slow parse", { uid, parseMs, bytes: Buffer.byteLength(raw) });
+          }
+        } catch (err) {
+          fileLogger.warn("Parse failed, skipping message", { uid, bytes: Buffer.byteLength(raw), error: String(err) });
+          return { isDuplicate: false, isNew: false };
+        }
+
+        const { result: existing, durationMs: duplicateCheckDuration } = await timer(
+          "duplicate_check",
+          async () => db.prepare("SELECT 1 FROM messages WHERE message_id = ?").get(parsed.messageId)
+        );
+        
+        if (existing) {
+          fileLogger.debug("Skipping duplicate", {
+            uid,
+            messageId: parsed.messageId,
+            date: parsed.date,
+            checkDurationMs: duplicateCheckDuration,
+          });
+          return { isDuplicate: true, isNew: false }; // Already in DB; skip write and insert (saves disk I/O and avoids overwriting)
+        }
+        
+        synced++; // Increment before logging so order is accurate
+
+        const filename = safeFilename(uid, parsed.messageId);
+        const relPath = join("cur", filename);
+        const absPath = join(config.maildirPath, relPath);
+        const { durationMs: writeMs } = await timer(
+          "disk_write",
+          async () => {
+            writeFileSync(absPath, raw, "binary");
+          },
+          { logSlow: 100, logLevel: 'debug' }
+        );
+        if (writeMs > 100) {
+          fileLogger.debug("Slow disk write", { uid, writeMs, bytes: Buffer.byteLength(raw) });
+        }
+
+        const threadId = parsed.messageId;
+        const labelsJson = JSON.stringify(labelsArr);
+        db.prepare(
+          `INSERT INTO messages (
+            message_id, thread_id, folder, uid, labels, from_address, from_name,
+            to_addresses, cc_addresses, subject, date, body_text, raw_path, embedding_state
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+        ).run(
+          parsed.messageId,
+          threadId,
+          mailbox,
+          uid,
+          labelsJson,
+          parsed.fromAddress,
+          parsed.fromName,
+          JSON.stringify(parsed.toAddresses),
+          JSON.stringify(parsed.ccAddresses),
+          parsed.subject,
+          parsed.date,
+          parsed.bodyText,
+          relPath,
+        );
+
+        db.prepare(
+          `INSERT OR REPLACE INTO threads (thread_id, subject, participant_count, message_count, last_message_at)
+           VALUES (?, ?, 1, 1, ?)`
+        ).run(threadId, parsed.subject, parsed.date);
+
+        // Process attachments
+        if (parsed.attachments.length > 0) {
+          const attachmentsDir = join(config.maildirPath, "attachments", parsed.messageId);
+          mkdirSync(attachmentsDir, { recursive: true });
+
+          for (const att of parsed.attachments) {
+            const uniqueFilename = ensureUniqueFilename(attachmentsDir, att.filename);
+            const attachmentPath = join(attachmentsDir, uniqueFilename);
+            writeFileSync(attachmentPath, att.content, "binary");
+
+            const storedPath = join("attachments", parsed.messageId, uniqueFilename);
+            db.prepare(
+              `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
+               VALUES (?, ?, ?, ?, ?, NULL)`
+            ).run(parsed.messageId, att.filename, att.mimeType, att.size, storedPath);
+          }
+        }
+
+        // synced++ moved earlier (before logging)
+        if (!earliestDate || parsed.date < earliestDate) earliestDate = parsed.date;
+        if (!latestDate || parsed.date > latestDate) latestDate = parsed.date;
+        
+        return { isDuplicate: false, isNew: true };
+      };
       
       for (let i = 0; i < uids.length; i += batchSize) {
         const batch = uids.slice(i, i + batchSize);
@@ -650,130 +784,6 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           }
         }
         
-        // Helper function to process a single message
-        async function processMessage(msg: any): Promise<{ isDuplicate: boolean; isNew: boolean }> {
-          const raw = msg.source;
-          if (!raw || !Buffer.isBuffer(raw)) {
-            return { isDuplicate: false, isNew: false };
-          }
-
-          messagesFetched++;
-          bytesDownloaded += Buffer.byteLength(raw);
-
-          const labelSet = msg.labels != null ? (msg.labels instanceof Set ? msg.labels : new Set(msg.labels as string[])) : new Set<string>();
-          const labelsArr = [...labelSet];
-          const hasExcluded = excludeLabels.length > 0 && labelsArr.some((l) => excludeLabels.includes(String(l).toLowerCase()));
-          if (hasExcluded) {
-            return { isDuplicate: false, isNew: false }; // Trash, Spam, etc. — skip storing (still counted in messagesFetched/bytesDownloaded)
-          }
-
-          const uid = msg.uid;
-          let parsed;
-          try {
-            // Hard 5s timeout: a stuck parser never blocks the full sync.
-            const { result, durationMs: parseMs } = await timer(
-              "parse",
-              () => Promise.race([
-                parseRawMessage(Buffer.from(raw)),
-                new Promise<never>((_, reject) =>
-                  setTimeout(() => reject(new Error("parse timeout")), 5_000)
-                ),
-              ]),
-              { logSlow: 500, logLevel: 'debug' }
-            );
-            parsed = result;
-            if (parseMs > 500) {
-              fileLogger.debug("Slow parse", { uid, parseMs, bytes: Buffer.byteLength(raw) });
-            }
-          } catch (err) {
-            fileLogger.warn("Parse failed, skipping message", { uid, bytes: Buffer.byteLength(raw), error: String(err) });
-            return { isDuplicate: false, isNew: false };
-          }
-
-          const { result: existing, durationMs: duplicateCheckDuration } = await timer(
-            "duplicate_check",
-            async () => db.prepare("SELECT 1 FROM messages WHERE message_id = ?").get(parsed.messageId)
-          );
-          
-          if (existing) {
-            fileLogger.debug("Skipping duplicate", {
-              uid,
-              messageId: parsed.messageId,
-              date: parsed.date,
-              checkDurationMs: duplicateCheckDuration,
-            });
-            return { isDuplicate: true, isNew: false }; // Already in DB; skip write and insert (saves disk I/O and avoids overwriting)
-          }
-          
-          synced++; // Increment before logging so order is accurate
-
-          const filename = safeFilename(uid, parsed.messageId);
-          const relPath = join("cur", filename);
-          const absPath = join(config.maildirPath, relPath);
-          const { durationMs: writeMs } = await timer(
-            "disk_write",
-            async () => {
-              writeFileSync(absPath, raw, "binary");
-            },
-            { logSlow: 100, logLevel: 'debug' }
-          );
-          if (writeMs > 100) {
-            fileLogger.debug("Slow disk write", { uid, writeMs, bytes: Buffer.byteLength(raw) });
-          }
-
-          const threadId = parsed.messageId;
-          const labelsJson = JSON.stringify(labelsArr);
-          db.prepare(
-            `INSERT INTO messages (
-              message_id, thread_id, folder, uid, labels, from_address, from_name,
-              to_addresses, cc_addresses, subject, date, body_text, raw_path, embedding_state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
-          ).run(
-            parsed.messageId,
-            threadId,
-            mailbox,
-            uid,
-            labelsJson,
-            parsed.fromAddress,
-            parsed.fromName,
-            JSON.stringify(parsed.toAddresses),
-            JSON.stringify(parsed.ccAddresses),
-            parsed.subject,
-            parsed.date,
-            parsed.bodyText,
-            relPath,
-          );
-
-          db.prepare(
-            `INSERT OR REPLACE INTO threads (thread_id, subject, participant_count, message_count, last_message_at)
-             VALUES (?, ?, 1, 1, ?)`
-          ).run(threadId, parsed.subject, parsed.date);
-
-          // Process attachments
-          if (parsed.attachments.length > 0) {
-            const attachmentsDir = join(config.maildirPath, "attachments", parsed.messageId);
-            mkdirSync(attachmentsDir, { recursive: true });
-
-            for (const att of parsed.attachments) {
-              const uniqueFilename = ensureUniqueFilename(attachmentsDir, att.filename);
-              const attachmentPath = join(attachmentsDir, uniqueFilename);
-              writeFileSync(attachmentPath, att.content, "binary");
-
-              const storedPath = join("attachments", parsed.messageId, uniqueFilename);
-              db.prepare(
-                `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
-                 VALUES (?, ?, ?, ?, ?, NULL)`
-              ).run(parsed.messageId, att.filename, att.mimeType, att.size, storedPath);
-            }
-          }
-
-          // synced++ moved earlier (before logging)
-          if (!earliestDate || parsed.date < earliestDate) earliestDate = parsed.date;
-          if (!latestDate || parsed.date > latestDate) latestDate = parsed.date;
-          
-          return { isDuplicate: false, isNew: true };
-        }
-        
         // Log progress every 100 messages or at batch boundaries
         if (synced % 100 === 0 && synced > 0) {
           fileLogger.info("Sync progress", {
@@ -839,20 +849,26 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       // This ensures results are always current and improve as more data is indexed.
 
       fileLogger.close();
+      restoreLogger(); // Restore original logger
 
       return result;
     } finally {
       lock.release();
     }
-  } catch (err) {
-    releaseLock(db, "sync_summary");
-    fileLogger.error("Sync failed", { error: String(err) });
-    fileLogger.close();
-    throw err;
+    } catch (err) {
+      releaseLock(db, "sync_summary");
+      fileLogger.error("Sync failed", { error: String(err) });
+      fileLogger.close();
+      restoreLogger(); // Restore original logger even on error
+      throw err;
+    } finally {
+      // Force-close the connection. On a stalled/timed-out socket, logout hangs
+      // indefinitely, so we close unconditionally and let the OS clean up TCP state.
+      client.close();
+    }
   } finally {
-    // Force-close the connection. On a stalled/timed-out socket, logout hangs
-    // indefinitely, so we close unconditionally and let the OS clean up TCP state.
-    client.close();
+    // Ensure logger is always restored even if something goes wrong
+    restoreLogger();
   }
 }
 

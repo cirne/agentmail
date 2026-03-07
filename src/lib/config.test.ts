@@ -52,10 +52,12 @@ describe("config", () => {
       expect(config.imap.port).toBe(993);
     });
 
-    it("defaults dataDir to <homedir>/.zmail/data", () => {
+    it("defaults dataDir to <homedir>/.zmail/data when ZMAIL_HOME unset", () => {
+      delete process.env.ZMAIL_HOME;
       expect(config.dataDir).toContain(".zmail/data");
       expect(config.dataDir).not.toContain("~");
       expect(config.dataDir).toMatch(/^\//); // absolute path
+      process.env.ZMAIL_HOME = testHome; // restore for afterEach
     });
 
     it("defaultSince is set (exact default verified via subprocess test)", () => {

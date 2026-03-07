@@ -17,6 +17,14 @@ export interface EmbeddingRow extends Record<string, unknown> {
 let db: Connection | null = null;
 let table: Table | null = null;
 
+/**
+ * Reset the cached table and DB connection. Call this when vectors directory is deleted.
+ */
+export function resetVectorCache(): void {
+  table = null;
+  db = null;
+}
+
 async function getVectorDb(): Promise<Connection> {
   if (!db) {
     mkdirSync(config.vectorsPath, { recursive: true });
@@ -45,9 +53,24 @@ export async function addEmbeddingsBatch(rows: EmbeddingRow[]): Promise<void> {
   if (rows.length === 0) return;
   let tbl = await getTable();
   if (!tbl) {
-    const vectorDb = await getVectorDb();
-    tbl = await vectorDb.createTable(TABLE_NAME, rows);
-    table = tbl;
+    // Table doesn't exist, try to create it
+    // Handle race condition: multiple batches may try to create simultaneously
+    try {
+      const vectorDb = await getVectorDb();
+      tbl = await vectorDb.createTable(TABLE_NAME, rows);
+      table = tbl;
+    } catch (err: any) {
+      // Table was created by another concurrent batch, open it instead
+      if (err.message?.includes("already exists") || err.message?.includes("Table")) {
+        const vectorDb = await getVectorDb();
+        tbl = await vectorDb.openTable(TABLE_NAME);
+        table = tbl;
+        // Add rows to the existing table
+        await tbl.add(rows);
+        return;
+      }
+      throw err;
+    }
     return;
   }
   await tbl.add(rows);

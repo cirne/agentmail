@@ -114,7 +114,7 @@ Find people by email address or display name. Returns matching identities with s
 
 ### `get_status`
 
-Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS/semantic counts), and date range of synced messages.
+Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS/semantic counts), date range of synced messages, and freshness (time since latest mail and last sync).
 
 **Parameters:** None
 
@@ -123,6 +123,7 @@ Get sync and indexing status. Returns current state of sync (running/idle, last 
 - `indexing`: `{ isRunning, totalToIndex, indexedSoFar, startedAt, completedAt, totalIndexed, totalFailed, pending }`
 - `search`: `{ ftsReady, semanticReady }`
 - `dateRange`: `{ earliest, latest }` or `null`
+- `freshness`: `{ latestMailAgo, lastSyncAgo }` — human-readable duration + ISO 8601 (e.g. `{ human: "2h ago", duration: "PT2H" }`), or `null` when not applicable
 
 **Example:**
 ```json

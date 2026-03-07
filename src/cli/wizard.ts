@@ -113,7 +113,10 @@ export async function runWizard(options: { noValidate?: boolean; clean?: boolean
       validate: (v) => (v ? true : "IMAP password is required"),
     });
   } else {
-    console.log("Create one at https://myaccount.google.com/apppasswords");
+    console.log("Gmail requires an app password (not your regular password).");
+    console.log("An app password is a 16-character code that lets IMAP clients like zmail access your mail without your main password.");
+    console.log("Enable 2-Step Verification first if you don't have it: https://myaccount.google.com/signinoptions/two-step-verification");
+    console.log("Then create an app password: https://myaccount.google.com/apppasswords");
     passwordValue = await password({
       message: "IMAP app password",
       mask: true,

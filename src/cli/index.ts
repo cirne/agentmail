@@ -2,23 +2,23 @@ import { runSync } from "~/sync";
 import { searchWithMeta } from "~/search";
 import { who } from "~/search/who";
 import { indexMessages } from "~/search/indexing";
-import { getDb } from "~/db";
+import { getDb, checkSchemaVersion } from "~/db";
+import { reindexFromMaildir } from "~/db/rebuild";
 import { startMcpServer } from "~/mcp";
 import { config } from "~/lib/config";
-import { logger } from "~/lib/logger";
+import { logger, setLogger, SYNC_LOG_PATH, createFileLogger } from "~/lib/logger";
 import { parseSinceToDate } from "~/sync/parse-since";
 import { htmlToMarkdown } from "~/lib/content-normalize";
 import { parseRawMessage } from "~/sync/parse-message";
 import type { SearchResult, WhoResult } from "~/lib/types";
 import type { SqliteDatabase } from "~/db";
-import { readFileSync, existsSync } from "fs";
+import { readFileSync, existsSync, rmSync } from "fs";
 import { join } from "path";
 import { formatMessageLlmFriendly } from "~/cli/format-message";
 import { extractAndCache } from "~/attachments";
-import { getStatus, getImapServerStatus } from "~/lib/status";
+import { getStatus, getImapServerStatus, formatTimeAgo } from "~/lib/status";
 import { spawn } from "child_process";
 import { isProcessAlive } from "~/lib/process-lock";
-import { SYNC_LOG_PATH } from "~/lib/file-logger";
 
 /**
  * Check sync log for errors from the most recent sync run.
@@ -679,11 +679,14 @@ function getUnknownCommandHint(unknownCommand: string): string {
   return "Run 'zmail' for usage.";
 }
 
+const STATUS_LABEL_WIDTH = 13;
+
 /**
  * Print sync and indexing status (reusable for status command and early exits)
  */
 function printStatus(db: SqliteDatabase = getDb()): void {
   const status = getStatus(db);
+  const pad = (s: string) => s.padEnd(STATUS_LABEL_WIDTH);
 
   // Calculate progress or status message if we have target, start, and current earliest dates
   // Only count NEW emails synced in this run, not pre-existing ones
@@ -703,8 +706,8 @@ function printStatus(db: SqliteDatabase = getDb()): void {
       if (currentEarliestDate <= targetDate) {
         progressText = " (100% complete)";
       } else if (currentEarliestDate >= startEarliestDate) {
-        // Still reviewing previously synced emails (haven't reached new emails yet)
-        progressText = " (reviewing existing emails)";
+        // Still iterating through already-synced date range (internal crawl state; no user-facing progress)
+        progressText = "";
       } else {
         // We're syncing new emails - calculate progress percentage
         // Total range to sync: from where we started (or target, whichever is older) down to target
@@ -730,11 +733,11 @@ function printStatus(db: SqliteDatabase = getDb()): void {
 
   // Sync status
   if (status.sync.isRunning) {
-    console.log(`Sync:      running${progressText}`);
+    console.log(`${pad("Sync:")} running${progressText}`);
   } else if (status.sync.lastSyncAt) {
-    console.log(`Sync:      idle (last: ${status.sync.lastSyncAt.slice(0, 10)}, ${status.sync.totalMessages} messages)${progressText}`);
+    console.log(`${pad("Sync:")} idle (last: ${status.sync.lastSyncAt.slice(0, 10)}, ${status.sync.totalMessages} messages)${progressText}`);
   } else {
-    console.log(`Sync:      never run`);
+    console.log(`${pad("Sync:")} never run`);
   }
 
   // Indexing status
@@ -748,25 +751,68 @@ function printStatus(db: SqliteDatabase = getDb()): void {
     const elapsed = startedMs ? Math.round((Date.now() - startedMs) / 1000) : 0;
     // total_to_index can be 0 when sync+index start together (pending was 0 at start); use live total for display
     const displayTotal = Math.max(status.indexing.totalToIndex, status.indexing.indexedSoFar + status.indexing.pending);
-    console.log(`Indexing:  running (${status.indexing.indexedSoFar}/${displayTotal} indexed${status.indexing.totalFailed > 0 ? `, ${status.indexing.totalFailed} failed` : ''}, ${elapsed}s elapsed)`);
+    console.log(`${pad("Indexing:")} running (${status.indexing.indexedSoFar}/${displayTotal} indexed${status.indexing.totalFailed > 0 ? `, ${status.indexing.totalFailed} failed` : ''}, ${elapsed}s elapsed)`);
   } else if (status.indexing.completedAt) {
-    console.log(`Indexing:  idle (last: ${status.indexing.completedAt.slice(0, 10)}, ${status.indexing.totalIndexed} indexed${status.indexing.totalFailed > 0 ? `, ${status.indexing.totalFailed} failed` : ''})`);
+    console.log(`${pad("Indexing:")} idle (last: ${status.indexing.completedAt.slice(0, 10)}, ${status.indexing.totalIndexed} indexed${status.indexing.totalFailed > 0 ? `, ${status.indexing.totalFailed} failed` : ''})`);
   } else {
-    console.log(`Indexing:  never run`);
+    console.log(`${pad("Indexing:")} never run`);
   }
 
   // Search readiness
-  console.log(`Search:    FTS ready (${status.search.ftsReady}) | Semantic ready (${status.search.semanticReady})`);
+  console.log(`${pad("Search:")} FTS ready (${status.search.ftsReady}) | Semantic ready (${status.search.semanticReady})`);
 
   // Date range
   if (status.dateRange) {
     const earliest = status.dateRange.earliest.slice(0, 10);
     const latest = status.dateRange.latest.slice(0, 10);
-    console.log(`Range:     ${earliest} .. ${latest}`);
+    console.log(`${pad("Range:")} ${earliest} .. ${latest}`);
+  }
+
+  // Freshness: time since most recent mail and last sync (human + ISO 8601 duration)
+  const latestMailAgo = formatTimeAgo(status.dateRange?.latest ?? null);
+  const lastSyncAgo = status.sync.isRunning ? null : formatTimeAgo(status.sync.lastSyncAt);
+  if (latestMailAgo) {
+    console.log(`${pad("Newest mail:")} ${latestMailAgo.human} (${latestMailAgo.duration})`);
+  }
+  if (lastSyncAgo) {
+    console.log(`${pad("Last sync:")} ${lastSyncAgo.human} (${lastSyncAgo.duration})`);
   }
 }
 
 async function main() {
+  // Check schema version and rebuild if needed (before any command that uses the DB)
+  const stale = checkSchemaVersion();
+  if (stale) {
+    process.stderr.write("Schema updated — rebuilding index from local cache (up to 20s)...\n");
+    rmSync(config.dbPath, { force: true });
+    rmSync(config.vectorsPath, { recursive: true, force: true });
+    // Reset LanceDB cache since we deleted vectors/
+    const { resetVectorCache } = await import("~/search/vectors");
+    resetVectorCache();
+    getDb(); // creates fresh DB, sets user_version
+    
+    // Use sync log file for rebuild logging (same as sync command)
+    const fileLogger = createFileLogger("sync");
+    fileLogger.writeSeparator(process.pid);
+    
+    // Replace global logger with file logger for rebuild operations
+    const restoreLogger = setLogger(fileLogger);
+    
+    let parsed = 0;
+    try {
+      fileLogger.info("Schema rebuild starting");
+      const result = await reindexFromMaildir();
+      parsed = result.parsed;
+      await indexMessages();
+      fileLogger.info("Schema rebuild complete", { parsed });
+    } finally {
+      fileLogger.close();
+      restoreLogger(); // Restore original logger
+    }
+    
+    process.stderr.write(`Rebuild complete (${parsed} messages re-indexed).\n`);
+  }
+
   switch (command) {
     case "sync": {
       // Sync: Initial setup, goes backward to fill gaps
@@ -1292,6 +1338,12 @@ async function main() {
       if (outputJson) {
         const status = getStatus(db);
         const output: Record<string, unknown> = { ...status };
+        const latestMailAgo = formatTimeAgo(status.dateRange?.latest ?? null);
+        const lastSyncAgo = status.sync.isRunning ? null : formatTimeAgo(status.sync.lastSyncAt);
+        output.freshness = {
+          latestMailAgo: latestMailAgo ?? null,
+          lastSyncAgo: lastSyncAgo ?? null,
+        };
         
         if (showImapStatus) {
           const imapComparison = await getImapServerStatus(db);
@@ -1329,6 +1381,17 @@ async function main() {
           }
         } else {
           console.log("");
+          const syncStatus = getStatus(db);
+          const TEN_MIN_MS = 10 * 60 * 1000; // 10 minutes
+          const lastSyncAt = syncStatus.sync.lastSyncAt;
+          const lastSyncMs = lastSyncAt
+            ? Date.now() - (lastSyncAt.includes("Z") || lastSyncAt.includes("+")
+                ? new Date(lastSyncAt).getTime()
+                : new Date(lastSyncAt.replace(" ", "T") + "Z").getTime())
+            : 0;
+          if (!syncStatus.sync.isRunning && lastSyncMs > TEN_MIN_MS) {
+            console.log("Hint: Run 'zmail refresh' to fetch the latest emails");
+          }
           console.log("Hint: Add --imap flag to show IMAP server status (may take 10+ seconds longer)");
         }
       }
