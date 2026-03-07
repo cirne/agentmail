@@ -411,10 +411,25 @@ export function whoDynamic(db: SqliteDatabase, opts: WhoOptions): WhoResult {
     );
   });
 
-  // Remove internal score field
+  // Remove internal score field and filter out null/empty values
   const finalPeople = people.slice(0, limit).map((p) => {
     const { _score, ...rest } = p as WhoPerson & { _score: number };
-    return rest;
+    const cleaned: WhoPerson = {
+      primaryAddress: rest.primaryAddress,
+      addresses: rest.addresses,
+      sentCount: rest.sentCount,
+      receivedCount: rest.receivedCount,
+      mentionedCount: rest.mentionedCount,
+      name: rest.name ?? null,
+      aka: rest.aka && rest.aka.length > 0 ? rest.aka : [],
+      phone: rest.phone ?? null,
+      title: rest.title ?? null,
+      company: rest.company ?? null,
+      urls: rest.urls && rest.urls.length > 0 ? rest.urls : [],
+      lastContact: rest.lastContact ?? null,
+    };
+    
+    return cleaned;
   });
 
   return { query: query.trim(), people: finalPeople };
