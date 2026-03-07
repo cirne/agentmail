@@ -1,6 +1,6 @@
 # OPP-013: Name Inference from Email Addresses
 
-**Status:** Partial — Dot/underscore patterns work, firstlast (no separator) still returns null.
+**Status:** Complete — Heuristic inference works for common patterns; LLM-based inference available via `--enrich` flag for better accuracy.
 
 **Problem:** Many contacts show `name: null` despite inferable names. Contacts with significant interaction history show `name: null` when no display name was found in email headers, but many of these have names clearly embedded in the email address.
 
@@ -20,17 +20,28 @@ Also:
 { "name": null, "primaryAddress": "katelyn.cirne@gmail.com", "receivedCount": 2 }
 ```
 
-**Proposed direction:** Infer display names from email addresses as a fallback when no header name exists:
-- ✅ `lewis.cirne@...` → "Lewis Cirne" — *Working*
-- ✅ `katelyn_cirne@...` → "Katelyn Cirne" — *Working*
-- ⚠️ `alanfinley@...` → "Alan Finley" — *Not yet working (firstlast without separator)*
-- ✅ `sjohnson@...` → null (ambiguous) — *Working as intended*
+**Implemented solution:** Infer display names from email addresses as a fallback when no header name exists:
+- ✅ `lewis.cirne@...` → "Lewis Cirne" — *Heuristic inference (high confidence)*
+- ✅ `katelyn_cirne@...` → "Katelyn Cirne" — *Heuristic inference (high confidence)*
+- ✅ `alanfinley@...` → "Alan Finley" — *Heuristic inference (medium confidence, requires name ending signal)*
+- ✅ `whitneyallen@...` → "Whitney Allen" — *Heuristic inference (medium confidence)*
+- ✅ `sjohnson@...` → null (ambiguous) — *Correctly rejected*
+- ✅ `fredbrown@...` → null (could be username) — *Correctly rejected*
 
-**Implemented patterns:** `firstname.lastname`, `firstname_lastname`, camelCase (`lewisCirne`).
+**Heuristic patterns:** `firstname.lastname`, `firstname_lastname`, camelCase (`lewisCirne`), and all-lowercase with strong signals (name endings, common names, high score).
 
-**Remaining:** `firstnamelastname` (no separator) — requires dictionary or better heuristics.
+**LLM-based inference:** Use `--enrich` flag for more accurate name inference via GPT-4.1 nano:
+- Handles ambiguous cases better than heuristics
+- Can infer company names from domain
+- Provides type classification (person/group/company/other)
+- Requires `ZMAIL_OPENAI_API_KEY` to be set
+- Adds ~1-2s latency per query
 
-Mark inferred names distinctly (e.g., `"nameSource": "inferred"`) so agents know confidence level.
+**Example with --enrich:**
+```bash
+zmail who "alanfinley" --enrich
+```
+Returns more accurate inference, especially for ambiguous cases or when company information is needed.
 
 **Open questions:**
 - How to handle ambiguous cases (e.g., `sjohnson` could be "S Johnson" or "Sjohn Son")?

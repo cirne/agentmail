@@ -71,6 +71,12 @@ The signature parser needs heuristics to reject:
 - **Result:** Fix confirmed. LinkedIn noreply entries no longer show copyright notices as `title`, mailing addresses as `company`, or tracking URLs in `urls`. All three fields are now null/empty for these entries.
 - **Tested with:** `zmail who "noreply" --all --limit 5`
 
+**Additional improvements (2026-03-07):**
+- Standalone company name extraction: Now extracts company names that appear on their own line (e.g., "Green Longhorn Inc.") without requiring a title pattern
+- Quoted reply detection: Signature extraction stops at quoted reply patterns (e.g., "On ... wrote:") to prevent false positives
+- Better signature selection: Improved logic to find the best signature block when multiple candidates exist
+- Verified with real-world signatures: Confirmed working with signatures like "Donna Wilcox / Green Longhorn Inc. / phone" format
+
 ---
 
 ## References

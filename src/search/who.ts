@@ -10,8 +10,8 @@ import { whoDynamic, type WhoOptions } from "./who-dynamic";
  * 
  * Uses fuzzy/phonetic matching for better discoverability (e.g., "geoff" matches "Geof").
  */
-export function who(db: SqliteDatabase, opts: WhoOptions): WhoResult {
-  return whoDynamic(db, opts);
+export async function who(db: SqliteDatabase, opts: WhoOptions): Promise<WhoResult> {
+  return await whoDynamic(db, opts);
 }
 
 // Re-export WhoOptions for convenience

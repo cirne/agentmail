@@ -19,18 +19,17 @@ describe("inferNameFromAddress", () => {
   });
 
   it("infers name from all-lowercase local-part when pattern is clear", () => {
-    // Note: These patterns are harder to infer reliably without a dictionary
-    // The function may return null for ambiguous cases
-    // Focus is on dot/underscore/camelCase patterns which are more reliable
-    const result1 = inferNameFromAddress("alanfinley@example.com");
-    const result2 = inferNameFromAddress("johnsmith@example.com");
-    // Accept either inferred name or null (conservative inference)
-    expect(result1 === null || result1 === "Alan Finley").toBe(true);
-    expect(result2 === null || result2 === "John Smith").toBe(true);
+    // Improved heuristics should handle common patterns
+    expect(inferNameFromAddress("alanfinley@example.com")).toBe("Alan Finley");
+    expect(inferNameFromAddress("johnsmith@example.com")).toBe("John Smith");
+    expect(inferNameFromAddress("whitneyallen@example.com")).toBe("Whitney Allen");
   });
 
-  it("returns null for ambiguous single-letter cases", () => {
-    expect(inferNameFromAddress("sjohnson@example.com")).toBeNull();
+  it("infers name from single-letter prefix pattern", () => {
+    expect(inferNameFromAddress("abrown@somecompany.com")).toBe("A Brown");
+    expect(inferNameFromAddress("jsmith@example.com")).toBe("J Smith");
+    // Ambiguous short cases should still return null
+    expect(inferNameFromAddress("sjohnson@example.com")).toBeNull(); // Too short last name (4 chars)
   });
 
   it("returns null for non-name patterns", () => {
@@ -44,5 +43,9 @@ describe("inferNameFromAddress", () => {
     expect(inferNameFromAddress("ab@example.com")).toBeNull(); // Too short
     expect(inferNameFromAddress("a@example.com")).toBeNull(); // Too short
     expect(inferNameFromAddress("123@example.com")).toBeNull(); // Numbers
+  });
+
+  it("returns null for ambiguous all-lowercase patterns that could be usernames", () => {
+    expect(inferNameFromAddress("fredbrown@example.com")).toBeNull(); // No strong signal, could be username
   });
 });

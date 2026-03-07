@@ -38,18 +38,18 @@ describe("who", () => {
   });
 
   // Helper to query (dynamic queries work directly from messages, no rebuild needed)
-  function queryWho(query: string, opts?: Omit<Parameters<typeof who>[1], "query">) {
-    return who(db, { query, ...opts });
+  async function queryWho(query: string, opts?: Omit<Parameters<typeof who>[1], "query">) {
+    return await who(db, { query, ...opts });
   }
 
-  it("returns empty people when no messages match", () => {
+  it("returns empty people when no messages match", async () => {
     insertTestMessage(db, { fromAddress: "alice@example.com", subject: "Hi" });
-    const result = queryWho("nonexistent");
+    const result = await queryWho("nonexistent");
     expect(result.query).toBe("nonexistent");
     expect(result.people).toEqual([]);
   });
 
-  it("matches identity by from_address", () => {
+  it("matches identity by from_address", async () => {
     insertMessage(db, {
       messageId: "<1@a>",
       fromAddress: "tom@example.com",
@@ -61,31 +61,33 @@ describe("who", () => {
       fromName: "Tom Smith",
     });
 
-    const result = queryWho("tom");
+    const result = await queryWho("tom");
     expect(result.people.length).toBe(1);
     expect(result.people[0].primaryAddress).toBe("tom@example.com");
-    expect(result.people[0].name).toBe("Tom Smith");
+    expect(result.people[0].firstname).toBe("Tom");
+    expect(result.people[0].lastname).toBe("Smith");
     expect(result.people[0].addresses).toContain("tom@example.com");
     expect(result.people[0].sentCount).toBe(2);
     expect(result.people[0].receivedCount).toBe(0);
     expect(result.people[0].mentionedCount).toBe(0);
   });
 
-  it("matches identity by from_name", () => {
+  it("matches identity by from_name", async () => {
     insertMessage(db, {
       messageId: "<1@b>",
       fromAddress: "geoff@company.com",
       fromName: "Geoff Cirne",
     });
 
-    const result = queryWho("geoff");
+    const result = await queryWho("geoff");
     expect(result.people.length).toBe(1);
     expect(result.people[0].primaryAddress).toBe("geoff@company.com");
-    expect(result.people[0].name).toBe("Geoff Cirne");
+    expect(result.people[0].firstname).toBe("Geoff");
+    expect(result.people[0].lastname).toBe("Cirne");
     expect(result.people[0].sentCount).toBe(1);
   });
 
-  it("matches identity appearing only in to_addresses", () => {
+  it("matches identity appearing only in to_addresses", async () => {
     insertMessage(db, {
       messageId: "<1@c>",
       fromAddress: "sender@example.com",
@@ -93,16 +95,19 @@ describe("who", () => {
       ccAddresses: [],
     });
 
-    const result = queryWho("recipient");
+    const result = await queryWho("recipient");
     expect(result.people.length).toBe(1);
     expect(result.people[0].primaryAddress).toBe("recipient@example.com");
+    // No display name - should be null
     expect(result.people[0].name).toBeNull();
+    expect(result.people[0].firstname).toBeUndefined();
+    expect(result.people[0].lastname).toBeUndefined();
     expect(result.people[0].sentCount).toBe(0);
     expect(result.people[0].receivedCount).toBe(1);
-    expect(result.people[0].mentionedCount).toBe(0);
+    expect(result.people[0].mentionedCount).toBe(1);
   });
 
-  it("matches identity appearing only in cc_addresses", () => {
+  it("matches identity appearing only in cc_addresses", async () => {
     insertMessage(db, {
       messageId: "<1@d>",
       fromAddress: "sender@example.com",
@@ -116,14 +121,14 @@ describe("who", () => {
       ccAddresses: ["ccperson@example.com"],
     });
 
-    const result = queryWho("ccperson");
+    const result = await queryWho("ccperson");
     expect(result.people.length).toBe(1);
     expect(result.people[0].primaryAddress).toBe("ccperson@example.com");
     expect(result.people[0].sentCount).toBe(0);
     expect(result.people[0].receivedCount).toBe(2);
   });
 
-  it("deduplicates by address and uses sender display name when available", () => {
+  it("deduplicates by address and uses sender display name when available", async () => {
     insertMessage(db, {
       messageId: "<1@e>",
       fromAddress: "alice@example.com",
@@ -135,15 +140,18 @@ describe("who", () => {
       toAddresses: ["alice@example.com"],
     });
 
-    const result = queryWho("alice");
+    const result = await queryWho("alice");
     expect(result.people.length).toBe(1);
     expect(result.people[0].primaryAddress).toBe("alice@example.com");
+    // Single name - should use name field, not firstname/lastname
     expect(result.people[0].name).toBe("Alice");
+    expect(result.people[0].firstname).toBeUndefined();
+    expect(result.people[0].lastname).toBeUndefined();
     expect(result.people[0].sentCount).toBe(1);
     expect(result.people[0].receivedCount).toBe(1);
   });
 
-  it("orders by sent_count DESC then received_count DESC", () => {
+  it("orders by sent_count DESC then received_count DESC", async () => {
     insertMessage(db, {
       messageId: "<1@f>",
       fromAddress: "low@example.com",
@@ -158,7 +166,7 @@ describe("who", () => {
       fromAddress: "high@example.com",
     });
 
-    const result = queryWho("example");
+    const result = await queryWho("example");
     expect(result.people.length).toBe(2);
     expect(result.people[0].primaryAddress).toBe("high@example.com");
     expect(result.people[0].sentCount).toBe(2);
@@ -168,7 +176,7 @@ describe("who", () => {
     expect(result.people[1].receivedCount).toBe(0);
   });
 
-  it("respects limit option", () => {
+  it("respects limit option", async () => {
     insertMessage(db, {
       messageId: "<1@g>",
       fromAddress: "one@example.com",
@@ -182,11 +190,11 @@ describe("who", () => {
       fromAddress: "three@example.com",
     });
 
-    const result = queryWho("example", { limit: 2 });
+    const result = await queryWho("example", { limit: 2 });
     expect(result.people.length).toBe(2);
   });
 
-  it("respects minSent and minReceived options", () => {
+  it("respects minSent and minReceived options", async () => {
     insertMessage(db, {
       messageId: "<1@h>",
       fromAddress: "sender@example.com",
@@ -201,39 +209,39 @@ describe("who", () => {
       toAddresses: ["recipient@example.com"],
     });
 
-    const result = queryWho("example", { minSent: 2, minReceived: 0 });
+    const result = await queryWho("example", { minSent: 2, minReceived: 0 });
     expect(result.people.length).toBe(1);
     expect(result.people[0].primaryAddress).toBe("sender@example.com");
     expect(result.people[0].sentCount).toBe(2);
   });
 
-  it("returns stable query in result", () => {
+  it("returns stable query in result", async () => {
     insertMessage(db, {
       messageId: "<1@i>",
       fromAddress: "alice@example.com",
     });
-    const result = queryWho("  alice  ");
+    const result = await queryWho("  alice  ");
     expect(result.query).toBe("alice");
     expect(result.people.length).toBe(1);
   });
 
-  it("matching is case-insensitive", () => {
+  it("matching is case-insensitive", async () => {
     insertMessage(db, {
       messageId: "<1@j>",
       fromAddress: "Tom.Big@Example.COM",
       fromName: "Tom Big",
     });
 
-    const result = queryWho("tom");
+    const result = await queryWho("tom");
     expect(result.people.length).toBe(1);
-    // Addresses are normalized to lowercase in people table
-    expect(result.people[0].primaryAddress.toLowerCase()).toBe("tom.big@example.com");
+    // Addresses are normalized (lowercase, dots stripped from local-part)
+    expect(result.people[0].primaryAddress.toLowerCase()).toBe("tombig@example.com");
   });
 
   describe("with ownerAddress (sent = I sent to them, received = from them to me, mentioned = in to/cc not sender)", () => {
     const me = "me@example.com";
 
-    it("counts sent as emails owner sent to person, received as from person to owner, mentioned as person in to/cc but not sender", () => {
+    it("counts sent as emails owner sent to person, received as from person to owner, mentioned as person in to/cc but not sender", async () => {
       // I send to Tim and Donna
       insertMessage(db, {
         messageId: "<1@owner>",
@@ -258,7 +266,7 @@ describe("who", () => {
 
       // Note: ownerAddress affects counts but people table has pre-computed counts
       // Dynamic queries work directly from messages, no rebuild needed
-      const result = who(db, { query: "example", ownerAddress: me });
+      const result = await who(db, { query: "example", ownerAddress: me });
       expect(result.people.length).toBeGreaterThanOrEqual(2);
 
       const tim = result.people.find((p) => p.primaryAddress.toLowerCase() === "tim@example.com");
@@ -269,6 +277,40 @@ describe("who", () => {
       const donna = result.people.find((p) => p.primaryAddress.toLowerCase() === "donna@example.com");
       expect(donna).toBeDefined();
       expect(donna!.sentCount + donna!.receivedCount).toBeGreaterThan(0);
+    });
+  });
+
+  describe("hint for --enrich flag", () => {
+    it("includes hint when enrich is not used and results exist", async () => {
+      insertMessage(db, {
+        messageId: "<1@hint>",
+        fromAddress: "alice@example.com",
+        fromName: "Alice",
+      });
+
+      const result = await queryWho("alice");
+      expect(result.people.length).toBeGreaterThan(0);
+      expect(result.hint).toBeDefined();
+      expect(result.hint).toContain("--enrich");
+      expect(result.hint).toContain("more accurate");
+    });
+
+    it("does not include hint when enrich is used", async () => {
+      insertMessage(db, {
+        messageId: "<1@hint-enrich>",
+        fromAddress: "bob@example.com",
+        fromName: "Bob",
+      });
+
+      const result = await queryWho("bob", { enrich: true });
+      expect(result.people.length).toBeGreaterThan(0);
+      expect(result.hint).toBeUndefined();
+    });
+
+    it("does not include hint when no results found", async () => {
+      const result = await queryWho("nonexistent");
+      expect(result.people.length).toBe(0);
+      expect(result.hint).toBeUndefined();
     });
   });
 });

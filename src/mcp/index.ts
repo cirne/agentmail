@@ -264,17 +264,19 @@ export function createMcpServer() {
       minSent: z.number().optional().describe("Minimum sent count filter (default: 0)"),
       minReceived: z.number().optional().describe("Minimum received count filter (default: 0)"),
       includeNoreply: z.boolean().optional().describe("Include noreply/bot addresses (default: false)"),
+      enrich: z.boolean().optional().describe("Use LLM (GPT-4.1 nano) to guess names from email addresses for better accuracy. Requires ZMAIL_OPENAI_API_KEY to be set. Adds ~1-2s latency (default: false)"),
     },
-    async ({ query, limit, minSent, minReceived, includeNoreply }) => {
+    async ({ query, limit, minSent, minReceived, includeNoreply, enrich }) => {
       const db = getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
-      const result = who(db, {
+      const result = await who(db, {
         query,
         limit,
         minSent,
         minReceived,
         includeNoreply,
         ownerAddress,
+        enrich,
       });
 
       return {

@@ -75,4 +75,23 @@ describe("extractSignatureData", () => {
     const body = "Just a message";
     expect(extractSignatureData(body, "sender@example.com")).toBeNull();
   });
+
+  it("extracts signature with standalone company name and phone", () => {
+    const body = `Message text
+
+*Donna Wilcox*
+Green Longhorn Inc.
+
+dwilcox@greenlonghorninc.com
+
+512-914-8479
+
+
+On Sat, Feb 28, 2026 at 1:20 PM Someone <someone@example.com> wrote:`;
+    const result = extractSignatureData(body, "dwilcox@greenlonghorninc.com");
+    expect(result).toBeTruthy();
+    expect(result!.phone).toBeTruthy();
+    expect(result!.phone).toMatch(/512.*914.*8479/);
+    expect(result!.company).toBe("Green Longhorn Inc.");
+  });
 });

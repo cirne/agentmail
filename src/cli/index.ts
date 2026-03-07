@@ -151,6 +151,7 @@ interface ParsedWhoArgs {
   includeNoreply?: boolean;
   dynamic?: boolean; // Kept for backward compatibility / testing, but dynamic is now default
   forceText: boolean;
+  enrich?: boolean;
 }
 
 function whoUsage() {
@@ -160,6 +161,8 @@ function whoUsage() {
   console.error("  --min-sent <n>     minimum sent count");
   console.error("  --min-received <n> minimum received count");
   console.error("  --all              include noreply/bot addresses");
+  console.error("  --enrich          use LLM (GPT-4.1 nano) to guess names from email addresses");
+  console.error("                     requires ZMAIL_OPENAI_API_KEY to be set");
   console.error("");
   console.error("Note: Profiles are built dynamically from messages (always up-to-date)");
 }
@@ -197,6 +200,10 @@ function parseWhoArgs(rawArgs: string[]): ParsedWhoArgs {
     }
     if (arg === "--dynamic") {
       parsed.dynamic = true;
+      continue;
+    }
+    if (arg === "--enrich") {
+      parsed.enrich = true;
       continue;
     }
     if (arg === "--limit") {
@@ -1070,13 +1077,14 @@ async function main() {
       const ownerAddress = config.imap.user?.trim() || undefined;
 
       const startTime = Date.now();
-      const result = who(db, {
+      const result = await who(db, {
         query: whoParsed.query,
         limit: whoParsed.limit,
         minSent: whoParsed.minSent,
         minReceived: whoParsed.minReceived,
         includeNoreply: whoParsed.includeNoreply,
         ownerAddress,
+        enrich: whoParsed.enrich,
       });
       const duration = Date.now() - startTime;
 
@@ -1095,13 +1103,19 @@ async function main() {
 
       if (result.people.length === 0) {
         console.log("No matching people found.");
+        if (result.hint) {
+          console.log(`\n${result.hint}`);
+        }
         break;
       }
 
       console.log(`People matching "${result.query}":\n`);
       for (const p of result.people) {
-        const name = p.name || "Unknown";
-        const akaStr = p.aka.length > 0 ? ` (aka: ${p.aka.join(", ")})` : "";
+        // Display name: use firstname/lastname if available, otherwise name field
+        const name = (p.firstname && p.lastname) 
+          ? `${p.firstname} ${p.lastname}`
+          : p.name || (p.firstname || p.lastname) || "Unknown";
+        const akaStr = p.aka && p.aka.length > 0 ? ` (aka: ${p.aka.join(", ")})` : "";
         console.log(`  ${name}${akaStr}`);
         console.log(`    Primary: ${p.primaryAddress}`);
         if (p.addresses.length > 1) {
@@ -1115,7 +1129,7 @@ async function main() {
           const titleCompany = [p.title, p.company].filter(Boolean).join(" at ");
           console.log(`    ${titleCompany}`);
         }
-        if (p.urls.length > 0) {
+        if (p.urls && p.urls.length > 0) {
           console.log(`    URLs: ${p.urls.join(", ")}`);
         }
         console.log(
@@ -1125,6 +1139,10 @@ async function main() {
           console.log(`    Last contact: ${p.lastContact}`);
         }
         console.log("");
+      }
+      
+      if (result.hint) {
+        console.log(result.hint);
       }
       break;
     }

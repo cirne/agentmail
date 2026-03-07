@@ -266,3 +266,41 @@ export function parseName(displayName: string | null): { first: string | null; l
 
   return { first, last };
 }
+
+/**
+ * Determine if a name can be parsed into firstname/lastname (person name)
+ * vs should be kept as a single name field (company/group/other).
+ * 
+ * Returns parsed components if it's a person name, null otherwise.
+ */
+export function parsePersonName(
+  displayName: string | null
+): { firstname: string; lastname: string } | null {
+  if (!displayName) return null;
+
+  const trimmed = displayName.trim();
+  if (!trimmed) return null;
+
+  // Check for company/group indicators (comma, "Inc", "LLC", etc.)
+  const companyIndicators = [
+    /,?\s*(inc|llc|ltd|corp|corporation|company|co\.|group|team|department|dept)/i,
+    /^[A-Z][a-z]+\s+[A-Z][a-z]+,\s+Inc/i, // "Apple, Inc"
+  ];
+  if (companyIndicators.some((pattern) => pattern.test(trimmed))) {
+    return null; // Company/group name, not a person
+  }
+
+  const parsed = parseName(trimmed);
+  
+  // Only return if we have both first and last name
+  if (parsed.first && parsed.last) {
+    // Capitalize properly
+    const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+    return {
+      firstname: capitalize(parsed.first),
+      lastname: capitalize(parsed.last),
+    };
+  }
+
+  return null; // Can't parse into firstname/lastname
+}

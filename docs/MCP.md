@@ -96,8 +96,10 @@ Find people by email address or display name. Returns matching identities with s
 - `limit` (number, optional): Maximum number of results (default: 50)
 - `minSent` (number, optional): Minimum sent count filter (default: 0)
 - `minReceived` (number, optional): Minimum received count filter (default: 0)
+- `includeNoreply` (boolean, optional): Include noreply/bot addresses (default: false)
+- `enrich` (boolean, optional): Use LLM (GPT-4.1 nano) to guess names from email addresses for better accuracy. Requires `ZMAIL_OPENAI_API_KEY` to be set. Adds ~1-2s latency (default: false)
 
-**Returns:** JSON object with `query` and `people` array. Each person has `address`, `displayName`, `sentCount`, `receivedCount`, `mentionedCount`.
+**Returns:** JSON object with `query` and `people` array. Each person has `firstname`, `lastname`, `name`, `primaryAddress`, `addresses`, `phone`, `title`, `company`, `urls`, `sentCount`, `receivedCount`, `mentionedCount`, `lastContact`. May include `hint` field with suggestions (e.g., to use `enrich` flag).
 
 **Note:** When mailbox owner is configured, counts are relative to the owner: `sentCount` = emails I sent to them, `receivedCount` = emails from them to me, `mentionedCount` = emails where they were in to/cc but not the sender.
 
@@ -105,7 +107,8 @@ Find people by email address or display name. Returns matching identities with s
 ```json
 {
   "query": "alice",
-  "limit": 10
+  "limit": 10,
+  "enrich": true
 }
 ```
 

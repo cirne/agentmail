@@ -39,27 +39,111 @@ export function extractSignature(bodyText: string): string | null {
   }
 
   // Fallback: look for blank line gap followed by short lines
+  // First, find where quoted replies start to avoid detecting them as signatures
+  let maxSearchIndex = lines.length;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim().toLowerCase();
+    const nextLine = i + 1 < lines.length ? lines[i + 1].trim().toLowerCase() : "";
+    // Stop searching at quoted reply patterns
+    if (
+      line.match(/^on .+ wrote:$/i) ||
+      (line.match(/^on .+$/i) && nextLine.match(/wrote:?$/i)) || // Multi-line "On ... wrote:"
+      line.match(/^from: .+$/i) ||
+      line.match(/^sent: .+$/i) ||
+      line.match(/^date: .+$/i) ||
+      line.match(/^subject: .+$/i) ||
+      (line.startsWith(">") && i > 5) // Quoted text (but allow early ">" which might be formatting)
+    ) {
+      maxSearchIndex = i;
+      break;
+    }
+  }
+
   if (sigStartIndex === -1) {
-    let blankLineIndex = -1;
-    for (let i = lines.length - 1; i >= Math.max(0, lines.length - 15); i--) {
-      if (lines[i].trim() === "") {
-        blankLineIndex = i;
-        break;
+    // Search backwards from maxSearchIndex (before quoted replies)
+    const searchEnd = Math.min(maxSearchIndex, lines.length);
+    // Look for blank lines and check if what follows looks like a signature
+    // Collect all candidate signatures and pick the best one (earliest with most elements)
+    let bestCandidate: { index: number; score: number } | null = null;
+    
+    for (let i = searchEnd - 1; i >= Math.max(0, searchEnd - 20); i--) {
+      if (lines[i].trim() === "" && i < searchEnd - 2) {
+        const candidateLines = lines.slice(i + 1, maxSearchIndex);
+        const nonEmptyLines = candidateLines.filter((l) => l.trim().length > 0);
+        
+        // Check if this looks like a signature (not a quoted reply)
+        let looksLikeSignature = false;
+        let hasName = false;
+        let hasCompanyOrEmail = false;
+        let hasPhone = false;
+        
+        for (const line of nonEmptyLines.slice(0, 6)) { // Check first 6 non-empty lines
+          const trimmed = line.trim();
+          const lower = trimmed.toLowerCase();
+          
+          // Reject if it looks like a quoted reply header
+          if (
+            lower.match(/^on .+ wrote:$/i) ||
+            lower.match(/^from: .+$/i) ||
+            lower.match(/^sent: .+$/i) ||
+            lower.match(/^date: .+$/i) ||
+            lower.match(/^subject: .+$/i)
+          ) {
+            looksLikeSignature = false;
+            break;
+          }
+          
+          // Check for signature elements
+          if (trimmed.length < 80 && !trimmed.match(/^>/)) {
+            // Remove formatting markers (asterisks, underscores, etc.)
+            const cleanLine = trimmed.replace(/[*_~`]/g, "").trim();
+            
+            // Looks like a name (capitalized, 2-4 words, possibly with formatting)
+            if (cleanLine.match(/^[A-Z][a-z]+(?:\s+[A-Z][a-z]+){0,3}$/) && !hasName) {
+              hasName = true;
+              looksLikeSignature = true;
+            }
+            // Company name pattern
+            if (trimmed.match(/\b(inc|llc|ltd|corp|corporation|company|co)\.?$/i)) {
+              hasCompanyOrEmail = true;
+              looksLikeSignature = true;
+            }
+            // Email address
+            if (trimmed.match(/[\w.+-]+@[\w.-]+\.\w{2,}/i)) {
+              hasCompanyOrEmail = true;
+              looksLikeSignature = true;
+            }
+            // Phone number
+            if (trimmed.match(/[\d\s().-]{10,}/)) {
+              hasPhone = true;
+              looksLikeSignature = true;
+            }
+          }
+        }
+        
+        // Require at least 2 signature elements (name + company/email/phone)
+        const signatureElementCount = (hasName ? 1 : 0) + (hasCompanyOrEmail ? 1 : 0) + (hasPhone ? 1 : 0);
+        if (looksLikeSignature && signatureElementCount >= 2 && nonEmptyLines.length >= 2) {
+          // Score: prefer signatures with name (more complete)
+          const score = signatureElementCount * 10 + (hasName ? 5 : 0);
+          if (!bestCandidate || score > bestCandidate.score) {
+            bestCandidate = { index: i + 1, score };
+          }
+        }
       }
     }
-    if (blankLineIndex >= 0 && blankLineIndex < lines.length - 2) {
-      // Check if lines after blank are mostly short (signature-like)
-      const candidateLines = lines.slice(blankLineIndex + 1);
-      const shortLines = candidateLines.filter((l) => l.trim().length > 0 && l.trim().length < 80);
-      if (shortLines.length >= 2) {
-        sigStartIndex = blankLineIndex + 1;
-      }
+    
+    if (bestCandidate) {
+      sigStartIndex = bestCandidate.index;
     }
   }
 
   if (sigStartIndex === -1 || sigStartIndex >= lines.length) return null;
 
-  const signatureLines = lines.slice(sigStartIndex);
+  // Find where signature ends (stop at quoted reply patterns)
+  let sigEndIndex = Math.min(maxSearchIndex, lines.length);
+
+  const signatureLines = lines.slice(sigStartIndex, sigEndIndex);
   let signatureText = signatureLines.join("\n").trim();
 
   // Strip common boilerplate
@@ -209,6 +293,31 @@ export function parseSignatureBlock(signatureText: string, senderAddress: string
         result.title = titlePart.trim();
         result.company = companyPart.trim();
         break;
+      }
+    }
+
+    // Pattern: Standalone company name (common patterns like "Company Inc.", "Company LLC", etc.)
+    // Only extract if we haven't found a company yet and line looks like a company name
+    if (!result.company && !result.title) {
+      const companyPatterns = [
+        /\b(inc|llc|ltd|corp|corporation|company|co)\.?$/i, // Ends with Inc., LLC, etc.
+        /^[A-Z][a-zA-Z\s&]+(?:Inc|LLC|Ltd|Corp|Corporation|Company|Co)\.?$/i, // Capitalized company name
+      ];
+      
+      const looksLikeCompany = companyPatterns.some(pattern => pattern.test(line)) &&
+        line.length > 3 &&
+        line.length < 60 &&
+        !lowerLine.match(/^on .+ wrote$/i) && // Not a quoted reply header
+        !lowerLine.match(/^from:/i) &&
+        !lowerLine.match(/^sent:/i) &&
+        !lowerLine.match(/^date:/i) &&
+        !lowerLine.match(/^subject:/i) &&
+        !lowerLine.match(/\d{5}/) && // Not a ZIP code
+        !lowerLine.match(/\d+\s+[a-z\s]+(street|st|avenue|ave|road|rd|drive|dr|boulevard|blvd|way|place|pl|lane|ln)[\s,]/i); // Not an address
+      
+      if (looksLikeCompany) {
+        result.company = line.trim();
+        // Don't break - continue looking for title
       }
     }
   }

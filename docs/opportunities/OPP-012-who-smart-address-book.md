@@ -1,6 +1,6 @@
 # OPP-012: Make `zmail who` a Smart, Unified Address Book
 
-**Status:** Partial — Tiers 1-2 complete, Tiers 3-4 remaining.
+**Status:** Partial — Tiers 1-2 complete, Tier 3 mostly complete (signature extraction robust), Tier 4 remaining.
 
 **Problem:** As an agent, `zmail who` is my only way to answer "who is this person?" or "how do I reach them?" Right now it returns raw per-address rows with no identity merging, no contact metadata, and no way to distinguish a real person from a noreply address. For `who` to become a true address book — the agent's de facto contact lookup — it needs to evolve significantly.
 
@@ -22,12 +22,13 @@
 - ⚠️ **Domain grouping** — Show which organizations a person is associated with: `"orgs": ["greenlonghorninc.com", "gmail.com"]` — *Not yet implemented*
 - ⚠️ **Manual merge/split** — `zmail who merge <addr1> <addr2>` and `zmail who split <addr>` for corrections — *Not yet implemented*
 
-### Tier 3: Signature extraction (medium effort, high value) ⚠️ **PARTIAL**
+### Tier 3: Signature extraction (medium effort, high value) ✅ **MOSTLY COMPLETE**
 
-- ✅ **Phone numbers** — Parse email signatures for phone numbers: `"phone": ["+1-555-123-4567"]` — *Implemented but needs more testing*
+- ✅ **Phone numbers** — Parse email signatures for phone numbers: `"phone": "+1-555-123-4567"` — *Implemented and verified*
 - ✅ **Title / role** — Extract from signatures: `"title": "CEO, Green Longhorn Inc."` — *Implemented with boilerplate filtering* (addresses [BUG-014](../bugs/archive/BUG-014-who-signature-parser-noise.md))
-- ✅ **Company** — From signature or domain: `"company": "Green Longhorn Inc."` — *Implemented with boilerplate filtering*
+- ✅ **Company** — From signature or domain: `"company": "Green Longhorn Inc."` — *Implemented with boilerplate filtering and standalone company name detection* (verified 2026-03-07)
 - ✅ **Social links** — LinkedIn, Twitter URLs from signatures — *Implemented with tracking URL filtering*
+- ✅ **Quoted reply detection** — Signature extraction stops at quoted reply patterns (e.g., "On ... wrote:") to avoid false positives — *Implemented and verified*
 
 ### Tier 4: Smart queries (lower priority, polishes the experience)
 

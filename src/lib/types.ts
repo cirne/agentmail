@@ -80,7 +80,12 @@ export interface SearchResult {
 
 /** One identity from `zmail who`: merged person with all addresses, contact info, and counts. */
 export interface WhoPerson {
-  name: string | null;
+  /** First name (if parseable as person name) */
+  firstname?: string | null;
+  /** Last name (if parseable as person name) */
+  lastname?: string | null;
+  /** Full name (used when name can't be parsed into firstname/lastname, e.g., "Apple, Inc.") */
+  name?: string | null;
   aka: string[];
   primaryAddress: string;
   addresses: string[];
@@ -98,4 +103,6 @@ export interface WhoPerson {
 export interface WhoResult {
   query: string;
   people: WhoPerson[];
+  /** Optional hint to suggest improvements (e.g., using --enrich flag) */
+  hint?: string;
 }

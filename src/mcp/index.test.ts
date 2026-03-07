@@ -135,7 +135,7 @@ describe("MCP Server Tools", () => {
       const { who } = await import("~/search/who");
       const testDb = getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
-      const result = who(testDb, {
+      const result = await who(testDb, {
         query: "nonexistent",
         ownerAddress,
       });
@@ -165,14 +165,15 @@ describe("MCP Server Tools", () => {
 
       const { who } = await import("~/search/who");
       const testDb = getDb();
-      const result = who(testDb, {
+      const result = await who(testDb, {
         query: "tom",
         ownerAddress,
       });
 
       expect(result.people).toHaveLength(1);
       expect(result.people[0].primaryAddress.toLowerCase()).toBe("tom@example.com");
-      expect(result.people[0].name).toBe("Tom Smith");
+      expect(result.people[0].firstname).toBe("Tom");
+      expect(result.people[0].lastname).toBe("Smith");
       expect(result.people[0].receivedCount).toBeGreaterThanOrEqual(0); // Counts from people table
     });
 
@@ -186,14 +187,15 @@ describe("MCP Server Tools", () => {
       const { who } = await import("~/search/who");
       const testDb = getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
-      const result = who(testDb, {
+      const result = await who(testDb, {
         query: "geoff",
         ownerAddress,
       });
 
       expect(result.people).toHaveLength(1);
       expect(result.people[0].primaryAddress.toLowerCase()).toBe("geoff@company.com");
-      expect(result.people[0].name).toBe("Geoff Cirne");
+      expect(result.people[0].firstname).toBe("Geoff");
+      expect(result.people[0].lastname).toBe("Cirne");
     });
 
     it("respects limit parameter", async () => {
@@ -207,7 +209,7 @@ describe("MCP Server Tools", () => {
       const { who } = await import("~/search/who");
       const testDb = getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
-      const result = who(testDb, {
+      const result = await who(testDb, {
         query: "person",
         limit: 5,
         ownerAddress,
@@ -233,7 +235,7 @@ describe("MCP Server Tools", () => {
       const { who } = await import("~/search/who");
       const testDb = getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
-      const result = who(testDb, {
+      const result = await who(testDb, {
         query: "example.com",
         minSent: 2,
         ownerAddress,
