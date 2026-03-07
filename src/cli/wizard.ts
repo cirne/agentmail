@@ -24,6 +24,12 @@ const SYNC_DURATION_CHOICES = [
 ] as const;
 
 export async function runWizard(options: { noValidate?: boolean; clean?: boolean; yes?: boolean } = {}): Promise<void> {
+  // BUG-009 fix: Check for non-TTY stdin before launching interactive prompts
+  if (!process.stdin.isTTY) {
+    console.error("Wizard requires an interactive terminal. Use 'zmail setup' instead.");
+    process.exit(1);
+  }
+
   const { noValidate = false, clean = false, yes = false } = options;
 
   if (clean) {

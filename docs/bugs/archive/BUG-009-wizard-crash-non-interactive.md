@@ -1,6 +1,6 @@
 # BUG-009: `zmail wizard` Crashes with Stack Trace on Non-Interactive Stdin — Agent-Reported
 
-**Status:** Open.
+**Status:** Fixed.
 
 **Design lens:** [Agent-first](../VISION.md) — agents invoke commands via subprocess with piped stdio; interactive commands should detect non-TTY mode and fail gracefully with a clear error message, not crash with a stack trace.
 
@@ -63,6 +63,15 @@ Agent (or script) invokes `zmail wizard` in a non-TTY environment. The interacti
 - The `--help` output correctly suggests `zmail wizard` for interactive use and `zmail setup` for CLI/agent use. The issue is just missing a guard at the start of `wizard` to detect non-TTY stdin.
 
 ---
+
+## Fix
+
+Fixed by adding TTY check at the start of `runWizard()` function in `src/cli/wizard.ts`:
+- Check `process.stdin.isTTY` before launching any interactive prompts
+- Exit with code 1 and clear error message if stdin is not a TTY
+- Prevents `ExitPromptError` from being thrown
+
+Test case: `src/cli/wizard-non-interactive.test.ts` verifies the fix.
 
 ## References
 
