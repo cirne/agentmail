@@ -99,7 +99,7 @@ Clarity about what we don't do is as important as what we do.
 
 - **Not a replacement for Gmail/Outlook.** Users keep their existing provider. zmail is an intelligence layer in front of the provider, not a standalone mail client.
 - **Not an API proxy.** We don't forward queries to providers. We build a local dataset and query it directly.
-- **Not yet a write interface.** Today we are read-only — search, fetch, summarize. Send is in the vision (see [VISION.md](./VISION.md) — "The Full Loop"). Agent-friendly setup ([OPP-009](opportunities/archive/OPP-009-agent-friendly-setup.md)) is implemented; send is unblocked.
+- **Not yet a write interface.** Today we are read-only — search, fetch, summarize. Send is in the vision (see [VISION.md](./VISION.md) — "The Full Loop"). Send is blocked on customer validation for core search/index/onboarding — we want to nail that first.
 
 This sequencing is intentional. The underserved problem is deep, fast, intelligent *read* access. Once that works reliably for new users, send completes the loop.
 
@@ -129,7 +129,7 @@ Provider (Gmail, Outlook, Fastmail, ...)
 
 Based on this positioning, the highest-leverage work is:
 
-1. **Onboarding and user flow** — Agent-friendly setup ([OPP-009](opportunities/archive/OPP-009-agent-friendly-setup.md)) is implemented. Smooth first sync, clear feedback. Send is unblocked.
+1. **Onboarding and user flow** — Agent-friendly setup ([OPP-009](opportunities/archive/OPP-009-agent-friendly-setup.md)) is implemented. Customer validation for core search/index/onboarding — smooth first sync, clear feedback. Send is blocked until we nail that.
 
 2. **Attachment extraction and indexing** — The single most tangible differentiator. "Search inside every PDF in your email" is immediately compelling and impossible via API proxy.
 

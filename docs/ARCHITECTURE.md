@@ -17,7 +17,7 @@ IMAP provider → raw email store → SQLite FTS5 index → MCP server
 
 **Rationale:** If you can search your own email from an agent (Cursor, Claude Desktop) in natural language, the core value is proven. Everything else — filesystem interface, semantic embeddings, replacement SMTP mode — comes later.
 
-**Deferred:** Filesystem (FUSE) interface, SMTP ingress (MX hosting), semantic/vector search, multi-user. **Send (SMTP outbound)** is in the vision ([VISION.md](./VISION.md) — "The Full Loop"). Agent-friendly setup ([OPP-009](opportunities/archive/OPP-009-agent-friendly-setup.md)) is implemented; send is unblocked.
+**Deferred:** Filesystem (FUSE) interface, SMTP ingress (MX hosting), semantic/vector search, multi-user. **Send (SMTP outbound)** is in the vision ([VISION.md](./VISION.md) — "The Full Loop"). Send is blocked on customer validation for core search/index/onboarding — we want to nail that first.
 
 ---
 

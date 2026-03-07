@@ -16,6 +16,8 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 |---|---|---|---|
 | `ux-semantic-search-guidance.md` | 2026-03-06 | Created bug | [BUG-003](bugs/archive/BUG-003-fts-vs-semantic-search-guidance.md) — Superseded by OPP-008 |
 | `ux-simplify-search-modes.md` | 2026-03-06 | Created opportunity | [OPP-008](opportunities/archive/OPP-008-simplify-search-modes.md) — Implemented 2026-03-06 |
+| `bug-attachment-read-silent-failure.md` | 2026-03-06 | Created bug | [BUG-004](bugs/BUG-004-attachment-read-silent-failure.md) |
+| `bug-xlsx-object-object-rendering.md` | 2026-03-06 | Created bug | [BUG-005](bugs/BUG-005-xlsx-formula-cells-object-object.md) |
 
 ---
 

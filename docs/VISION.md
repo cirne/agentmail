@@ -335,7 +335,7 @@ Today zmail is read-only — search, fetch, summarize. The end state is **read +
 
 **Architecture:** SMTP (send-as-user through Gmail/Outlook/Fastmail) — same credentials, same identity, messages appear in Sent, zero deliverability risk. The provider stays the source of truth; zmail is the intelligence layer in front of it.
 
-**Sequencing:** Agent-friendly setup ([OPP-009](opportunities/archive/OPP-009-agent-friendly-setup.md)) is implemented; send is unblocked.
+**Sequencing:** Send is blocked on customer validation for core search/index/onboarding. We want to nail that first.
 
 ---
 

@@ -1,6 +1,6 @@
 # zmail — Agent Guide
 
-**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). Read-only today; send is in the vision ([VISION.md](docs/VISION.md)) and unblocked by agent-friendly setup ([OPP-009](docs/opportunities/archive/OPP-009-agent-friendly-setup.md)).
+**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). Read-only today; send is in the vision ([VISION.md](docs/VISION.md)) but blocked on customer validation for core search/index/onboarding — we want to nail that first.
 
 **Quick install:**
 ```bash

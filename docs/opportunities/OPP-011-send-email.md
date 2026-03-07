@@ -1,6 +1,6 @@
 # OPP-011: Send Email — Draft + SMTP
 
-**Status:** Opportunity. **Unblocked** — [OPP-009](archive/OPP-009-agent-friendly-setup.md) (agent-friendly setup + wizard) is implemented.
+**Status:** Opportunity. **Blocked** on customer validation for core search/index/onboarding — we want to nail that first.
 
 ## Context
 
@@ -20,6 +20,6 @@ Add send capability via SMTP (send-as-user through Gmail/Outlook/Fastmail). Same
 - Tagline as advertisement ("Sent via zmail")
 - Intent-to-action ("rsvp yes" → draft → confirm → send)
 
-## Unblocked by
+## Blocked by
 
-[OPP-009: Agent-Friendly Setup + Wizard](archive/OPP-009-agent-friendly-setup.md) — implemented.
+Customer validation for core search/index/onboarding. Agent-friendly setup ([OPP-009](archive/OPP-009-agent-friendly-setup.md)) is implemented; we need to validate the read/sync/search flow with real users before adding send.

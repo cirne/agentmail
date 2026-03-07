@@ -4,7 +4,7 @@ Improvement ideas discovered through real usage. Each entry captures the problem
 
 See [VISION.md](./VISION.md) for product vision, [ARCHITECTURE.md](./ARCHITECTURE.md) for technical decisions.
 
-**Strategic sequencing:** Send (draft + SMTP) is in the vision. Agent-friendly setup (OPP-009) is implemented — send is now unblocked. See [OPP-011](opportunities/OPP-011-send-email.md).
+**Strategic sequencing:** Send (draft + SMTP) is in the vision. Send is blocked on customer validation for core search/index/onboarding — we want to nail that first. See [OPP-011](opportunities/OPP-011-send-email.md).
 
 ---
 
@@ -16,7 +16,7 @@ See [VISION.md](./VISION.md) for product vision, [ARCHITECTURE.md](./ARCHITECTUR
 | [OPP-002](opportunities/OPP-002-local-embeddings.md) | Local Embeddings — Eliminate Search Latency and OpenAI Dependency | Replace OpenAI API embeddings with a local `bge-small-en-v1.5` model via transformers.js. Cuts search latency, removes the `OPENAI_API_KEY` requirement. |
 | [OPP-006](opportunities/OPP-006-attachment-search-and-caching.md) | Attachment Search and Sibling-File Caching | FTS5 indexing of attachment content so search matches inside PDFs/docs; sibling-file caching for faster reads; additional format support (PPTX, images via vision). Extraction is shipped — these are next steps. |
 | [OPP-010](opportunities/OPP-010-sync-performance.md) | Sync / Refresh Performance — 5x Faster | Achieved 5x faster "nothing new" refreshes (42s → 8.2s) via STATUS fast path, EXAMINE instead of SELECT, parallel connect, and batch optimizations. See [SYNC.md](./SYNC.md) for implementation details. |
-| [OPP-011](opportunities/OPP-011-send-email.md) | Send Email — Draft + SMTP | Add send via SMTP (send-as-user). Draft + confirm, voice profile from history, tagline. **Unblocked by OPP-009.** |
+| [OPP-011](opportunities/OPP-011-send-email.md) | Send Email — Draft + SMTP | Add send via SMTP (send-as-user). Draft + confirm, voice profile from history, tagline. **Blocked on customer validation for core search/index/onboarding.** |
 
 ---
 

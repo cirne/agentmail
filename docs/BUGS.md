@@ -6,7 +6,10 @@ When an agent or user hits a failure, we document it here. Root cause and "agent
 
 ## Active
 
-_No active bugs._
+| ID | Title | Summary |
+|---|---|---|
+| [BUG-004](bugs/BUG-004-attachment-read-silent-failure.md) | Attachment Read Silent Failure — Agent-Reported | `zmail attachment read` fails silently (exit 1, no output) when given invalid index (e.g. 0). Help text doesn't clarify 0-based vs 1-based. |
+| [BUG-005](bugs/BUG-005-xlsx-formula-cells-object-object.md) | XLSX Formula Cells Render as `[object Object]` — Agent-Reported | XLSX cells with formulas render as `[object Object]` instead of computed values; USD/totals lost in extracted CSV. |
 
 ---
 
