@@ -1,6 +1,6 @@
 # BUG-016: Bakeoff Failure — Incomplete Coverage vs Google Adapter — Agent-Reported
 
-**Status:** Open. **Updated:** 2026-03-07 (deep analysis after second retest)
+**Status:** Open. **Updated:** 2026-03-07 (deep analysis after second retest). **Tags:** semantic
 
 **Design lens:** [Agent-first](../../VISION.md) — For transactional queries requiring complete coverage (financial, legal, compliance), zmail must return all matching results. Missing half the data makes it unsuitable for critical workflows, regardless of search speed advantage.
 
