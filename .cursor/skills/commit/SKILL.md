@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Pre-commit checklist to ensure code quality, test coverage, linting, and documentation accuracy. Use when preparing commits, reviewing changes before commit, or when the user asks about commit requirements or pre-commit checks.
+description: Pre-commit checklist to ensure code quality, test coverage, linting, and documentation accuracy. Use when preparing commits, reviewing changes before commit, or when the user asks about commit requirements or pre-commit checks. When invoked: run the full checklist; if everything is clean, commit and push; only hold off and report if there are issues.
 ---
 
 # Commit Checklist
@@ -86,14 +86,16 @@ For any code changes (even small ones), all checklist items apply, especially do
 
 ## Final Step: Commit and Push
 
-**When all checklist items are complete, tests and lint are clean, then commit and push:**
+**If everything is clean, commit and push. Do not hold off — complete the commit and push.** Only stop and report to the user when there are issues (lint failures, test failures, or documentation gaps that need human input).
+
+When all checklist items are complete, tests and lint are clean:
 
 1. **VERIFY documentation review is complete** — this is the most common mistake
 2. Stage your changes: `git add .`
 3. Commit with a descriptive message: `git commit -m "your message"`
 4. Push to remote: `git push`
 
-Only proceed to commit and push after verifying:
+Before committing, confirm:
 - ✅ **Documentation review is complete** (MANDATORY - check this first!)
 - ✅ All checklist items are satisfied
 - ✅ `npm run lint` passes with no errors
@@ -102,3 +104,8 @@ Only proceed to commit and push after verifying:
 - ✅ Bug backlog is organized (fixed bugs archived, superseded bugs noted)
 - ✅ Opportunities are organized (implemented opportunities moved to archive)
 - ✅ All links are correct and point to the right locations
+
+Only hold off (do not commit/push) when:
+- Lint fails or tests fail — report the failures and what to fix
+- Documentation or backlog updates need a decision (e.g., whether to archive an opportunity)
+- User has explicitly asked for a dry run or review-only
