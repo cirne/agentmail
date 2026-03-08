@@ -3,7 +3,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { join } from "path";
 import { getDb } from "~/db";
-import { search } from "~/search";
+import { searchWithMeta } from "~/search";
 import { who } from "~/search/who";
 import { logger } from "~/lib/logger";
 import { extractAndCache } from "~/attachments";
@@ -26,6 +26,7 @@ export const MCP_SEARCH_MAIL_PARAM_KEYS: readonly string[] = [
   "fromAddress",
   "afterDate",
   "beforeDate",
+  "includeThreads",
 ];
 
 /**
@@ -73,7 +74,7 @@ export function createMcpServer() {
 
   server.tool(
     "search_mail",
-    "Search emails using FTS5 full-text search. Returns matching messages with snippets. Supports inline query operators: from:, to:, subject:, after:, before:. Example: 'invoice from:alice@example.com after:30d'",
+    "Search emails using FTS5 full-text search. Returns matching messages with bodyPreview, attachment metadata, and optional full threads. Use includeThreads: true to get full conversations per match and avoid get_thread round-trips.",
     {
       query: z.string().optional().describe("Full-text search query. Supports inline operators: from:, to:, subject:, after:, before:. Example: 'invoice from:alice@example.com after:30d'"),
       limit: z.number().optional().describe("Maximum number of results to return (default: 50)"),
@@ -81,20 +82,25 @@ export function createMcpServer() {
       fromAddress: z.string().optional().describe("Filter by sender email address (alternative to 'from:' in query)"),
       afterDate: z.string().optional().describe("Filter messages after this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
       beforeDate: z.string().optional().describe("Filter messages before this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
+      includeThreads: z.boolean().optional().describe("When true, also return full threads (all messages per matching thread) to avoid get_thread calls (default: false)"),
     },
-    async ({ query, limit, offset, fromAddress, afterDate, beforeDate }) => {
+    async ({ query, limit, offset, fromAddress, afterDate, beforeDate, includeThreads }) => {
       const db = getDb();
-      const results = await search(db, {
+      const result = await searchWithMeta(db, {
         query,
         limit,
         offset,
         fromAddress,
         afterDate,
         beforeDate,
+        includeThreads: includeThreads ?? false,
       });
 
+      const payload = result.threads?.length
+        ? { results: result.results, threads: result.threads, totalMatched: result.totalMatched, timings: result.timings }
+        : result.results;
       return {
-        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
       };
     }
   );

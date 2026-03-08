@@ -1,7 +1,23 @@
 import type { SqliteDatabase } from "~/db";
-import type { SearchResult } from "~/lib/types";
+import type { SearchResult, SearchResultAttachment } from "~/lib/types";
 import { parseSearchQuery } from "./query-parse";
 import { buildFilterClause, buildWhereClause } from "./filter-compiler";
+
+/** One message in a thread when includeThreads is true (avoids get_thread round-trip). */
+export interface ThreadMessageInSearch {
+  messageId: string;
+  fromAddress: string;
+  fromName: string | null;
+  subject: string;
+  date: string;
+  bodyPreview: string;
+}
+
+export interface ThreadSearchResult {
+  threadId: string;
+  subject: string;
+  messages: ThreadMessageInSearch[];
+}
 
 // ResolvedSearchMode type removed - no longer needed
 
@@ -16,6 +32,8 @@ export interface SearchOptions {
   beforeDate?: string;
   /** When true, use OR logic between filters instead of AND. */
   filterOr?: boolean;
+  /** When true, also return full threads (all messages per matching thread_id). Default false. */
+  includeThreads?: boolean;
 }
 
 export interface SearchTimings {
@@ -27,6 +45,8 @@ export interface SearchResultSet {
   results: SearchResult[];
   timings: SearchTimings;
   totalMatched?: number; // Total number of matches before limit/offset
+  /** When includeThreads is true, full conversation per matching thread. */
+  threads?: ThreadSearchResult[];
   _meta?: {
     hasFtsMatches: boolean;
     hasAnyMatches: boolean;
@@ -34,6 +54,86 @@ export interface SearchResultSet {
 }
 
 // fromFilterPattern is now in filter-compiler.ts
+
+const BODY_PREVIEW_LEN = 300;
+
+/** Batch-load attachment metadata for result message_ids and merge onto each result (1-based index). */
+function mergeAttachmentMetadata(
+  db: SqliteDatabase,
+  results: SearchResult[]
+): SearchResult[] {
+  if (results.length === 0) return results;
+  const ids = results.map((r) => r.messageId);
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      /* sql */ `
+    SELECT message_id AS messageId, id, filename, mime_type AS mimeType
+    FROM attachments
+    WHERE message_id IN (${placeholders})
+    ORDER BY message_id, id
+    `
+    )
+    .all(...ids) as Array<{ messageId: string; id: number; filename: string; mimeType: string }>;
+  const byMessage = new Map<string, SearchResultAttachment[]>();
+  for (const row of rows) {
+    const list = byMessage.get(row.messageId) ?? [];
+    list.push({ id: row.id, filename: row.filename, mimeType: row.mimeType, index: list.length + 1 });
+    byMessage.set(row.messageId, list);
+  }
+  return results.map((r) => ({
+    ...r,
+    attachments: byMessage.get(r.messageId) ?? [],
+  }));
+}
+
+/** Load full thread messages (for includeThreads). */
+function loadThreads(
+  db: SqliteDatabase,
+  threadIds: string[]
+): ThreadSearchResult[] {
+  if (threadIds.length === 0) return [];
+  const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(body_text, 1, ${BODY_PREVIEW_LEN})), '') || (CASE WHEN LENGTH(TRIM(body_text)) > ${BODY_PREVIEW_LEN} THEN '…' ELSE '' END)`;
+  const placeholders = threadIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      /* sql */ `
+    SELECT thread_id AS threadId, message_id AS messageId, from_address AS fromAddress, from_name AS fromName,
+           subject, date, ${bodyPreviewSql} AS bodyPreview
+    FROM messages
+    WHERE thread_id IN (${placeholders})
+    ORDER BY thread_id, date ASC
+    `
+    )
+    .all(...threadIds) as Array<{
+      threadId: string;
+      messageId: string;
+      fromAddress: string;
+      fromName: string | null;
+      subject: string;
+      date: string;
+      bodyPreview: string;
+    }>;
+  const byThread = new Map<string, ThreadMessageInSearch[]>();
+  for (const row of rows) {
+    const list = byThread.get(row.threadId) ?? [];
+    list.push({
+      messageId: row.messageId,
+      fromAddress: row.fromAddress,
+      fromName: row.fromName,
+      subject: row.subject,
+      date: row.date,
+      bodyPreview: row.bodyPreview,
+    });
+    byThread.set(row.threadId, list);
+  }
+  const threads: ThreadSearchResult[] = [];
+  for (const tid of threadIds) {
+    const messages = byThread.get(tid);
+    if (messages?.length) threads.push({ threadId: tid, subject: messages[0].subject, messages });
+  }
+  return threads;
+}
 
 /**
  * Filter-only search (no query text, just WHERE clauses).
@@ -55,8 +155,9 @@ function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): { results: S
     )
     .get(...filterClause.params) as { count: number };
 
-  // Then get results
+  // Then get results (bodyPreview = first 300 chars to reduce follow-up reads)
   const params = [...filterClause.params, limit, offset];
+  const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
   const rows = db
     .prepare(
       /* sql */ `
@@ -68,6 +169,7 @@ function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): { results: S
         m.subject,
         m.date,
         COALESCE(TRIM(SUBSTR(m.body_text, 1, 200)), '') || (CASE WHEN LENGTH(m.body_text) > 200 THEN '…' ELSE '' END) AS snippet,
+        ${bodyPreviewSql} AS bodyPreview,
         0 AS rank
       FROM messages m
       ${where}
@@ -161,6 +263,7 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
     // Then get results
     const params = [escapedQuery, ...filterClause.params, limit + offset + 50];
 
+    const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
     const rows = db
       .prepare(
         /* sql */ `
@@ -172,6 +275,7 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
           m.subject,
           m.date,
           snippet(messages_fts, 2, '<b>', '</b>', '…', 20) AS snippet,
+          ${bodyPreviewSql} AS bodyPreview,
           rank
         FROM messages_fts
         JOIN messages m ON m.id = messages_fts.rowid
@@ -251,10 +355,15 @@ export async function searchWithMeta(
   if (!parsedQuery?.trim() && hasFilters) {
     const { results, totalCount } = filterOnlySearch(db, effectiveOpts);
     timings.totalMs = Date.now() - startedAt;
+    const resultsWithAttachments = mergeAttachmentMetadata(db, results);
+    const threads = effectiveOpts.includeThreads
+      ? loadThreads(db, [...new Set(resultsWithAttachments.map((r) => r.threadId))])
+      : undefined;
     return {
-      results,
+      results: resultsWithAttachments,
       timings,
       totalMatched: totalCount,
+      ...(threads?.length ? { threads } : {}),
       _meta: {
         hasFtsMatches: results.length > 0,
         hasAnyMatches: results.length > 0,
@@ -279,10 +388,15 @@ export async function searchWithMeta(
   const { results, totalCount } = ftsSearch(db, effectiveOpts);
   timings.ftsMs = Date.now() - ftsStart;
   timings.totalMs = Date.now() - startedAt;
+  const resultsWithAttachments = mergeAttachmentMetadata(db, results);
+  const threads = effectiveOpts.includeThreads
+    ? loadThreads(db, [...new Set(resultsWithAttachments.map((r) => r.threadId))])
+    : undefined;
   return {
-    results,
+    results: resultsWithAttachments,
     timings,
     totalMatched: totalCount,
+    ...(threads?.length ? { threads } : {}),
     _meta: {
       hasFtsMatches: results.length > 0,
       hasAnyMatches: results.length > 0,

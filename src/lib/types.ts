@@ -67,6 +67,14 @@ export interface SyncSummary {
   isRunning: boolean;
 }
 
+/** Attachment metadata included inline in search results to avoid list_attachments calls. */
+export interface SearchResultAttachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  index: number; // 1-based for CLI/MCP read_attachment
+}
+
 export interface SearchResult {
   messageId: string;
   threadId: string;
@@ -76,6 +84,10 @@ export interface SearchResult {
   date: string;
   snippet: string;
   rank: number;
+  /** First ~300 chars of body (always present) to reduce follow-up get_message calls. */
+  bodyPreview?: string;
+  /** Inline attachment metadata when requested to avoid list_attachments round-trips. */
+  attachments?: SearchResultAttachment[];
 }
 
 /** One identity from `zmail who`: merged person with all addresses, contact info, and counts. */

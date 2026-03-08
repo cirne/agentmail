@@ -22,6 +22,7 @@ const INTENDED_MCP_SEARCH_PARAMS: (keyof SearchOptions)[] = [
   "fromAddress",
   "afterDate",
   "beforeDate",
+  "includeThreads",
 ];
 
 const INTENDED_MCP_WHO_PARAMS: (keyof WhoOptions)[] = [

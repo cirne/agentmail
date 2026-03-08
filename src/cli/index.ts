@@ -74,7 +74,9 @@ type SearchField =
   | "subject"
   | "rank"
   | "snippet"
-  | "body";
+  | "bodyPreview"
+  | "body"
+  | "attachments";
 
 const VALID_DETAILS = new Set<SearchDetail>(["headers", "snippet", "body"]);
 const VALID_FIELDS = new Set<SearchField>([
@@ -86,7 +88,9 @@ const VALID_FIELDS = new Set<SearchField>([
   "subject",
   "rank",
   "snippet",
+  "bodyPreview",
   "body",
+  "attachments",
 ]);
 const DEFAULT_HEADER_FIELDS: SearchField[] = [
   "messageId",
@@ -96,6 +100,8 @@ const DEFAULT_HEADER_FIELDS: SearchField[] = [
   "fromName",
   "subject",
   "rank",
+  "bodyPreview",
+  "attachments",
 ];
 const JSON_LIMIT_CAP = 100;
 const JSON_BYTE_CAP = 64 * 1024;
@@ -120,6 +126,7 @@ interface ParsedSearchArgs {
   idsOnly: boolean;
   timings: boolean;
   includeTopBody: boolean;
+  threads: boolean;
 }
 
 function searchUsage() {
@@ -133,6 +140,7 @@ function searchUsage() {
   console.error("  --limit <n>        max results (default: 50)");
   console.error("  --detail <level>   headers | snippet | body (default: headers)");
   console.error("  --fields <csv>     projection fields, e.g. messageId,subject,date");
+  console.error("  --threads          return full threads for each match (conversation view)");
   console.error("  --ids-only         return only message IDs");
   console.error("  --timings          include machine-readable search timings");
   console.error("  --text             human-readable table output (default: JSON)");
@@ -265,6 +273,7 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
     idsOnly: false,
     timings: false,
     includeTopBody: true,
+    threads: false,
   };
 
   const queryParts: string[] = [];
@@ -319,6 +328,10 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
         throw new Error(`Invalid --limit: "${rawLimit}". Must be a positive number.`);
       }
       parsed.limit = limit;
+      continue;
+    }
+    if (arg === "--threads") {
+      parsed.threads = true;
       continue;
     }
     if (arg === "--mode") {
@@ -464,27 +477,29 @@ function serializeJsonPayload(
   resultCount?: number,
   totalMatched?: number,
   limit?: number,
-  searchHint?: string
+  searchHint?: string,
+  threads?: unknown[]
 ): string {
   const total = rows.length;
   const trueTotal = totalMatched ?? total; // Use provided totalMatched, fallback to rows.length
   const truncated = trueTotal > total;
   // Use searchHint from searchWithMeta if provided, otherwise fall back to getSearchHint
   const hint = searchHint ?? (query ? getSearchHint(query, resultCount ?? total, trueTotal, limit) : undefined);
-  
+  const hasMeta = truncated || timings || hint || (threads && threads.length > 0);
+
   for (let includeCount = total; includeCount >= 0; includeCount--) {
     const visible = rows.slice(0, includeCount);
-    const payload =
-      truncated || timings || hint
-        ? {
-            results: visible,
-            truncated,
-            totalMatched: trueTotal,
-            returned: visible.length,
-            ...(hint ? { hint } : {}),
-            ...(timings ? { timings } : {}),
-          }
-        : visible;
+    const payload = hasMeta
+      ? {
+          results: visible,
+          ...(threads && threads.length > 0 ? { threads } : {}),
+          truncated,
+          totalMatched: trueTotal,
+          returned: visible.length,
+          ...(hint ? { hint } : {}),
+          ...(timings ? { timings } : {}),
+        }
+      : visible;
     const json = JSON.stringify(payload, null, 2);
     if (Buffer.byteLength(json, "utf8") <= JSON_BYTE_CAP) {
       return json;
@@ -494,6 +509,7 @@ function serializeJsonPayload(
   return JSON.stringify(
     {
       results: [],
+      ...(threads && threads.length > 0 ? { threads } : {}),
       truncated: true,
       totalMatched: trueTotal,
       returned: 0,
@@ -884,6 +900,7 @@ async function main() {
           afterDate: parsed.afterDate,
           beforeDate: parsed.beforeDate,
           limit: effectiveLimit,
+          includeThreads: parsed.threads,
         });
       } catch (err) {
         console.error(err instanceof Error ? err.message : String(err));
@@ -906,7 +923,8 @@ async function main() {
           results.length,
           run.totalMatched ?? results.length,
           effectiveLimit,
-          parsed.query ? getSearchHint(parsed.query, results.length, run.totalMatched ?? results.length, effectiveLimit) : undefined
+          parsed.query ? getSearchHint(parsed.query, results.length, run.totalMatched ?? results.length, effectiveLimit) : undefined,
+          parsed.threads && run.threads?.length ? run.threads : undefined
         );
         console.log(json);
         break;
@@ -947,7 +965,24 @@ async function main() {
           console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}`);
         }
       }
-      
+
+      if (parsed.threads && run.threads?.length) {
+        console.log("\nThreads (full conversations):");
+        for (const thread of run.threads) {
+          console.log(`\n  Thread: ${thread.subject} (${thread.threadId})`);
+          for (const msg of thread.messages) {
+            const from = (msg.fromName ? `${msg.fromName} ` : "") + `<${msg.fromAddress}>`;
+            console.log(`    ${msg.date.slice(0, 10)}  ${from}`);
+            console.log(`    ${msg.subject}`);
+            if (msg.bodyPreview?.trim()) {
+              const preview = msg.bodyPreview.replace(/\n/g, " ").slice(0, 120);
+              console.log(`    ${preview}${msg.bodyPreview.length > 120 ? "…" : ""}`);
+            }
+            console.log("");
+          }
+        }
+      }
+
       // Show actionable hints after results (only in text mode, not JSON)
       const hint = getSearchHint(parsed.query, results.length, totalMatched, effectiveLimit);
       if (hint) {
@@ -1484,7 +1519,7 @@ Usage:
 
 Agent interfaces:
   CLI (this): Use for direct subprocess calls. Fast for one-off queries. Commands default to JSON (search, who, attachment list) or text (read, thread, status, stats). Use --text or --json flags to override.
-  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. Search returns top-result body; use get_messages([ids]) to batch-read multiple emails. See docs/MCP.md.
+  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. Search returns bodyPreview and attachment metadata per result; use includeThreads: true for full threads, get_messages([ids]) to batch-read. See docs/MCP.md.
 
 Run 'zmail setup' for setup instructions.
 `);

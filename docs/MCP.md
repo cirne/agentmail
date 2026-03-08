@@ -30,7 +30,7 @@ The server runs on stdio and communicates via JSON-RPC over stdin/stdout. It wil
 
 ### `search_mail`
 
-Search emails using FTS5 full-text search. Returns matching messages with snippets.
+Search emails using FTS5 full-text search. Returns matching messages with **bodyPreview** (first ~300 chars of body) and **attachment metadata** inline so agents can avoid follow-up `get_message` / `list_attachments` calls. Use `includeThreads: true` to return full conversations per match and avoid `get_thread` round-trips.
 
 **Parameters:**
 - `query` (string, optional): Full-text search query. Supports inline operators: `from:`, `to:`, `subject:`, `after:`, `before:`
@@ -39,8 +39,9 @@ Search emails using FTS5 full-text search. Returns matching messages with snippe
 - `fromAddress` (string, optional): Filter by sender email address
 - `afterDate` (string, optional): Filter messages after this date (ISO 8601 or relative like "7d", "30d")
 - `beforeDate` (string, optional): Filter messages before this date
+- `includeThreads` (boolean, optional): When true, also return full threads (all messages per matching thread) as a `threads` array (default: false)
 
-**Returns:** JSON array of message objects with `message_id`, `from`, `to`, `subject`, `date`, `snippet`, etc.
+**Returns:** JSON array of message objects with `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, index }` when present). When `includeThreads: true`, response is an object `{ results, threads, totalMatched?, timings? }` with `threads` being an array of `{ threadId, subject, messages }` (each message has `messageId`, `fromAddress`, `fromName`, `subject`, `date`, `bodyPreview`).
 
 **Example:**
 ```json
@@ -304,7 +305,7 @@ Both interfaces share the same underlying index and data. A message synced via `
 
 ### CLI arguments (quick reference)
 
-- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--fields csv] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date]`
+- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--fields csv] [--threads] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date]`
 - **who:** `zmail who <query> [--limit n] [--min-sent n] [--min-received n] [--all] [--enrich] [--text]`
 - **status:** `zmail status [--json] [--imap]` — `--imap` compares local DB with IMAP server (CLI-only).
 - **stats:** `zmail stats [--json]`
