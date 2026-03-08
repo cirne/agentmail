@@ -3,6 +3,8 @@ import { searchWithMeta } from "~/search";
 import { who } from "~/search/who";
 import { normalizeMessageId } from "~/mcp";
 import { parseSinceToDate } from "~/sync/parse-since";
+import { formatMessageForOutput } from "~/messages/presenter";
+import { shapeShapedToOutput, DEFAULT_MAX_BODY_CHARS } from "~/messages/lean-shape";
 
 /**
  * Metadata-only search result (no body content).
@@ -150,6 +152,7 @@ async function executeSearchTool(
   const afterDate = parseDateParam(args.afterDate as string | undefined);
   const beforeDate = parseDateParam(args.beforeDate as string | undefined);
   const includeThreads = (args.includeThreads as boolean) ?? false;
+  const filterOr = (args.filterOr as boolean) ?? false;
 
   const result = await searchWithMeta(db, {
     query,
@@ -160,6 +163,7 @@ async function executeSearchTool(
     afterDate,
     beforeDate,
     includeThreads,
+    filterOr,
   });
 
   const metadataResults = toMetadataResults(result.results);
@@ -241,13 +245,110 @@ function executeGetThreadHeadersTool(
 }
 
 /**
- * Execute a nano tool (metadata-only).
+ * Execute get_message tool - get full message content.
+ */
+async function executeGetMessageTool(
+  db: SqliteDatabase,
+  args: Record<string, unknown>
+): Promise<string> {
+  const messageId = normalizeMessageId(args.messageId as string);
+  const detail = (args.detail as "full" | "summary" | "raw" | undefined) ?? "full";
+  const maxBodyChars = (args.maxBodyChars as number | undefined) ?? DEFAULT_MAX_BODY_CHARS;
+  const raw = (args.raw as boolean | undefined) ?? false;
+
+  const message = db.prepare("SELECT * FROM messages WHERE message_id = ?").get(messageId) as any | undefined;
+  
+  if (!message) {
+    return JSON.stringify({ error: `Message ${messageId} not found` });
+  }
+
+  const useRaw = raw || detail === "raw";
+  const shaped = await formatMessageForOutput(message, useRaw);
+  const out = shapeShapedToOutput([shaped], { useRaw, detail, maxBodyChars });
+  return JSON.stringify(out[0]);
+}
+
+/**
+ * Execute add_message tool - add a message to the context set.
+ * Returns confirmation and message summary.
+ */
+function executeAddMessageTool(
+  db: SqliteDatabase,
+  args: Record<string, unknown>,
+  contextSet: { messageIds: Set<string> }
+): string {
+  const messageIdArg = args.messageId as string;
+  
+  // Validate messageId is provided and not empty
+  if (!messageIdArg || typeof messageIdArg !== "string" || messageIdArg.trim() === "") {
+    return JSON.stringify({ error: "messageId is required and cannot be empty", added: false });
+  }
+  
+  const messageId = normalizeMessageId(messageIdArg);
+  
+  // Verify message exists
+  const exists = db.prepare("SELECT 1 FROM messages WHERE message_id = ?").get(messageId);
+  if (!exists) {
+    return JSON.stringify({ error: `Message ${messageId} not found`, added: false });
+  }
+  
+  contextSet.messageIds.add(messageId);
+  
+  // Return summary
+  const msg = db.prepare("SELECT subject, from_address, from_name, date FROM messages WHERE message_id = ?").get(messageId) as any;
+  return JSON.stringify({
+    added: true,
+    messageId,
+    subject: msg.subject,
+    from: msg.from_name ? `${msg.from_name} <${msg.from_address}>` : msg.from_address,
+    date: msg.date,
+    totalMessages: contextSet.messageIds.size,
+  });
+}
+
+/**
+ * Execute add_attachment tool - add a specific attachment to the context set.
+ * Returns confirmation and attachment metadata.
+ */
+async function executeAddAttachmentTool(
+  db: SqliteDatabase,
+  args: Record<string, unknown>,
+  contextSet: { attachmentIds: Set<number> }
+): Promise<string> {
+  const attachmentId = args.attachmentId as number;
+  
+  // Verify attachment exists and get metadata
+  const att = db.prepare(`
+    SELECT id, message_id, filename, mime_type, size, extracted_text 
+    FROM attachments WHERE id = ?
+  `).get(attachmentId) as any | undefined;
+  
+  if (!att) {
+    return JSON.stringify({ error: `Attachment ${attachmentId} not found`, added: false });
+  }
+  
+  contextSet.attachmentIds.add(attachmentId);
+  
+  return JSON.stringify({
+    added: true,
+    attachmentId,
+    filename: att.filename,
+    mimeType: att.mime_type,
+    size: att.size,
+    extracted: att.extracted_text !== null,
+    totalAttachments: contextSet.attachmentIds.size,
+  });
+}
+
+/**
+ * Execute a nano tool (metadata-only + context building).
  * Returns JSON string for the LLM.
  */
 export async function executeNanoTool(
   db: SqliteDatabase,
   name: string,
-  args: Record<string, unknown>
+  args: Record<string, unknown>,
+  contextSet?: { messageIds: Set<string>; attachmentIds: Set<number> }
 ): Promise<string> {
   try {
     switch (name) {
@@ -257,6 +358,18 @@ export async function executeNanoTool(
         return await executeWhoTool(db, args);
       case "get_thread_headers":
         return executeGetThreadHeadersTool(db, args);
+      case "get_message":
+        return await executeGetMessageTool(db, args);
+      case "add_message":
+        if (!contextSet) {
+          return JSON.stringify({ error: "Context set not provided" });
+        }
+        return executeAddMessageTool(db, args, contextSet);
+      case "add_attachment":
+        if (!contextSet) {
+          return JSON.stringify({ error: "Context set not provided" });
+        }
+        return await executeAddAttachmentTool(db, args, contextSet);
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -268,22 +381,38 @@ export async function executeNanoTool(
 }
 
 /**
- * Get OpenAI tool definitions for nano (metadata-only tools).
+ * Get OpenAI tool definitions for nano (search + context building tools).
  */
-export function getNanoToolDefinitions() {
+/**
+ * Tools for investigation phase: search, explore, but don't add to context yet
+ */
+export function getInvestigationToolDefinitions() {
   return [
     {
       type: "function" as const,
       function: {
         name: "search",
         description:
-          "Search emails by full-text and filters. Returns message list with headers/metadata only (messageId, threadId, from, subject, date, short snippet). No body content. Use from:, to:, after: in query or separate params.",
+          "Search emails by full-text and filters. Returns message list with headers/metadata only (messageId, threadId, from, subject, date, short snippet). No body content.\n\n" +
+          "FTS5 QUERY CONSTRUCTION:\n" +
+          "- FTS5 treats space-separated words as AND (all must match). Use OR operator for alternatives.\n" +
+          "- Good: 'dan cabo' (2 key terms), 'invoice OR receipt' (alternatives), 'funds request' (2 related terms)\n" +
+          "- Bad: 'dan cabo suggestion' (3 words - too specific), 'what did dan suggest' (action words don't help)\n" +
+          "- Extract core nouns/concepts from the question. Remove action words (suggest, recommend, said, want, need).\n" +
+          "- Use OR for synonyms/alternatives: 'invoice OR receipt', 'flight OR travel OR trip'\n" +
+          "- Use OR for person name variations: 'dan OR daniel' (if needed)\n" +
+          "- Keep queries simple: 2-3 terms maximum, or use OR to combine alternatives\n" +
+          "- Examples:\n" +
+          "  * 'what did dan suggest for cabo?' → 'dan cabo' OR 'cabo'\n" +
+          "  * 'latest invoice from amazon' → 'invoice amazon' OR 'amazon invoice'\n" +
+          "  * 'funds request from rudy' → 'funds request' OR 'rudy funds'\n\n" +
+          "Use from:, to:, after: in query or separate params.",
         parameters: {
           type: "object",
           properties: {
             query: {
               type: "string",
-              description: "Full-text search query. Supports inline operators: from:, to:, subject:, after:, before:",
+              description: "Full-text search query. Construct FTS5 queries using OR for alternatives. Examples: 'dan cabo', 'invoice OR receipt', 'funds request'. Supports inline operators: from:, to:, subject:, after:, before:",
             },
             limit: {
               type: "number",
@@ -312,6 +441,10 @@ export function getNanoToolDefinitions() {
             includeThreads: {
               type: "boolean",
               description: "When true, also return full threads (headers only, no bodies)",
+            },
+            filterOr: {
+              type: "boolean",
+              description: "When true, use OR logic between filters (e.g., fromAddress OR toAddress) instead of AND. Useful when searching for emails where a person is either sender or recipient.",
             },
           },
           required: ["query"],
@@ -358,5 +491,119 @@ export function getNanoToolDefinitions() {
         },
       },
     },
+    {
+      type: "function" as const,
+      function: {
+        name: "get_message",
+        description:
+          "Get full message content by message ID. Use this to read message bodies when you need to understand what a message says. Returns full message with body content (up to maxBodyChars). Use detail: 'summary' for minimal payload when scanning, 'full' (default) for body content.",
+        parameters: {
+          type: "object",
+          properties: {
+            messageId: {
+              type: "string",
+              description: "Message ID (from search results)",
+            },
+            detail: {
+              type: "string",
+              enum: ["full", "summary", "raw"],
+              description: "'summary' = minimal + snippet; 'full' = body content (default); 'raw' = EML",
+            },
+            maxBodyChars: {
+              type: "number",
+              description: "Max body chars when detail='full' (default: 2000)",
+            },
+          },
+          required: ["messageId"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "add_message",
+        description:
+          "Add a message to the context set that will be sent to mini. Use this when you've found a message that's relevant to answering the question. You can add multiple messages. Call this after reviewing search results or reading a message with get_message.",
+        parameters: {
+          type: "object",
+          properties: {
+            messageId: {
+              type: "string",
+              description: "Message ID to add to context",
+            },
+          },
+          required: ["messageId"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "add_attachment",
+        description:
+          "Add a specific attachment to the context set. Use this when you've identified an attachment (from search results or get_message) that contains information needed to answer the question. Only add attachments that are relevant - don't add all attachments from a message.",
+        parameters: {
+          type: "object",
+          properties: {
+            attachmentId: {
+              type: "number",
+              description: "Attachment ID (from search results or get_message attachments array)",
+            },
+          },
+          required: ["attachmentId"],
+        },
+      },
+    },
   ];
+}
+
+/**
+ * Tools for context assembly phase: only add_message and add_attachment
+ */
+export function getContextAssemblyToolDefinitions() {
+  return [
+    {
+      type: "function" as const,
+      function: {
+        name: "add_message",
+        description:
+          "Add a message to the context set that will be sent to mini. Use this when you've found a message that's relevant to answering the question. You can add multiple messages. Call this with messageIds from your investigation phase.",
+        parameters: {
+          type: "object",
+          properties: {
+            messageId: {
+              type: "string",
+              description: "Message ID to add to context",
+            },
+          },
+          required: ["messageId"],
+        },
+      },
+    },
+    {
+      type: "function" as const,
+      function: {
+        name: "add_attachment",
+        description:
+          "Add a specific attachment to the context set. Use this when you've identified an attachment (from investigation phase) that contains information needed to answer the question. Only add attachments that are relevant - don't add all attachments from a message.",
+        parameters: {
+          type: "object",
+          properties: {
+            attachmentId: {
+              type: "number",
+              description: "Attachment ID (from investigation phase search results or get_message attachments array)",
+            },
+          },
+          required: ["attachmentId"],
+        },
+      },
+    },
+  ];
+}
+
+/**
+ * Legacy function - returns all tools (for backward compatibility during transition)
+ */
+export function getNanoToolDefinitions() {
+  return getInvestigationToolDefinitions().concat(getContextAssemblyToolDefinitions());
 }
