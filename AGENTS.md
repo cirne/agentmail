@@ -65,6 +65,23 @@ npm run lint         # tsc --noEmit (no ESLint)
 npm test             # vitest run
 ```
 
+### CLI Commands
+
+```bash
+zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--text]
+zmail who <query> [--limit n] [--enrich] [--text]
+zmail read <message_id> [--raw]
+zmail thread <thread_id> [--json] [--raw]
+zmail ask "<question>"  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY)
+zmail status [--json]
+zmail stats [--json]
+zmail attachment list <message_id> [--text]
+zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]
+zmail mcp  # Start MCP server (stdio)
+```
+
+See [`docs/ASK.md`](docs/ASK.md) for details on using `zmail ask` as a higher-level query interface.
+
 ### Sync logging and background execution
 
 **Recommended:** Run sync in the background for long-running syncs. Each sync run writes a log file to `{ZMAIL_HOME}/logs/sync-{date}-{time}.log`:
@@ -119,7 +136,8 @@ zmail provides two interfaces for agents, both accessing the same SQLite index:
 - Use for direct subprocess calls from agents
 - Fast for one-off queries (no persistent connection overhead)
 - Commands default to JSON (search, who, attachment list) or text (read, thread, status, stats). Use `--text` or `--json` flags to override.
-- Best for: one-time searches, status checks, simple workflows
+- **`zmail ask "<question>"`** — Higher-level answer engine for natural language queries. Handles orchestration internally (Nano → Context assembler → Mini pipeline). See [`docs/ASK.md`](docs/ASK.md) for when to use `ask` vs primitive tools.
+- Best for: one-time searches, status checks, simple workflows, natural language Q&A
 
 **MCP (Model Context Protocol):**
 - Use for persistent tool-based integration
@@ -127,7 +145,7 @@ zmail provides two interfaces for agents, both accessing the same SQLite index:
 - Better for iterative workflows with multiple tool calls
 - Best for: agents with MCP support, complex multi-step queries, tool-based integrations
 
-See [`docs/MCP.md`](docs/MCP.md) for MCP server documentation and tool reference.
+See [`docs/MCP.md`](docs/MCP.md) for MCP server documentation and tool reference. See [`docs/ASK.md`](docs/ASK.md) for using `zmail ask` as a higher-level query interface.
 
 ## Search
 

@@ -319,8 +319,13 @@ Both interfaces share the same underlying index and data. A message synced via `
 - Resources: Expose message/thread data as MCP resources
 - Prompts: Pre-built prompt templates for common email queries
 
+## Higher-Level Query Interface: `zmail ask`
+
+For agents that want natural language answers instead of orchestrating primitive tools, zmail provides `zmail ask "<question>"` — a single-call answer engine that handles all orchestration internally. See [ASK.md](./ASK.md) for when to use `ask` vs primitive tools, integration patterns, and performance characteristics.
+
 ## See Also
 
+- [ASK.md](./ASK.md) — Using `zmail ask` as a higher-level query interface
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — ADR-005: Dual Agent Interface
 - [AGENTS.md](../AGENTS.md) — Development guide and CLI reference
 - [STRATEGY.md](./STRATEGY.md) — Strategic priorities including MCP tool surface

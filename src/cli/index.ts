@@ -1491,6 +1491,42 @@ async function main() {
       break;
     }
 
+    case "ask": {
+      // Parse question: handle -- separator
+      let question: string;
+      if (args[0] === "--") {
+        question = args.slice(1).join(" ");
+      } else {
+        question = args.join(" ");
+      }
+
+      if (!question.trim()) {
+        console.error("Usage: zmail ask <question>");
+        console.error("  Answer a question about your email using an internal agent (requires ZMAIL_OPENAI_API_KEY).");
+        console.error("");
+        console.error("Example: zmail ask \"summarize my tech news this week\"");
+        process.exit(1);
+      }
+
+      // Require OpenAI key
+      try {
+        getDb(); // Ensure DB is accessible
+        config.openai.apiKey; // This will throw if missing
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("ZMAIL_OPENAI_API_KEY")) {
+          console.error("zmail ask requires an LLM API key.");
+          console.error("Set ZMAIL_OPENAI_API_KEY or run 'zmail setup' with --openai-key.");
+          process.exit(1);
+        }
+        throw error;
+      }
+
+      const db = getDb();
+      const { runAsk } = await import("~/ask/agent");
+      await runAsk(question, db, { stream: true });
+      break;
+    }
+
     case "mcp": {
       await startMcpServer();
       break;
@@ -1515,6 +1551,7 @@ Usage:
   zmail thread <id> [--json] [--raw]   Fetch thread (text by default)
   zmail attachment list <message_id>   List attachments (use message_id from search)
   zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]   Read by index (1-based) or filename
+  zmail ask "<question>"            Answer a question about your email (requires LLM API key)
   zmail mcp                        Start MCP server (stdio)
 
 Agent interfaces:

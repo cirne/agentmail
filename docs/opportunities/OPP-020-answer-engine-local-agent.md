@@ -1,12 +1,12 @@
-# OPP-020: Answer Engine — Local Agent for 10x Faster Email Queries
+# OPP-020: Answer Engine — Local Agent for Faster Email Queries
 
-**Status:** Proposed experiment. **Created:** 2026-03-08.
+**Status:** Proposed experiment. **Created:** 2026-03-08. **Updated:** 2026-03-08.
 
-**Problem:** zmail is 2-5x slower than Gmail MCP in bakeoff testing despite having faster tool execution. The bottleneck is not zmail — it's the number of LLM rounds required by the orchestrating agent (Claude, GPT, etc.). Each tool call round costs 15-25s in LLM deliberation. A typical query takes 3-4 rounds (search → read → follow-up → synthesize) = 60-100s wall clock. 91-99% of that time is LLM thinking, not tool execution.
+**Problem:** zmail matches or slightly lags Gmail MCP in bakeoff wall-clock time despite faster individual tool execution. The bottleneck is the orchestrating agent: high tool count and complex tool interface force use of a high-power/slower LLM (e.g. Opus 4.6). Each round costs 15-25s. A typical query takes 3-4 rounds (search → read → follow-up → synthesize) = ~50-100s. The vast majority of that time is LLM deliberation, not tool execution.
 
-**Constraint:** No optimization to zmail's tools can fix this. Making search 100x faster saves milliseconds. The only path to 5-10x improvement is reducing the number of LLM rounds — ideally to zero.
+**Constraint:** Optimizing zmail's primitive tools cannot fix this. The only path to meaningful improvement is to move orchestration inside zmail: a faster/smaller LLM focused on email Q&A, with a purpose-built internal tool interface, so the user (or a future agent interface) sees a single "ask" and gets an answer — with zero or one external LLM round.
 
-**Proposed direction:** Make zmail an **answer engine**, not a tool library. Instead of exposing primitives (search, read, get_thread) for an external LLM to orchestrate across multiple rounds, zmail accepts a natural-language question and returns a synthesized answer. The multi-step orchestration happens inside zmail's own pipeline, using a fast/cheap model, with zero external LLM rounds.
+**Proposed direction:** Make zmail an **answer engine**. Expose a single interface (e.g. `zmail ask "<question>"`) that returns a synthesized answer. All multi-step orchestration runs inside zmail: an internal micro-agent loop with email-native tools, a tiny context, and a fast/cheap model. External interface (MCP tool, agent harness, UI) is deferred; the prototype is CLI-only. Success is validated by re-running the same bakeoff questions and achieving **at least 50% latency improvement vs Google MCP** (e.g. ~50s → ~25s), with room for further gains. zmail may later become the agent that manages email (and calendar); the UI or agent interface comes later.
 
 ---
 
@@ -24,18 +24,17 @@ Gmail won despite having more tool calls and slower individual calls. Its struct
 
 ### Why this can't be fixed incrementally
 
-OPP-018 (richer search output, batch reads) targets 99s → ~45s by collapsing 3-4 rounds to 1-2. That's a 2x improvement — valuable, but not the 5-10x needed to make zmail feel qualitatively different from Gmail MCP.
+OPP-018 (richer search output, batch reads) would reduce rounds and help, but the fundamental constraint remains: **each external LLM round costs 15-25s.** The current approach needs a powerful/slower model (Opus 4.6) to orchestrate many tools well. The only way to break through is to move orchestration inside zmail with a faster/smaller model and a brilliant internal tool interface.
 
-The fundamental constraint: **each LLM round costs 15-25s, and that cost is external to zmail.** The only way to break through is to eliminate rounds.
+**Validation target:** Re-run the same bakeoff questions against the new answer-engine flow. Success = **at least 50% latency improvement vs Google MCP** (e.g. ~50s → ~25s). We have enough bakeoff results to compare. Further improvement (e.g. toward 15-20s) is low-hanging fruit after that.
 
-| Approach | Expected wall clock | Improvement |
-|----------|-------------------|-------------|
-| Current architecture | 96-99s | baseline |
-| OPP-018 (richer responses) | ~45s | ~2x |
-| Skill + OPP-018 | ~35s | ~3x |
-| Answer engine (via MCP tool) | ~15-20s | 5-7x |
-| Answer engine (standalone CLI) | 2-5s | 20-50x |
-| Pre-built intents (no LLM for planning) | 1-3s | 30-100x |
+| Approach | Expected wall clock | Notes |
+|----------|---------------------|-------|
+| Current (zmail MCP + Opus) | ~96-99s | Baseline; ≈ equal to Gmail MCP |
+| Google MCP (bakeoff) | ~74s | Comparison baseline |
+| Answer engine (CLI prototype) | Target ≤25s | 50%+ improvement vs Gmail; validate first |
+| Answer engine (tuned) | 15-20s | Room for improvement after validation |
+| Answer engine (future MCP tool) | 15-20s + 1 outer round | If/when we expose ask as a tool |
 
 ---
 
@@ -43,66 +42,38 @@ The fundamental constraint: **each LLM round costs 15-25s, and that cost is exte
 
 ### The idea
 
-Replace multi-round LLM orchestration with a single-call pipeline:
+Single entry point; all orchestration inside zmail:
 
 ```
-User or agent → zmail ask "summarize my tech news this week" → synthesized answer
+User → zmail ask "summarize my tech news this week" → synthesized answer (streaming)
 ```
 
-### Internal pipeline
+No hardcoded pipeline. An **internal micro-agent** runs an agentic loop: the fast LLM chooses which internal tools to call (search, get_messages, who, get_thread, etc.), executes them locally (sub-millisecond), and repeats until it has enough to answer. Each internal round is cheap (~200-500ms LLM + negligible tool time), so 3-4 rounds still land under the latency target. Specialization is not "five fixed query types" — it's **"I know how to find answers in email lightning fast in a very small number of turns."**
 
-```
-1. Intent classification (rule-based + fast LLM fallback)
-   Input:  "summarize my tech news this week"
-   Output: { intent: "summarize", topic: "tech news", timeframe: "7d" }
-   Cost:   <100ms (rules) or ~500ms (fast model)
+### Internal tool interface (purpose-built, not external)
 
-2. Query execution (pure code — no LLM)
-   → search(db, { query: "tech news newsletter", afterDate: "7d", limit: 10 })
-   → retrieve bodies for top results
-   Cost:   <50ms (SQLite FTS5 + body fetch)
+The interface between the internal LLM and zmail is **entirely different** from what we would expose externally. It is designed for one consumer: the fast model.
 
-3. Synthesis (fast model, tight prompt, streaming)
-   → System: "You are a concise email summarizer."
-   → User: "Summarize these 8 newsletter excerpts. Key stories only."
-   → [email bodies as context]
-   Cost:   1-3s (GPT-4.1 mini or Haiku with small context)
+- **Email-native primitives:** search (FTS + from/to/date/subject), get_messages (batch bodies with previews), who (resolve person → addresses + relationship), get_thread (full conversation). Information-dense responses so the model often needs fewer rounds.
+- **No prescriptive flow:** the model decides order and how many steps. Aim for as few turns as possible; no hard cap.
+- **Swappable LLM provider:** easy to support (e.g. OpenAI, Anthropic). No dependency on Pi or other harnesses; we own the loop.
 
-Total: 2-5s standalone, ~15-20s if called as MCP tool by outer LLM
-```
-
-### Two modes of operation
-
-**Standalone CLI (2-5s):**
-```bash
-zmail ask "what's my flight to cabo?"
-zmail ask "summarize spending on apple.com last 30 days"
-zmail ask "who is marcio nunes and how do I know him?"
-```
-
-The user (or a script, or a voice assistant) calls zmail directly. No outer LLM. The answer streams to stdout. This is the fastest possible path.
-
-**MCP tool (15-20s):**
-```json
-{ "tool": "ask_email", "arguments": { "question": "summarize my tech news" } }
-```
-
-An outer LLM (Claude in Cursor, GPT in another harness) calls a single tool. One LLM round (~15s) + zmail internal pipeline (2-5s). Still 5-7x faster than the current multi-round workflow.
+External interface (MCP tool, agent harness, richer CLI) is **deferred**. For the prototype, the only surface we expose is `zmail ask "<question>"`.
 
 ### Why the internal model is fast
 
-The outer LLM in Cursor/Claude Code is slow because it processes a massive context on every round:
+The outer LLM (e.g. Opus in Cursor) is slow because every round carries:
 - Full conversation history (often 50k+ tokens)
 - All tool schemas and descriptions
 - System prompt, user rules, file contents
-- Tool call/response pairs from prior rounds
+- Prior tool call/response pairs
 
 zmail's internal model sees only:
 - A tight system prompt (~200 tokens)
 - The user's question (~20 tokens)
-- The relevant email bodies (~2000-5000 tokens)
+- Tool definitions (small set) and the last few tool results (~2-5k tokens)
 
-Small context = fast inference. A model like GPT-4.1 mini or Claude Haiku with 3-5k input tokens responds in 1-2s.
+Small context = fast inference. A model like GPT-4.1 mini or Claude Haiku with 3-5k input tokens responds in 1-2s per round.
 
 ---
 
@@ -126,54 +97,32 @@ Candidates:
 
 ---
 
-## Intent Classification
+## Intent and retrieval (no fixed flow)
 
-Not every query needs an LLM for planning. Many common patterns can be handled with rules:
+We do **not** rely on a fixed set of rule-based intents as the foundation. The internal agent uses **LLM-driven tool use** as the primary path: the model sees the question and the internal tools (search, get_messages, who, get_thread), and decides what to call. That works for any question shape. Rule-based shortcuts for common patterns (e.g. "tech news", "spending on X", "who is X") can be added later as optimizations to reduce turns or latency; they are not required for Phase 1.
 
-### Rule-based intents (no LLM, <10ms)
+The internal tools are designed so that the fast LLM can get maximum signal per call (information-dense, email-native), keeping the number of internal rounds low. No hardcoded pipeline; the model controls the flow.
 
-```
-"tech news"              → search newsletters from last 24-48h, summarize
-"spending on X"          → from:X.com receipts, extract amounts, total
-"flight to X"            → search travel/booking/confirmation + X, extract itinerary
-"who is X"               → who(X) + recent messages, synthesize relationship
-"what did X say about Y" → from:X + Y, return relevant excerpts
-```
+### Design Philosophy: Generalized vs Overfitted
 
-These are deterministic pipelines. The query pattern maps directly to a search strategy and a synthesis prompt template. Sub-second for the search, 1-2s for synthesis.
+The answer engine avoids overfitting to specific test cases (e.g., "try apple.com when searching for apple"). Instead, it uses **generalized mechanisms** that work for any query:
 
-### LLM-assisted intent (fast model, ~500ms)
+- **Result feedback** — tools provide hints based on result patterns (0 results, low diversity, more available)
+- **High default limits** — 50+ results by default catches more cases without hardcoding
+- **General prompt guidance** — "try variations if 0 results" works for any query type
 
-For queries that don't match a rule:
-
-```
-"that stressful email from last month"
-"find the contract with the non-compete clause"
-"what decisions were made in the Q3 planning thread"
-```
-
-A fast model (nano/mini) classifies the intent and generates search parameters:
-
-```
-Input:  "that stressful email from last month"
-Output: {
-  searches: [
-    { query: "urgent deadline stress", afterDate: "30d", limit: 5 },
-    { query: "frustrated disappointed concerned", afterDate: "30d", limit: 5 }
-  ],
-  synthesisGoal: "identify the email the user is thinking of"
-}
-```
-
-This is a structured-output call with a tight schema — fast models excel at this.
+**Why this is better:**
+- Works for any domain (Apple, Amazon, travel, events, etc.)
+- Adapts to new query types without prompt changes
+- Tool feedback guides the model dynamically, not hardcoded rules
 
 ---
 
-## What Gets Returned
+## What gets returned (Phase 1: CLI only)
 
-### For standalone CLI
+Stream the answer to stdout as the model generates. Optionally include timing or metadata (e.g. pipeline ms, model used) for bakeoff comparison — same questions, measure wall clock vs Google MCP.
 
-Stream the answer to stdout as it generates. The user sees the answer progressively, like a conversation:
+Example:
 
 ```
 $ zmail ask "summarize my tech news this week"
@@ -181,35 +130,16 @@ $ zmail ask "summarize my tech news this week"
 Here are the key tech stories from your newsletters this week:
 
 **AI & LLMs**
-- OpenAI released GPT-4.1, a model focused on instruction following and
-  coding. Available in mini and nano variants...
+- OpenAI released GPT-4.1...
 - Anthropic announced...
 
 **Industry**
 - Apple's WWDC dates confirmed for June...
 
-Sources: TLDR (Mar 7, Mar 6, Mar 5), The Information (Mar 7), ...
+Sources: TLDR (Mar 7, Mar 6), The Information (Mar 7), ...
 ```
 
-### For MCP tool
-
-Return structured JSON so the outer LLM can incorporate the answer:
-
-```json
-{
-  "answer": "Here are the key tech stories...",
-  "sources": [
-    { "messageId": "<abc>", "subject": "TLDR 2026-03-07", "from": "tldr@example.com" },
-    { "messageId": "<def>", "subject": "The Information Daily", "from": "newsletters@theinformation.com" }
-  ],
-  "searchesRun": ["tech news newsletter after:7d"],
-  "messagesRead": 8,
-  "modelUsed": "gpt-4.1-mini",
-  "pipelineMs": 2847
-}
-```
-
-Sources let the outer LLM cite specific emails or drill deeper if needed. `searchesRun` provides transparency into what zmail did.
+When we later expose an external interface (e.g. MCP `ask_email`), we can return structured JSON (answer, sources, searchesRun, pipelineMs) so callers can cite or drill deeper. Deferred for Phase 1.
 
 ---
 
@@ -223,7 +153,7 @@ A skill teaching Claude the optimal zmail query patterns would reduce wasted rou
 
 ### 2. Richer tool responses / OPP-018 (complementary, not sufficient)
 
-Body previews, batch reads, attachment indicators — these reduce rounds from 3-4 to 1-2. Expected improvement: ~2x (100s → 45s). Valuable and should still be implemented, but doesn't reach the 5-10x target.
+Body previews, batch reads, attachment indicators — these reduce rounds from 3-4 to 1-2. Expected improvement: ~2x. Valuable and complementary, but moving orchestration inside zmail (answer engine) is what delivers the 50%+ latency win vs Google MCP.
 
 **These improvements also help the answer engine** — richer search results mean the internal pipeline has more to work with before needing follow-up queries.
 
@@ -238,9 +168,13 @@ Branching off main (which had LanceDB + per-query OpenAI embeddings) was conside
 
 This is a Phase 2 optimization (see below), not a prerequisite for the experiment.
 
-### 4. Pre-built intent shortcuts (included as Phase 1b)
+### 4. Pi (badlogic) or other agent harness (rejected for Phase 1)
 
-Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zmail flights`) that don't need any LLM for query planning. Sub-second search + 1-2s synthesis. These are the lowest-hanging fruit and can be built alongside the general `ask` command.
+Using Pi's SDK or agent framework would provide a ready-made tool loop and multi-provider support. We are not using it: we are not building many pluggable tools or providers; a minimal agent loop and swappable LLM are straightforward to implement ourselves. Keeps dependencies and complexity low for the experiment.
+
+### 5. Pre-built intent shortcuts (optional later)
+
+Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zmail flights`) could be added as optimizations. Not required for Phase 1; the internal agent loop handles arbitrary questions first.
 
 ---
 
@@ -248,45 +182,37 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 
 ### Phase 1: Validate the architecture (the experiment)
 
-**Goal:** Can `zmail ask "summarize my tech news"` return a good answer in <5s?
+**Goal:** Re-run the same bakeoff questions with `zmail ask`. Achieve **at least 50% latency improvement vs Google MCP** (e.g. ~50s → ~25s). Prove that a faster/smaller LLM plus a purpose-built internal tool interface can beat the current multi-round, high-tool-count approach.
 
 **Scope:**
-- `zmail ask <question>` CLI command
-- Rule-based intent classification for 2-3 common patterns (news summary, spending, person lookup)
-- GPT-4.1 mini for synthesis
-- Streaming output to stdout
-- Simple prompt templates per intent
+- `zmail ask <question>` CLI command (only external interface for the prototype)
+- Internal micro-agent loop: fast LLM (e.g. GPT-4.1 mini) with tool-calling; no hardcoded pipeline
+- Purpose-built internal tools: email-native, information-dense (search, get_messages, who, get_thread as needed)
+- Streaming answer to stdout; optional timing/metadata for bakeoff comparison
+- Swappable LLM provider kept simple (no Pi or external harness)
 
 **Success criteria:**
-- Wall clock <5s for rule-based intents
-- Wall clock <8s for LLM-assisted intents
-- Answer quality comparable to what Claude produces with 3-4 zmail tool calls
+- Same bakeoff questions as before; wall clock **≥50% lower than Google MCP** (e.g. ≤25s where Gmail was ~50s)
+- Answer quality acceptable (good enough to trust for the tested questions)
+- Room for further improvement (e.g. tuning tools, context, or model) without redesign
 
 **Non-goals for Phase 1:**
-- MCP `ask_email` tool (add after CLI validates)
+- MCP `ask_email` or any external agent interface (defer until CLI validates)
+- Rule-based intent shortcuts (add later if useful)
 - Semantic search / embeddings
-- Extensive intent coverage
-- Production error handling
+- Production-grade error handling or polish
 
-### Phase 1b: Pre-built intents
+### Phase 2: External interface + tuning
 
-- `zmail news` — today's newsletters, auto-summarized
-- `zmail spending <vendor>` — receipts from vendor, amounts extracted and totaled
-- `zmail recap` — daily email digest
-
-### Phase 2: MCP integration + broader coverage
-
-- Add `ask_email` MCP tool for outer LLM integration
-- LLM-assisted intent classification for arbitrary questions
-- Expand rule-based intents based on real usage
-- Decide primitive tools strategy (keep, deprecate, or make `ask_email` the recommended default)
+- Expose `ask` as MCP tool or other agent interface if desired
+- Add rule-based shortcuts for high-frequency patterns if data supports it
+- Tune internal tools and prompts based on Phase 1 usage
+- Decide strategy for primitive tools (keep alongside ask, or make ask the default)
 
 ### Phase 3: Semantic search (if needed)
 
-- sqlite-vec for embeddings stored in SQLite
-- Local embedding model (transformers.js / ONNX) or index-time-only API embedding
-- Query planner decides FTS vs semantic per-query
-- Only pursue if Phase 1/2 reveal queries where FTS + intent decomposition fails
+- sqlite-vec for embeddings in SQLite; local or index-time embeddings
+- Only if Phase 1/2 show FTS + tool loop insufficient for some query types
 
 ---
 
@@ -294,28 +220,24 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 
 ### Benefits
 
-- **5-20x faster wall clock** for the most common email queries
-- **Works standalone** — no dependency on an outer LLM for simple questions
-- **Model control** — zmail picks the fastest/cheapest model for the task
-- **Prompt engineering** — tight, purpose-built prompts vs. generic tool-use context
-- **Streaming** — answers appear progressively, feel instant
+- **Target: ≥50% latency improvement vs Google MCP** on same bakeoff questions (e.g. ~50s → ~25s), with room to go lower
+- **CLI-first** — validate without building MCP or agent UI; external interface comes later
+- **Model control** — zmail uses a fast/cheap model for the task; no dependency on a heavy orchestrator (Opus, etc.)
+- **Purpose-built internal tools** — email-native, information-dense; not a generic tool library
+- **Streaming** — answers appear progressively
 
 ### Risks
 
-- **API key dependency** — requires `ZMAIL_OPENAI_API_KEY` (or another provider). Currently optional; this makes it load-bearing for the `ask` feature. Mitigatable with local models later.
-- **Answer quality ceiling** — fast/cheap models may produce worse synthesis than frontier models. The bet: for email summarization (not open-ended reasoning), mini-class models are sufficient.
-- **Scope creep in intent classification** — the long tail of possible questions is infinite. Rule-based intents cover common cases; the LLM fallback handles the rest, but may be slow or imprecise.
-- **Two LLMs in MCP mode** — when used as an MCP tool, there's an outer LLM (for routing) and an inner LLM (for synthesis). This is architecturally unusual and may confuse users or create debugging challenges.
-- **Transparency** — users/agents can't see what zmail searched or read. Mitigated by including `sources` and `searchesRun` in the response.
-- **Maintenance of two interfaces** — primitive tools (search, read, etc.) and the answer engine. Need a clear story for when to use which.
+- **API key dependency** — `ask` requires an LLM key (e.g. `ZMAIL_OPENAI_API_KEY`). Mitigatable with swappable providers or local models later.
+- **Answer quality ceiling** — fast/small models may be worse than frontier models at synthesis; the bet is they are good enough for email Q&A over pre-selected content.
+- **Transparency** — user sees the answer, not the internal tool calls. Can expose sources/metadata when we add an external interface.
+- **Two interfaces eventually** — primitive tools (search, read, who) vs answer engine. Phase 1 only builds ask; strategy for coexistence decided in Phase 2.
 
 ### Open questions
 
-- **Should primitive MCP tools remain?** The answer engine handles the 80% case. Complex multi-step queries ("find the contract attachment from Fred and compare it to the one from last quarter") may still need primitive tools. Keep both, with guidance on when to use which?
-- **Streaming protocol for MCP:** MCP's current response model is request/response, not streaming. The standalone CLI can stream, but the MCP tool returns a complete response. Is the synthesis fast enough (~2s) that streaming doesn't matter?
-- **Cost per query:** GPT-4.1 mini at ~5k input tokens + ~500 output tokens = ~$0.003 per query. Acceptable for personal use. Worth tracking.
-- **Local model viability:** Can a local model (Llama 3 8B, Phi-3) running on CPU produce acceptable synthesis quality in <5s? This would eliminate the API dependency entirely. Worth testing in Phase 2.
-- **How does this change zmail's positioning?** zmail moves from "tool library for agents" to "intelligent email assistant." That's a bigger product — is it the right product?
+- **Cost per query:** GPT-4.1 mini ~$0.003/query at typical usage; acceptable. Worth tracking.
+- **Local model viability:** Could a local model (Llama 3 8B, Phi-3) give acceptable quality at target latency? Would remove API dependency. Phase 2.
+- **Positioning:** zmail may evolve from "tool library for agents" toward "the agent that manages my email." UI/agent interface deferred; we validate speed and quality first.
 
 ---
 
@@ -333,8 +255,9 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 
 ## References
 
-- Bakeoff performance data: OPP-018, BUG-016
+- Bakeoff performance data: OPP-018, BUG-016 (same questions to be re-run for Phase 1 validation)
 - FTS-first decision: OPP-019
 - STRATEGY.md — competitive positioning
 - VISION.md — "just works in the agent" user promise
 - Prior art: Perplexity (search → synthesize), Phind (code search → answer), RAG pipelines generally
+- Pi (badlogic) coding agent: considered for agent loop; not used for Phase 1 (minimal loop, easy provider swap)
