@@ -1,6 +1,6 @@
 ---
 name: commit
-description: Pre-commit checklist to ensure code quality, test coverage, linting, and documentation accuracy. Use when preparing commits, reviewing changes before commit, or when the user asks about commit requirements or pre-commit checks. When invoked: run the full checklist; if everything is clean, commit and push; only hold off and report if there are issues.
+description: Pre-commit checklist to ensure code quality, test coverage, linting, and documentation accuracy. Use when preparing commits, reviewing changes before commit, or when the user asks about commit requirements or pre-commit checks. When invoked: run the full checklist; if everything is clean, commit and push. Only hold off when there are failures that you are unable to fix — then report them to the user.
 ---
 
 # Commit Checklist
@@ -86,7 +86,7 @@ For any code changes (even small ones), all checklist items apply, especially do
 
 ## Final Step: Commit and Push
 
-**If everything is clean, commit and push. Do not hold off — complete the commit and push.** Only stop and report to the user when there are issues (lint failures, test failures, or documentation gaps that need human input).
+**If everything is clean, commit and push. Do not hold off — complete the commit and push.** Only hold off when there are failures that you are unable to fix (e.g. lint or test failures you cannot resolve, or documentation/backlog decisions that need human input); then report them to the user.
 
 When all checklist items are complete, tests and lint are clean:
 
@@ -105,7 +105,7 @@ Before committing, confirm:
 - ✅ Opportunities are organized (implemented opportunities moved to archive)
 - ✅ All links are correct and point to the right locations
 
-Only hold off (do not commit/push) when:
-- Lint fails or tests fail — report the failures and what to fix
-- Documentation or backlog updates need a decision (e.g., whether to archive an opportunity)
+Only hold off (do not commit/push) when there are failures you cannot fix:
+- Lint or test failures you are unable to resolve — report the failures and what’s wrong
+- Documentation or backlog updates that need a human decision (e.g., whether to archive an opportunity)
 - User has explicitly asked for a dry run or review-only
