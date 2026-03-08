@@ -15,7 +15,7 @@ Usage:
   zmail wizard [--no-validate]   Interactive setup (prompts for credentials)
   zmail sync [--since <spec>] [--foreground]     Initial sync: fill gaps going backward (runs in background by default; use --foreground to wait)
   zmail refresh                    Refresh: fetch new messages since last sync (frequent updates)
-  zmail search <query> [flags]    Search email (hybrid by default; use --fts for exact keyword matching)
+  zmail search <query> [flags]    Search email (FTS5 full-text search)
   zmail who <query> [flags]       Find people by address or name (use --help for flags)
   zmail status [--imap]           Show sync and indexing status (--imap for IMAP server comparison, may take 10+ seconds)
   zmail stats                     Show database statistics

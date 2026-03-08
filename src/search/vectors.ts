@@ -100,22 +100,6 @@ export async function ensureIndex(): Promise<void> {
   logger.info("ANN index built");
 }
 
-/**
- * Search for similar messages using k-nearest neighbors.
- * Uses ANN index if available, falls back to brute-force.
- */
-export async function searchVectors(
-  queryEmbedding: number[],
-  limit: number = 20,
-): Promise<Array<{ messageId: string; score: number }>> {
-  const tbl = await getTable();
-  if (!tbl) return [];
-  const results = await tbl.search(queryEmbedding).limit(limit).toArray();
-  return results.map((r: any) => ({
-    messageId: r.messageId as string,
-    score: r._distance ? 1 / (1 + r._distance) : 0,
-  }));
-}
 
 /**
  * Check if an embedding exists for a given messageId.

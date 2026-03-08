@@ -115,7 +115,6 @@ interface ParsedSearchArgs {
   afterDate?: string;
   beforeDate?: string;
   limit?: number;
-  fts: boolean;
   detail: SearchDetail;
   fields?: SearchField[];
   forceText: boolean;
@@ -132,8 +131,6 @@ function searchUsage() {
   console.error("");
   console.error("Flags:");
   console.error("  --limit <n>        max results (default: 50)");
-  console.error("  --fts              use FTS-only search (exact keyword matching)");
-  console.error("                     default: hybrid search (semantic + FTS)");
   console.error("  --detail <level>   headers | snippet | body (default: headers)");
   console.error("  --fields <csv>     projection fields, e.g. messageId,subject,date");
   console.error("  --ids-only         return only message IDs");
@@ -262,7 +259,6 @@ function parseDateFlag(raw: string, flagName: "--after" | "--before"): string {
 function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
   const parsed: ParsedSearchArgs = {
     query: "",
-    fts: false,
     detail: "headers",
     forceText: false,
     idsOnly: false,
@@ -319,12 +315,8 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
       parsed.limit = limit;
       continue;
     }
-    if (arg === "--fts") {
-      parsed.fts = true;
-      continue;
-    }
     if (arg === "--mode") {
-      throw new Error(`--mode flag has been removed. Use --fts for FTS-only search, or omit for hybrid (default).`);
+      throw new Error(`--mode flag has been removed.`);
     }
     if (arg === "--detail") {
       const detail = readValue(arg) as SearchDetail;
@@ -420,8 +412,7 @@ function getSearchHint(
   query: string,
   resultCount: number,
   totalMatched: number,
-  limit?: number,
-  meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean }
+  limit?: number
 ): string | undefined {
   const words = query.trim().split(/\s+/).filter(Boolean);
   const isSingleWord = words.length === 1;
@@ -451,18 +442,6 @@ function getSearchHint(
     return "Tip: Narrow results with from:name or subject:keyword";
   }
 
-  // Query has exact keyword feel (short, no spaces, or contains quotes)
-  const hasQuotes = /["']/.test(query);
-  const isShortExact = words.length <= 2 && words.every(w => w.length <= 10);
-  if (hasQuotes || isShortExact) {
-    return "Tip: Add --fts for exact keyword matching";
-  }
-
-  // Use meta to detect semantic-only matches (no FTS matches) for gibberish queries
-  if (meta && meta.hasSemanticOnlyMatches && !meta.hasFtsMatches && resultCount > 0) {
-    // This suggests low-quality semantic matches (gibberish query)
-    return "No exact matches found. Showing semantic approximations.";
-  }
 
   return undefined;
 }
@@ -473,13 +452,12 @@ function serializeJsonPayload(
   query?: string,
   resultCount?: number,
   totalMatched?: number,
-  limit?: number,
-  meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean }
+  limit?: number
 ): string {
   const total = rows.length;
   const trueTotal = totalMatched ?? total; // Use provided totalMatched, fallback to rows.length
   const truncated = trueTotal > total;
-  const hint = query ? getSearchHint(query, resultCount ?? total, trueTotal, limit, meta) : undefined;
+  const hint = query ? getSearchHint(query, resultCount ?? total, trueTotal, limit) : undefined;
   
   for (let includeCount = total; includeCount >= 0; includeCount--) {
     const visible = rows.slice(0, includeCount);
@@ -660,7 +638,7 @@ function printStatus(db: SqliteDatabase = getDb()): void {
   }
 
   // Search readiness
-  console.log(`${pad("Search:")} FTS ready (${status.search.ftsReady}) | Semantic ready (${status.search.semanticReady})`);
+  console.log(`${pad("Search:")} FTS ready (${status.search.ftsReady})`);
 
   // Date range
   if (status.dateRange) {
@@ -922,14 +900,19 @@ async function main() {
 
       const db = getDb();
       const effectiveDetail = resolveDetail(parsed.detail, parsed.fields);
-      const run = await searchWithMeta(db, {
-        query: parsed.query,
-        fromAddress: parsed.fromAddress,
-        afterDate: parsed.afterDate,
-        beforeDate: parsed.beforeDate,
-        limit: effectiveLimit,
-        fts: parsed.fts,
-      });
+      let run;
+      try {
+        run = await searchWithMeta(db, {
+          query: parsed.query,
+          fromAddress: parsed.fromAddress,
+          afterDate: parsed.afterDate,
+          beforeDate: parsed.beforeDate,
+          limit: effectiveLimit,
+        });
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
 
       let results: Array<SearchResult & { body?: string }> = run.results;
       if (effectiveDetail === "body") {
@@ -946,8 +929,7 @@ async function main() {
           parsed.query,
           results.length,
           run.totalMatched ?? results.length,
-          effectiveLimit,
-          run._meta
+          effectiveLimit
         );
         console.log(json);
         break;
@@ -955,7 +937,7 @@ async function main() {
 
       if (results.length === 0) {
         console.log("No results found.");
-        const hint = getSearchHint(parsed.query, 0, 0, effectiveLimit, run._meta);
+        const hint = getSearchHint(parsed.query, 0, 0, effectiveLimit);
         if (hint) {
           console.log(`\n${hint}`);
         }
@@ -990,7 +972,7 @@ async function main() {
       }
       
       // Show actionable hints after results (only in text mode, not JSON)
-      const hint = getSearchHint(parsed.query, results.length, totalMatched, effectiveLimit, run._meta);
+      const hint = getSearchHint(parsed.query, results.length, totalMatched, effectiveLimit);
       if (hint) {
         console.log(`\n${hint}`);
       }
@@ -1122,6 +1104,15 @@ async function main() {
         .prepare("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
         .all(normalizedThreadId) as MessageRow[];
 
+      if (messages.length === 0) {
+        if (json) {
+          console.log("[]");
+          break;
+        }
+        console.error(`Thread not found: ${threadId}`);
+        process.exit(1);
+      }
+
       if (json) {
         const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, raw)));
         console.log(JSON.stringify(shaped, null, 2));
@@ -1160,8 +1151,8 @@ async function main() {
         .prepare("SELECT * FROM messages WHERE message_id = ?")
         .get(messageId) as MessageRow | undefined;
       if (!message) {
-        console.log("null");
-        break;
+        console.error(`Message not found: ${messageId}`);
+        process.exit(1);
       }
       const shaped = await formatMessageForOutput(message, parsed.raw);
       console.log(formatMessageLlmFriendly(message, shaped));
@@ -1354,6 +1345,22 @@ async function main() {
 
         const db = getDb();
         const messageId = normalizeMessageId(messageIdArg);
+        
+        // Check if message exists first
+        const messageExists = db
+          .prepare("SELECT 1 FROM messages WHERE message_id = ?")
+          .get(messageId);
+        const shouldOutputJson = !args.includes("--text");
+        if (!messageExists) {
+          if (shouldOutputJson) {
+            console.log("[]");
+            break;
+          }
+          // In text mode, output "No attachments found." to stdout for consistency
+          console.log("No attachments found.");
+          break;
+        }
+
         const attachments = db
           .prepare(
             `SELECT id, filename, mime_type, size, stored_path, extracted_text
@@ -1367,8 +1374,6 @@ async function main() {
           stored_path: string;
           extracted_text: string | null;
         }>;
-
-        const shouldOutputJson = !args.includes("--text");
 
         const quotedMsgId = messageId.includes(" ") ? `"${messageId}"` : messageId;
         if (shouldOutputJson) {
@@ -1505,7 +1510,7 @@ async function main() {
 Usage:
   zmail sync [--since <spec>]     Initial sync: fill gaps going backward (e.g. --since 7d, 5w, 3m, 2y)
   zmail refresh                    Refresh: fetch new messages since last sync (frequent updates)
-  zmail search <query> [flags]     Search email (hybrid by default; use --fts for exact keyword matching)
+  zmail search <query> [flags]     Search email (FTS5 full-text search)
   zmail who <query> [flags]        Find people by address or name (see --help for flags)
   zmail status [--json] [--imap]   Sync/indexing status; --imap: compare with server
   zmail stats [--json]             Database statistics

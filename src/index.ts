@@ -69,7 +69,7 @@ if (!command) {
   console.log("zmail — agent-first email: sync, index, and search your inbox.\n");
   console.log("  zmail sync              Start syncing email (background; waits until data flows)");
   console.log("  zmail refresh           Fetch new email since last sync (fast, foreground)");
-  console.log("  zmail search <query>    Search email — hybrid semantic+keyword by default");
+  console.log("  zmail search <query>    Search email — FTS5 full-text search");
   console.log("  zmail who <query>       Find people by name or address");
   console.log("  zmail status            Show sync and indexing progress");
   console.log("  zmail read <id>         Read a message");

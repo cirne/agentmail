@@ -11,7 +11,7 @@ The MCP server provides programmatic access to zmail's search, message retrieval
 - **Transport:** stdio (stdin/stdout) — no network, no ports, no auth required for local use
 - **Protocol:** MCP (Model Context Protocol) via `@modelcontextprotocol/sdk`
 - **Data source:** Same SQLite database (`~/.zmail/data/zmail.db`) as CLI commands
-- **Index:** FTS5 (full-text) + LanceDB (semantic) hybrid search
+- **Index:** FTS5 full-text search
 
 ## Starting the Server
 
@@ -30,7 +30,7 @@ The server runs on stdio and communicates via JSON-RPC over stdin/stdout. It wil
 
 ### `search_mail`
 
-Search emails using hybrid search (semantic + FTS5) by default. Returns matching messages with snippets. Use `fts=true` for FTS-only (exact keyword matching).
+Search emails using FTS5 full-text search. Returns matching messages with snippets.
 
 **Parameters:**
 - `query` (string, optional): Full-text search query. Supports inline operators: `from:`, `to:`, `subject:`, `after:`, `before:`
@@ -39,7 +39,6 @@ Search emails using hybrid search (semantic + FTS5) by default. Returns matching
 - `fromAddress` (string, optional): Filter by sender email address
 - `afterDate` (string, optional): Filter messages after this date (ISO 8601 or relative like "7d", "30d")
 - `beforeDate` (string, optional): Filter messages before this date
-- `fts` (boolean, optional): If true, use FTS-only search (exact keyword matching). Default is false (hybrid search)
 
 **Returns:** JSON array of message objects with `message_id`, `from`, `to`, `subject`, `date`, `snippet`, etc.
 
@@ -114,14 +113,14 @@ Find people by email address or display name. Returns matching identities with s
 
 ### `get_status`
 
-Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS/semantic counts), date range of synced messages, and freshness (time since latest mail and last sync).
+Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS count), date range of synced messages, and freshness (time since latest mail and last sync).
 
 **Parameters:** None
 
 **Returns:** JSON object with:
 - `sync`: `{ isRunning, lastSyncAt, totalMessages, earliestSyncedDate, latestSyncedDate }`
 - `indexing`: `{ isRunning, totalToIndex, indexedSoFar, startedAt, completedAt, totalIndexed, totalFailed, pending }`
-- `search`: `{ ftsReady, semanticReady }`
+- `search`: `{ ftsReady }`
 - `dateRange`: `{ earliest, latest }` or `null`
 - `freshness`: `{ latestMailAgo, lastSyncAgo }` — each value is `null` or `{ human: string, duration: string }` (e.g. `{ human: "2h ago", duration: "PT2H" }`); `null` when not applicable
 
@@ -255,7 +254,7 @@ Both interfaces share the same underlying index and data. A message synced via `
 
 ### CLI arguments (quick reference)
 
-- **search:** `zmail search <query> [--limit n] [--fts] [--detail headers|snippet|body] [--fields csv] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date]`
+- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--fields csv] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date]`
 - **who:** `zmail who <query> [--limit n] [--min-sent n] [--min-received n] [--all] [--enrich] [--text]`
 - **status:** `zmail status [--json] [--imap]` — `--imap` compares local DB with IMAP server (CLI-only).
 - **stats:** `zmail stats [--json]`

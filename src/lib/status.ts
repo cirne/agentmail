@@ -82,7 +82,6 @@ export interface StatusData {
   };
   search: {
     ftsReady: number;
-    semanticReady: number;
   };
   dateRange: {
     earliest: string;
@@ -188,7 +187,6 @@ export function getStatus(db: SqliteDatabase = getDb()): StatusData {
 
   const search = {
     ftsReady: messagesCount.count,
-    semanticReady: totalIndexed.count,
   };
 
   return {

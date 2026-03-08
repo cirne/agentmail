@@ -27,7 +27,7 @@ src/
   cli/          entrypoint and subcommands
   sync/         IMAP sync engine
   db/           SQLite schema, queries
-  search/       FTS5 and semantic search
+  search/       FTS5 full-text search
   attachments/  document extraction → markdown
   mcp/          MCP server tools
   lib/          shared utilities
@@ -103,7 +103,7 @@ Supported formats: PDF, DOCX, XLSX, HTML, CSV, TXT. Extraction happens on first 
 **Required credentials:**
 1. Email address (e.g., `user@gmail.com`) — provided via `--email` flag or `ZMAIL_EMAIL` environment variable
 2. IMAP app password (Gmail app password) — provided via `--password` flag or `ZMAIL_IMAP_PASSWORD` environment variable
-3. OpenAI API key (optional, for semantic search) — provided via `--openai-key` flag or `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) environment variable
+3. OpenAI API key (optional, for future features) — provided via `--openai-key` flag or `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) environment variable
 
 ```bash
 zmail setup --email user@gmail.com --password "app-password" --openai-key "sk-..." [--no-validate]
@@ -131,7 +131,7 @@ See [`docs/MCP.md`](docs/MCP.md) for MCP server documentation and tool reference
 
 ## Search
 
-Search uses hybrid (semantic + FTS) by default for comprehensive results. Use `--fts` for exact keyword matching only.
+Search uses FTS5 full-text search for keyword matching.
 
 ## Configuration
 
@@ -157,6 +157,6 @@ Required environment variables (for `zmail setup`):
 
 - `ZMAIL_EMAIL` — Email address (e.g., `user@gmail.com`)
 - `ZMAIL_IMAP_PASSWORD` — IMAP app password (Gmail app password, not regular password)
-- `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) — OpenAI API key for semantic search
+- `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) — OpenAI API key (optional, for future features)
 
 **Note:** The correct environment variable names are `ZMAIL_EMAIL` and `ZMAIL_IMAP_PASSWORD`. Do not use `IMAP_USER` or `IMAP_PASSWORD` — these are outdated and not supported.

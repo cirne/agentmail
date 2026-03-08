@@ -20,7 +20,6 @@ export const MCP_SEARCH_MAIL_PARAM_KEYS: readonly string[] = [
   "fromAddress",
   "afterDate",
   "beforeDate",
-  "fts",
 ];
 
 /**
@@ -49,7 +48,7 @@ export function normalizeMessageId(id: string): string {
  * Creates an MCP server exposing zmail's email search and retrieval capabilities.
  * 
  * The server runs in stdio-only mode (no HTTP, no ports) and provides tools for:
- * - Searching emails with hybrid FTS5 + semantic search
+ * - Searching emails with FTS5 full-text search
  * - Retrieving individual messages and threads
  * - Finding people by email/name
  * - Getting sync/indexing status and statistics
@@ -68,7 +67,7 @@ export function createMcpServer() {
 
   server.tool(
     "search_mail",
-    "Search emails using hybrid search (semantic + FTS5 full-text) by default. Returns matching messages with snippets. Supports inline query operators: from:, to:, subject:, after:, before:. Use fts=true for FTS-only (exact keyword matching). Example: 'invoice from:alice@example.com after:30d'",
+    "Search emails using FTS5 full-text search. Returns matching messages with snippets. Supports inline query operators: from:, to:, subject:, after:, before:. Example: 'invoice from:alice@example.com after:30d'",
     {
       query: z.string().optional().describe("Full-text search query. Supports inline operators: from:, to:, subject:, after:, before:. Example: 'invoice from:alice@example.com after:30d'"),
       limit: z.number().optional().describe("Maximum number of results to return (default: 50)"),
@@ -76,9 +75,8 @@ export function createMcpServer() {
       fromAddress: z.string().optional().describe("Filter by sender email address (alternative to 'from:' in query)"),
       afterDate: z.string().optional().describe("Filter messages after this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
       beforeDate: z.string().optional().describe("Filter messages before this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
-      fts: z.boolean().optional().describe("If true, use FTS-only search (exact keyword matching). Default is false (hybrid search: semantic + FTS)"),
     },
-    async ({ query, limit, offset, fromAddress, afterDate, beforeDate, fts }) => {
+    async ({ query, limit, offset, fromAddress, afterDate, beforeDate }) => {
       const db = getDb();
       const results = await search(db, {
         query,
@@ -87,7 +85,6 @@ export function createMcpServer() {
         fromAddress,
         afterDate,
         beforeDate,
-        fts,
       });
 
       return {
@@ -318,7 +315,7 @@ export function createMcpServer() {
 
   server.tool(
     "get_status",
-    "Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS/semantic counts), date range of synced messages, and freshness (time since latest mail and last sync, human + ISO 8601 duration).",
+    "Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS count), date range of synced messages, and freshness (time since latest mail and last sync, human + ISO 8601 duration).",
     {},
     async () => {
       const status = getStatus();
