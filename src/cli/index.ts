@@ -131,7 +131,7 @@ function searchUsage() {
   console.error("  Example: zmail search \"after:7d subject:meeting\"");
   console.error("");
   console.error("Flags:");
-  console.error("  --limit <n>        max results (default: 20)");
+  console.error("  --limit <n>        max results (default: 50)");
   console.error("  --fts              use FTS-only search (exact keyword matching)");
   console.error("                     default: hybrid search (semantic + FTS)");
   console.error("  --detail <level>   headers | snippet | body (default: headers)");
@@ -433,8 +433,12 @@ function getSearchHint(
   }
 
   // Truncated results hint (only show if we have more results than displayed)
-  if (totalMatched > resultCount && totalMatched > (limit ?? 20)) {
-    return `Showing ${resultCount} of ${totalMatched} matches. Use --limit to see more.`;
+  if (totalMatched > resultCount && totalMatched > (limit ?? 50)) {
+    const hasOffset = false; // TODO: track offset if we add it to CLI args
+    if (hasOffset) {
+      return `Showing ${resultCount} of ${totalMatched} matches. Use --limit or --offset to see more.`;
+    }
+    return `Showing ${resultCount} of ${totalMatched} matches. Use --limit ${Math.min(totalMatched, (limit ?? 50) + 50)} to see more, or --offset ${resultCount} for next page.`;
   }
 
   // Vague single-word query hint (common words that return too many results)
@@ -468,21 +472,23 @@ function serializeJsonPayload(
   timings?: object,
   query?: string,
   resultCount?: number,
+  totalMatched?: number,
   limit?: number,
   meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean }
 ): string {
   const total = rows.length;
-  const hint = query ? getSearchHint(query, resultCount ?? total, total, limit, meta) : undefined;
+  const trueTotal = totalMatched ?? total; // Use provided totalMatched, fallback to rows.length
+  const truncated = trueTotal > total;
+  const hint = query ? getSearchHint(query, resultCount ?? total, trueTotal, limit, meta) : undefined;
   
   for (let includeCount = total; includeCount >= 0; includeCount--) {
     const visible = rows.slice(0, includeCount);
-    const truncated = includeCount < total;
     const payload =
       truncated || timings || hint
         ? {
             results: visible,
             truncated,
-            totalMatched: total,
+            totalMatched: trueTotal,
             returned: visible.length,
             ...(hint ? { hint } : {}),
             ...(timings ? { timings } : {}),
@@ -498,7 +504,7 @@ function serializeJsonPayload(
     {
       results: [],
       truncated: true,
-      totalMatched: total,
+      totalMatched: trueTotal,
       returned: 0,
       ...(hint ? { hint } : {}),
       ...(timings ? { timings } : {}),
@@ -939,6 +945,7 @@ async function main() {
           parsed.timings ? run.timings : undefined,
           parsed.query,
           results.length,
+          run.totalMatched ?? results.length,
           effectiveLimit,
           run._meta
         );
@@ -955,7 +962,8 @@ async function main() {
         break;
       }
 
-      console.log(`Found ${results.length} result${results.length === 1 ? "" : "s"}:\n`);
+      const totalMatched = run.totalMatched ?? results.length;
+      console.log(`Found ${results.length} result${results.length === 1 ? "" : "s"}${totalMatched > results.length ? ` (of ${totalMatched} total)` : ""}:\n`);
       if (effectiveDetail === "headers") {
         console.log("  DATE        FROM                 SUBJECT                          MESSAGE ID");
         console.log("  " + "-".repeat(96));
@@ -982,7 +990,7 @@ async function main() {
       }
       
       // Show actionable hints after results (only in text mode, not JSON)
-      const hint = getSearchHint(parsed.query, results.length, results.length, effectiveLimit, run._meta);
+      const hint = getSearchHint(parsed.query, results.length, totalMatched, effectiveLimit, run._meta);
       if (hint) {
         console.log(`\n${hint}`);
       }

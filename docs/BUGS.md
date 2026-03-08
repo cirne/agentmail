@@ -6,7 +6,11 @@ When an agent or user hits a failure, we document it here. Root cause and "agent
 
 ## Active
 
-_No active bugs at this time._
+| ID | Title | Summary |
+|---|---|---|
+| [BUG-016](bugs/BUG-016-bakeoff-incomplete-coverage-critical.md) | Bakeoff Failure — Incomplete Coverage vs Google Adapter — Agent-Reported | 5 bugs compounding. Initial: 18 of 36 receipts. Post-fix retest: 9 of 37 (worse). Core cause: FTS5 phrase-quote makes "apple.com" more restrictive than pre-fix workarounds; domain queries should route to `from:` filter not FTS phrase. Also: double-truncation in hybrid merge, `returned > totalMatched` impossibility, no exhaustive enumeration path for transactional queries. |
+| [BUG-017](bugs/BUG-017-semantic-recall-gap-intent-queries.md) | Semantic Recall Gap for Intent-Based Queries — Agent-Reported | Bakeoff #2: zmail missed Marcio Nunes (Harmonee AI, Mar 3) despite data being in sync range. Evidence was spread across a Zoom invite, Otter.ai share, and investor intro — none contained the word "entrepreneur." Embedding mismatch + top-N truncation + no cross-email signal aggregation = recall failure for vague intent queries. **Bakeoff #5 confirmed resolution path:** FTS + agent query decomposition fixes this entirely. See OPP-019. |
+| [BUG-018](bugs/BUG-018-who-timings-unknown-flag.md) | `zmail who --timings` Unknown Flag — Agent-Reported | CLI agent wasted a tool call (15-25s LLM round) attempting `zmail who --timings`, which fails with unknown flag. `zmail search --timings` works; `who` does not. Flag inconsistency across commands causes agent retry overhead. |
 
 ---
 

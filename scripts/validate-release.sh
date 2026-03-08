@@ -27,7 +27,7 @@ section "Release Validation Checklist"
 section "Install Script"
 check "install.sh syntax valid" bash -n "$REPO_ROOT/install.sh"
 check "install.sh is executable" [ -x "$REPO_ROOT/install.sh" ]
-check "install.sh has correct URL" grep -q "curl.*raw.githubusercontent.com.*install.sh" "$REPO_ROOT/install.sh"
+check "install.sh references npm package" grep -q "@cirne/zmail" "$REPO_ROOT/install.sh"
 
 # Package.json checks
 section "Package Configuration"
@@ -72,9 +72,9 @@ if [ $errors -eq 0 ]; then
     echo ""
     echo "Ready to push. Next steps:"
     echo "1. git push origin main"
-    echo "2. Monitor GitHub Actions: https://github.com/cirne/zmail/actions"
-    echo "3. Check package: https://github.com/cirne/zmail/packages"
-    echo "4. Test install: curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash"
+    echo "2. Monitor GitHub Actions (if repo is public)"
+    echo "3. Check package: https://www.npmjs.com/package/@cirne/zmail"
+    echo "4. Test install: npm install -g @cirne/zmail"
     exit 0
 else
     echo -e "${RED}$errors check(s) failed${NC}"

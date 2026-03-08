@@ -17,11 +17,6 @@ Modern email systems are human-first — designed around inbox browsing and manu
    npm install -g @cirne/zmail
    ```
    
-   Or use the install script (checks Node.js version and PATH):
-   ```bash
-   curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
-   ```
-   
    For development:
    ```bash
    npm install

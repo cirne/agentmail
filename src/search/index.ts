@@ -33,6 +33,7 @@ export interface SearchTimings {
 export interface SearchResultSet {
   results: SearchResult[];
   timings: SearchTimings;
+  totalMatched?: number; // Total number of matches before limit/offset
   _meta?: {
     hasFtsMatches: boolean;
     hasSemanticOnlyMatches: boolean;
@@ -44,12 +45,25 @@ export interface SearchResultSet {
 
 /**
  * Filter-only search (no query text, just WHERE clauses).
+ * Returns results and total count.
  */
-function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): SearchResult[] {
-  const { limit = 20, offset = 0 } = opts;
+function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchResult[]; totalCount: number } {
+  const { limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
   const filterClause = buildFilterClause(opts);
   const where = filterClause.conditions.length > 0 ? `WHERE ${buildWhereClause(filterClause)}` : "";
 
+  // Get total count first
+  const countResult = db
+    .prepare(
+      /* sql */ `
+      SELECT COUNT(*) as count
+      FROM messages m
+      ${where}
+    `
+    )
+    .get(...filterClause.params) as { count: number };
+
+  // Then get results
   const params = [...filterClause.params, limit, offset];
   const rows = db
     .prepare(
@@ -70,23 +84,83 @@ function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): SearchResult
     `
     )
     .all(...params) as SearchResult[];
-  return rows;
+  return { results: rows, totalCount: countResult.count };
+}
+
+/**
+ * Escape FTS5 special characters in query string.
+ * FTS5 treats dots (.) as token separators, which causes syntax errors.
+ * We quote queries containing dots to treat them as phrase searches.
+ * 
+ * Special FTS5 characters: . - @ ( ) [ ] { } + * ? | \
+ * The dot (.) is the most problematic as it's common in domain names.
+ */
+function escapeFts5Query(query: string): string {
+  // Check for OR/AND operators (must be uppercase for FTS5)
+  const hasOperators = /\b(OR|AND)\b/i.test(query);
+  
+  // If query contains dots (common in domain names like "apple.com")
+  // and no operators, quote the entire query as a phrase
+  if (!hasOperators && query.includes('.')) {
+    // Escape any existing quotes and wrap in quotes
+    const escaped = query.replace(/"/g, '""');
+    return `"${escaped}"`;
+  }
+  
+  // For queries with operators and dots, quote each part separately
+  if (hasOperators && query.includes('.')) {
+    const parts = query.split(/\s+(OR|AND)\s+/i);
+    const escapedParts: string[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (/^(OR|AND)$/i.test(part)) {
+        escapedParts.push(part.toUpperCase());
+      } else if (part.includes('.')) {
+        // Quote parts with dots
+        const escaped = part.replace(/"/g, '""');
+        escapedParts.push(`"${escaped}"`);
+      } else {
+        escapedParts.push(part);
+      }
+    }
+    return escapedParts.join(' ');
+  }
+  
+  // No dots, return as-is (FTS5 handles other special chars reasonably)
+  return query;
 }
 
 /**
  * FTS5 search (keyword matching via BM25).
+ * Returns results and total count.
  */
-function ftsSearch(db: SqliteDatabase, opts: SearchOptions): SearchResult[] {
-  const { query, limit = 20, offset = 0 } = opts;
-  if (!query?.trim()) return [];
+function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchResult[]; totalCount: number } {
+  const { query, limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
+  if (!query?.trim()) return { results: [], totalCount: 0 };
+
+  // Escape FTS5 special characters
+  const escapedQuery = escapeFts5Query(query);
 
   // Build filter clause with FTS MATCH condition
   const filterClause = buildFilterClause(opts, true, "messages_fts MATCH ?");
   const whereClause = buildWhereClause(filterClause);
   const where = `WHERE ${whereClause}`;
 
-  // FTS search params: query first, then filter params
-  const params = [query, ...filterClause.params, limit + offset + 50];
+  // First, get total count (before limit/offset)
+  const countParams = [escapedQuery, ...filterClause.params];
+  const totalCount = db
+    .prepare(
+      /* sql */ `
+      SELECT COUNT(*) as count
+      FROM messages_fts
+      JOIN messages m ON m.id = messages_fts.rowid
+      ${where}
+    `
+    )
+    .get(...countParams) as { count: number };
+
+  // Then get results
+  const params = [escapedQuery, ...filterClause.params, limit + offset + 50];
 
   const rows = db
     .prepare(
@@ -110,7 +184,8 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): SearchResult[] {
     .all(...params) as SearchResult[];
 
   // Apply post-query filtering and limit/offset
-  return rows.slice(offset, offset + limit);
+  const results = rows.slice(offset, offset + limit);
+  return { results, totalCount: totalCount.count };
 }
 
 /**
@@ -121,7 +196,7 @@ async function vectorSearchFromEmbedding(
   opts: SearchOptions,
   queryEmbedding: number[]
 ): Promise<{ results: SearchResult[]; rawScores: Map<string, number> }> {
-  const { query, limit = 20, offset = 0 } = opts;
+  const { query, limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
   if (!query?.trim()) return { results: [], rawScores: new Map() };
 
   // Search LanceDB for similar messages
@@ -307,7 +382,7 @@ export async function searchWithMeta(
     }
   }
 
-  const { limit = 20, offset = 0 } = effectiveOpts;
+  const { limit = 50, offset = 0 } = effectiveOpts; // Increased default from 20 to 50 for agent workflows
   const hasFilters = !!(effectiveOpts.fromAddress || effectiveOpts.toAddress || effectiveOpts.subject || effectiveOpts.afterDate || effectiveOpts.beforeDate);
   
   // Update query in opts for search functions
@@ -318,11 +393,12 @@ export async function searchWithMeta(
   };
 
   if (!parsedQuery?.trim() && hasFilters) {
-    const results = filterOnlySearch(db, effectiveOpts);
+    const { results, totalCount } = filterOnlySearch(db, effectiveOpts);
     timings.totalMs = Date.now() - startedAt;
     return {
       results,
       timings,
+      totalMatched: totalCount,
       _meta: {
         hasFtsMatches: results.length > 0,
         hasSemanticOnlyMatches: false,
@@ -349,12 +425,13 @@ export async function searchWithMeta(
 
   if (useFtsOnly) {
     const ftsStart = Date.now();
-    const results = ftsSearch(db, effectiveOpts);
+    const { results, totalCount } = ftsSearch(db, effectiveOpts);
     timings.ftsMs = Date.now() - ftsStart;
     timings.totalMs = Date.now() - startedAt;
     return {
       results,
       timings,
+      totalMatched: totalCount,
       _meta: {
         hasFtsMatches: results.length > 0,
         hasSemanticOnlyMatches: false,
@@ -366,7 +443,9 @@ export async function searchWithMeta(
   // Default: hybrid search (semantic + FTS)
   const semanticPromise = vectorSearchWithTimings(db, effectiveOpts);
   const ftsStart = Date.now();
-  const ftsResults = ftsSearch(db, effectiveOpts);
+  const ftsSearchResult = ftsSearch(db, effectiveOpts);
+  const ftsResults = ftsSearchResult.results;
+  const ftsTotalCount = ftsSearchResult.totalCount;
   timings.ftsMs = Date.now() - ftsStart;
   const semantic = await semanticPromise;
   timings.embedMs = semantic.embedMs;
@@ -421,9 +500,12 @@ export async function searchWithMeta(
   const hasAnyMatches = sorted.length > 0;
 
   // Remove rrfScore and hasFtsMatch from final results
+  // For hybrid search, use FTS total count as the primary count (semantic is supplementary)
+  // The combined set may be larger than FTS alone, but FTS count is more reliable for pagination
   return {
     results: sorted.map(({ rrfScore, hasFtsMatch, ...rest }) => rest),
     timings,
+    totalMatched: ftsTotalCount, // Use FTS count as primary; combined results may exceed this
     _meta: {
       hasFtsMatches,
       hasSemanticOnlyMatches,

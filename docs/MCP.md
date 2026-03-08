@@ -34,7 +34,7 @@ Search emails using hybrid search (semantic + FTS5) by default. Returns matching
 
 **Parameters:**
 - `query` (string, optional): Full-text search query. Supports inline operators: `from:`, `to:`, `subject:`, `after:`, `before:`
-- `limit` (number, optional): Maximum number of results (default: 20)
+- `limit` (number, optional): Maximum number of results (default: 50)
 - `offset` (number, optional): Pagination offset (default: 0)
 - `fromAddress` (string, optional): Filter by sender email address
 - `afterDate` (string, optional): Filter messages after this date (ISO 8601 or relative like "7d", "30d")

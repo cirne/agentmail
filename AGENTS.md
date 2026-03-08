@@ -7,11 +7,6 @@
 npm install -g @cirne/zmail
 ```
 
-Or use the install script (checks Node.js version and PATH):
-```bash
-curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
-```
-
 ## Key documents
 
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical decisions and rationale (**read before making storage, sync, or interface decisions**)

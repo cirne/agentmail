@@ -107,14 +107,12 @@ test_variables() {
 
 # Test 5: URL validation
 test_url() {
-    section "Validating install script URL"
+    section "Validating install script"
     
-    EXPECTED_URL="https://raw.githubusercontent.com/cirne/zmail/main/install.sh"
-    
-    if grep -q "$EXPECTED_URL" "$INSTALL_SCRIPT"; then
-        pass "Install script URL is correct in comments"
+    if grep -q "@cirne/zmail" "$INSTALL_SCRIPT"; then
+        pass "Install script references npm package"
     else
-        fail "Install script URL not found in comments"
+        fail "Install script does not reference @cirne/zmail"
     fi
     
     # Check if URL matches repo
