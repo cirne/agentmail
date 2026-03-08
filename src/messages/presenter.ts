@@ -31,7 +31,6 @@ export interface MessageRow {
   body_text: string;
   raw_path: string;
   synced_at: string;
-  embedding_state: string;
 }
 
 /**

@@ -9,6 +9,12 @@ import { logger } from "~/lib/logger";
 import { extractAndCache } from "~/attachments";
 import { config } from "~/lib/config";
 import { getStatus, formatTimeAgo } from "~/lib/status";
+import {
+  DEFAULT_BODY_CAP,
+  DEFAULT_MAX_BODY_CHARS,
+  shapeShapedToOutput,
+  type ShapedMessageLike,
+} from "~/messages/lean-shape";
 
 /**
  * Param keys for search_mail tool. Used by CLI/MCP sync test; keep in sync with the tool schema and SearchOptions.
@@ -199,20 +205,22 @@ export function createMcpServer() {
 
   server.tool(
     "get_message",
-    "Retrieve a single message by message ID. Returns message content in LLM-friendly formatted text (headers, body, attachments list). Use raw=true to get the original EML format instead.",
+    "Retrieve a single message by message ID. Returns the same JSON shape as one element of get_messages (same params: detail, maxBodyChars). Use detail: 'summary' for minimal payload, detail: 'full' (default) for body up to maxBodyChars, or raw=true / detail: 'raw' for EML. For reading multiple messages, use get_messages instead to batch-read in a single call.",
     {
       messageId: z.string().describe("Message ID (from search_mail results) to retrieve"),
-      raw: z.boolean().optional().describe("If true, return raw EML format instead of parsed/formatted content (default: false)"),
+      raw: z.boolean().optional().describe("If true, return raw EML (same as detail: 'raw'). Prefer detail: 'raw' instead."),
+      detail: z.enum(["full", "summary", "raw"]).optional().describe("'summary' = minimal + 200-char snippet; 'full' = body up to maxBodyChars (default); 'raw' = EML. Same as get_messages."),
+      maxBodyChars: z.number().optional().describe("When detail is 'full': max body chars (default 2000). Same as get_messages. Ignored for 'summary' or 'raw'."),
     },
-    async ({ messageId, raw = false }) => {
+    async ({ messageId, raw = false, detail, maxBodyChars = DEFAULT_MAX_BODY_CHARS }) => {
       const db = getDb();
-      const { formatMessageForOutput, formatMessageLlmFriendly } = await import("~/messages/presenter");
-      
+      const { formatMessageForOutput } = await import("~/messages/presenter");
+
       const normalizedId = normalizeMessageId(messageId);
       const message = db
         .prepare("SELECT * FROM messages WHERE message_id = ?")
         .get(normalizedId) as any | undefined;
-      
+
       if (!message) {
         return {
           content: [
@@ -223,17 +231,53 @@ export function createMcpServer() {
           ],
         };
       }
-      
-      const shaped = await formatMessageForOutput(message, raw);
-      const formatted = formatMessageLlmFriendly(message, shaped);
-      
+
+      const useRaw = raw || detail === "raw";
+      const shaped = await formatMessageForOutput(message, useRaw);
+      const out = shapeShapedToOutput([shaped], { useRaw, detail, maxBodyChars });
       return {
-        content: [
-          {
-            type: "text",
-            text: formatted,
-          },
-        ],
+        content: [{ type: "text", text: JSON.stringify(out[0], null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "get_messages",
+    "Batch-read multiple emails in one call (max 20). Token efficiency: use detail: 'summary' when scanning many messages (returns subject, from, to, date, 200-char snippet only — ~80% fewer tokens). Use detail: 'full' (default) when you need full bodies; set maxBodyChars (default 2000) to 300-500 for quick confirmation or 4000+ for full reads. Use detail: 'raw' for original EML.",
+    {
+      messageIds: z.array(z.string()).describe("Array of message IDs (from search_mail results) to retrieve"),
+      detail: z.enum(["full", "summary", "raw"]).optional().describe("'summary' = minimal payload for scanning (subject, from, to, date, 200-char snippet); 'full' = full body up to maxBodyChars (default); 'raw' = EML. Prefer 'summary' when you need to scan 5+ messages with minimal tokens."),
+      raw: z.boolean().optional().describe("If true, return raw EML (same as detail: 'raw'). Prefer detail: 'raw' instead."),
+      maxBodyChars: z.number().optional().describe("When detail is 'full': max body chars per message (default 2000). Use 300-500 for quick confirmation; 4000+ for full email. Ignored when detail is 'summary' or 'raw'."),
+    },
+    async ({ messageIds, detail, raw = false, maxBodyChars = DEFAULT_MAX_BODY_CHARS }) => {
+      const db = getDb();
+      const { formatMessageForOutput } = await import("~/messages/presenter");
+      const useRaw = raw || detail === "raw";
+
+      const cappedIds = messageIds.slice(0, 20);
+      const normalizedIds = cappedIds.map((id) => normalizeMessageId(id));
+
+      const placeholders = normalizedIds.map(() => "?").join(",");
+      const messages = db
+        .prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
+        .all(...normalizedIds) as any[];
+
+      if (messages.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ error: "No messages found", requested: messageIds.length, found: 0 }, null, 2),
+            },
+          ],
+        };
+      }
+
+      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, useRaw)));
+      const out = shapeShapedToOutput(shaped, { useRaw, detail, maxBodyChars });
+      return {
+        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
       };
     }
   );
@@ -266,14 +310,15 @@ export function createMcpServer() {
       }
       
       const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, raw)));
-      
+
+      if (raw) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(shaped, null, 2) }],
+        };
+      }
+      const out = shapeShapedToOutput(shaped as (ShapedMessageLike | Record<string, unknown>)[], { useRaw: false, detail: "full", maxBodyChars: DEFAULT_BODY_CAP });
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(shaped, null, 2),
-          },
-        ],
+        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
       };
     }
   );

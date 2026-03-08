@@ -103,8 +103,6 @@ export function loadConfig(options?: { home?: string; env?: NodeJS.ProcessEnv })
   dataDir: string;
   dbPath: string;
   maildirPath: string;
-  vectorsPath: string;
-  embeddingCachePath: string;
 } {
   const home = options?.home ?? getZmailHome();
   const env = options?.env ?? process.env;
@@ -153,12 +151,6 @@ export function loadConfig(options?: { home?: string; env?: NodeJS.ProcessEnv })
     get maildirPath() {
       return join(this.dataDir, "maildir");
     },
-    get vectorsPath() {
-      return join(this.dataDir, "vectors");
-    },
-    get embeddingCachePath() {
-      return join(this.dataDir, "embedding-cache");
-    },
   } as any; // Type assertion needed because getters can't be in object literals
 }
 
@@ -196,12 +188,6 @@ export const config = {
   },
   get maildirPath() {
     return loadConfig().maildirPath;
-  },
-  get vectorsPath() {
-    return loadConfig().vectorsPath;
-  },
-  get embeddingCachePath() {
-    return loadConfig().embeddingCachePath;
   },
 } as const;
 

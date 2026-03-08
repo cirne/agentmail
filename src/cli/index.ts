@@ -1,7 +1,6 @@
 import { searchWithMeta } from "~/search";
 import { who } from "~/search/who";
-import { indexMessages } from "~/search/indexing";
-import { runSyncAndIndex } from "~/cli/sync-orchestration";
+import { runSync } from "~/sync";
 import { getDb, checkSchemaVersion } from "~/db";
 import { reindexFromMaildir } from "~/db/rebuild";
 import { startMcpServer } from "~/mcp";
@@ -120,6 +119,7 @@ interface ParsedSearchArgs {
   forceText: boolean;
   idsOnly: boolean;
   timings: boolean;
+  includeTopBody: boolean;
 }
 
 function searchUsage() {
@@ -136,6 +136,7 @@ function searchUsage() {
   console.error("  --ids-only         return only message IDs");
   console.error("  --timings          include machine-readable search timings");
   console.error("  --text             human-readable table output (default: JSON)");
+  console.error("  --no-body          suppress body text for top result (default: included)");
 }
 
 interface ParsedWhoArgs {
@@ -263,6 +264,7 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
     forceText: false,
     idsOnly: false,
     timings: false,
+    includeTopBody: true,
   };
 
   const queryParts: string[] = [];
@@ -292,6 +294,10 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
     }
     if (arg === "--timings") {
       parsed.timings = true;
+      continue;
+    }
+    if (arg === "--no-body") {
+      parsed.includeTopBody = false;
       continue;
     }
     if (arg === "--from") {
@@ -423,6 +429,11 @@ function getSearchHint(
     return "No results found. Try broader terms or check spelling.";
   }
 
+  // Batch reading hint (when multiple results found)
+  if (resultCount > 1) {
+    return `Tip: Top result includes body preview. Use get_messages(messageIds) to batch-read; use detail: 'summary' for minimal tokens when scanning, or detail: 'full' with maxBodyChars as needed.`;
+  }
+
   // Truncated results hint (only show if we have more results than displayed)
   if (totalMatched > resultCount && totalMatched > (limit ?? 50)) {
     const hasOffset = false; // TODO: track offset if we add it to CLI args
@@ -452,12 +463,14 @@ function serializeJsonPayload(
   query?: string,
   resultCount?: number,
   totalMatched?: number,
-  limit?: number
+  limit?: number,
+  searchHint?: string
 ): string {
   const total = rows.length;
   const trueTotal = totalMatched ?? total; // Use provided totalMatched, fallback to rows.length
   const truncated = trueTotal > total;
-  const hint = query ? getSearchHint(query, resultCount ?? total, trueTotal, limit) : undefined;
+  // Use searchHint from searchWithMeta if provided, otherwise fall back to getSearchHint
+  const hint = searchHint ?? (query ? getSearchHint(query, resultCount ?? total, trueTotal, limit) : undefined);
   
   for (let includeCount = total; includeCount >= 0; includeCount--) {
     const visible = rows.slice(0, includeCount);
@@ -508,7 +521,6 @@ interface MessageRow {
   body_text: string;
   raw_path: string;
   synced_at: string;
-  embedding_state: string;
 }
 
 function parseRawFlag(rawArgs: string[], usage: string): { id: string; raw: boolean } {
@@ -619,24 +631,6 @@ function printStatus(db: SqliteDatabase = getDb()): void {
     console.log(`${pad("Sync:")} never run`);
   }
 
-  // Indexing status
-  if (status.indexing.isRunning) {
-    // SQLite datetime('now') is UTC but has no 'Z'; parse as UTC to avoid negative elapsed (local-time parse)
-    const startedMs = status.indexing.startedAt
-      ? (status.indexing.startedAt.includes("Z") || status.indexing.startedAt.includes("+")
-          ? new Date(status.indexing.startedAt).getTime()
-          : new Date(status.indexing.startedAt.replace(" ", "T") + "Z").getTime())
-      : 0;
-    const elapsed = startedMs ? Math.round((Date.now() - startedMs) / 1000) : 0;
-    // total_to_index can be 0 when sync+index start together (pending was 0 at start); use live total for display
-    const displayTotal = Math.max(status.indexing.totalToIndex, status.indexing.indexedSoFar + status.indexing.pending);
-    console.log(`${pad("Indexing:")} running (${status.indexing.indexedSoFar}/${displayTotal} indexed${status.indexing.totalFailed > 0 ? `, ${status.indexing.totalFailed} failed` : ''}, ${elapsed}s elapsed)`);
-  } else if (status.indexing.completedAt) {
-    console.log(`${pad("Indexing:")} idle (last: ${status.indexing.completedAt.slice(0, 10)}, ${status.indexing.totalIndexed} indexed${status.indexing.totalFailed > 0 ? `, ${status.indexing.totalFailed} failed` : ''})`);
-  } else {
-    console.log(`${pad("Indexing:")} never run`);
-  }
-
   // Search readiness
   console.log(`${pad("Search:")} FTS ready (${status.search.ftsReady})`);
 
@@ -664,10 +658,6 @@ async function main() {
   if (stale) {
     process.stderr.write("Schema updated — rebuilding index from local cache (up to 20s)...\n");
     rmSync(config.dbPath, { force: true });
-    rmSync(config.vectorsPath, { recursive: true, force: true });
-    // Reset LanceDB cache since we deleted vectors/
-    const { resetVectorCache } = await import("~/search/vectors");
-    resetVectorCache();
     getDb(); // creates fresh DB, sets user_version
     
     // Use sync log file for rebuild logging (same as sync command)
@@ -682,7 +672,6 @@ async function main() {
       fileLogger.info("Schema rebuild starting");
       const result = await reindexFromMaildir();
       parsed = result.parsed;
-      await indexMessages();
       fileLogger.info("Schema rebuild complete", { parsed });
     } finally {
       fileLogger.close();
@@ -718,31 +707,18 @@ async function main() {
         };
         if (since) syncOptions.since = since;
 
-        const { syncResult, indexResult } = await runSyncAndIndex(syncOptions);
+        const syncResult = await runSync(syncOptions);
 
-        if (syncResult) {
-          const sec = (syncResult.durationMs / 1000).toFixed(2);
-          const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
-          const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
-          console.log("");
-          console.log("Sync metrics:");
-          console.log(`  messages:  ${syncResult.synced} new, ${syncResult.messagesFetched} fetched`);
-          console.log(`  downloaded: ${mb} MB (${syncResult.bytesDownloaded} bytes)`);
-          console.log(`  bandwidth: ${kbps} KB/s`);
-          console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
-          console.log(`  duration:  ${sec}s`);
-        }
-
-        if (indexResult.indexed > 0 || indexResult.failed > 0) {
-          const sec = (indexResult.durationMs / 1000).toFixed(2);
-          console.log("");
-          console.log("Indexing metrics:");
-          console.log(`  indexed:    ${indexResult.indexed}`);
-          if (indexResult.skipped > 0) console.log(`  skipped:    ${indexResult.skipped}`);
-          if (indexResult.failed > 0) console.log(`  failed:     ${indexResult.failed}`);
-          console.log(`  throughput: ${indexResult.messagesPerMinute} msg/min`);
-          console.log(`  duration:   ${sec}s`);
-        }
+        const sec = (syncResult.durationMs / 1000).toFixed(2);
+        const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
+        const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
+        console.log("");
+        console.log("Sync metrics:");
+        console.log(`  messages:  ${syncResult.synced} new, ${syncResult.messagesFetched} fetched`);
+        console.log(`  downloaded: ${mb} MB (${syncResult.bytesDownloaded} bytes)`);
+        console.log(`  bandwidth: ${kbps} KB/s`);
+        console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
+        console.log(`  duration:  ${sec}s`);
         break;
       }
 
@@ -929,7 +905,8 @@ async function main() {
           parsed.query,
           results.length,
           run.totalMatched ?? results.length,
-          effectiveLimit
+          effectiveLimit,
+          parsed.query ? getSearchHint(parsed.query, results.length, run.totalMatched ?? results.length, effectiveLimit) : undefined
         );
         console.log(json);
         break;
@@ -1169,33 +1146,18 @@ async function main() {
         direction: 'forward',
       };
 
-      const { syncResult, indexResult } = await runSyncAndIndex(syncOptions);
+      const syncResult = await runSync(syncOptions);
 
-      // Sync complete
-      if (syncResult) {
-        const sec = (syncResult.durationMs / 1000).toFixed(2);
-        const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
-        const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
-        console.log("");
-        console.log("Refresh metrics:");
-        console.log(`  messages:  ${syncResult.synced} new, ${syncResult.messagesFetched} fetched`);
-        console.log(`  downloaded: ${mb} MB (${syncResult.bytesDownloaded} bytes)`);
-        console.log(`  bandwidth: ${kbps} KB/s`);
-        console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
-        console.log(`  duration:  ${sec}s`);
-      }
-
-      if (indexResult.indexed > 0 || indexResult.failed > 0) {
-        const sec = (indexResult.durationMs / 1000).toFixed(2);
-        console.log("");
-        console.log("Indexing metrics:");
-        console.log(`  indexed:    ${indexResult.indexed}`);
-        if (indexResult.failed > 0) {
-          console.log(`  failed:     ${indexResult.failed}`);
-        }
-        console.log(`  throughput: ${Math.round(indexResult.messagesPerMinute)} msg/min`);
-        console.log(`  duration:  ${sec}s`);
-      }
+      const sec = (syncResult.durationMs / 1000).toFixed(2);
+      const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
+      const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
+      console.log("");
+      console.log("Refresh metrics:");
+      console.log(`  messages:  ${syncResult.synced} new, ${syncResult.messagesFetched} fetched`);
+      console.log(`  downloaded: ${mb} MB (${syncResult.bytesDownloaded} bytes)`);
+      console.log(`  bandwidth: ${kbps} KB/s`);
+      console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
+      console.log(`  duration:  ${sec}s`);
       break;
     }
 
@@ -1522,7 +1484,7 @@ Usage:
 
 Agent interfaces:
   CLI (this): Use for direct subprocess calls. Fast for one-off queries. Commands default to JSON (search, who, attachment list) or text (read, thread, status, stats). Use --text or --json flags to override.
-  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. See docs/MCP.md.
+  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. Search returns top-result body; use get_messages([ids]) to batch-read multiple emails. See docs/MCP.md.
 
 Run 'zmail setup' for setup instructions.
 `);

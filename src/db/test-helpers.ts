@@ -9,7 +9,6 @@ export function createTestDb(): SqliteDatabase {
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(SCHEMA);
   db.exec("INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0)");
-  db.exec("INSERT OR IGNORE INTO indexing_status (id) VALUES (1)");
   return db;
 }
 

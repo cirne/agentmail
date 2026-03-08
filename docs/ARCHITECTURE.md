@@ -30,8 +30,8 @@ Container
 └── /data  (persistent volume — survives redeploys)
     ├── maildir/           ← raw .eml files
     ├── zmail.db           ← SQLite: metadata, FTS5 index, sync state
-    ├── vectors/           ← LanceDB embedded
-    └── embedding-cache/   ← OpenAI embedding responses by (model, input hash)
+    ├── vectors/           ← (deferred) LanceDB embedded
+    └── embedding-cache/   ← (deferred) OpenAI embedding responses by (model, input hash)
 ```
 
 This layout applies to **both Phase 1 and Phase 2 (open source)**. Each user runs their own container with their own volume. There is no shared infrastructure to scale.
@@ -91,7 +91,7 @@ This layout applies to **both Phase 1 and Phase 2 (open source)**. Each user run
 ```
 zmail sync [--since <spec>]     ← Initial sync: fill gaps going backward (e.g. --since 7d, 5w, 3m, 2y)
 zmail refresh                    ← Refresh: fetch new messages since last sync (frequent updates)
-zmail search <query> [flags]    ← hybrid search (semantic + FTS) by default; use --fts for FTS-only
+zmail search <query> [flags]    ← FTS5 full-text search
                                   Query supports inline operators: from:, to:, subject:, after:, before:
                                   Example: zmail search "from:alice@example.com invoice OR receipt"
 zmail who <query> [flags]        ← find people by address or display name (sent/received/mentioned counts)
@@ -124,7 +124,7 @@ Both modes hit the same SQLite index. The binary is the same artifact.
 |---|---|---|
 | Raw email files | Maildir on persistent volume | S3 / DO Spaces |
 | Structured metadata + FTS | SQLite via `better-sqlite3` | Postgres |
-| Semantic / vector search | LanceDB embedded on volume | LanceDB → S3 |
+| Semantic / vector search | (deferred) LanceDB on volume | LanceDB → S3 |
 
 **SQLite schema (Phase 1):**
 ```
@@ -139,9 +139,7 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 **Full-text search:** SQLite FTS5. Handles millions of emails with sub-100ms queries. No external service, runs in-process, trivially backed up as a single file.
 
-**Vector / semantic search:** LanceDB embedded. TypeScript-native, no server required, stores data on the same volume as everything else. S3 backend available for Phase 3 if needed. Preferred over Chroma because it stays fully embedded through Phase 2.
-
-**Embedding generation:** OpenAI API for Phase 1 (simplest, negligible cost for personal use). Ollama (local models) supported for open-source users who want full privacy.
+**Vector / semantic search (deferred):** Current implementation is FTS-only ([OPP-019](opportunities/OPP-019-fts-first-retire-semantic-default.md)). LanceDB and embedding generation may be reintroduced later; design assumed LanceDB embedded on volume, S3 backend for Phase 3.
 
 ---
 
@@ -404,7 +402,7 @@ We do **not** introduce async job IDs or a job queue for sync unless we later ne
 | Raw email (MIME) | `.eml` file in `maildir/` | No | Canonical artifact — everything rebuilds from this |
 | `body_text` | `.eml` file | **Yes** — `messages.body_text` | Required for FTS5. The external-content FTS5 table (`content='messages'`) reads from this column for indexing and `snippet()` generation. Removing it would break full-text search. |
 | `body_html` | `.eml` file | **No** | Not indexed, not searched. Parse from `.eml` on demand when rendering is needed. |
-| Embeddings | LanceDB (`data/vectors/`) | No | Vector-only (no text stored in LanceDB). Rebuildable from `body_text`. |
+| Embeddings | (deferred) LanceDB | No | Current implementation is FTS-only; vector layer removed (OPP-019). |
 | Metadata (from, to, subject, date, labels) | `.eml` headers | **Yes** — `messages.*` columns | Needed for filtering, sorting, and display without parsing `.eml` on every query. |
 
 **Rationale:** The guiding principle is: the raw `.eml` store is the durable artifact; SQLite is a rebuildable index (ADR-002). Data should only be duplicated into SQLite when it is required for indexing or high-frequency queries. `body_text` qualifies because FTS5 cannot function without it. `body_html` does not — it's never searched and can be parsed from the `.eml` on the rare occasions it's needed. Metadata columns (from, to, subject, date) qualify because they're used in WHERE/ORDER BY/JOIN on nearly every query.
@@ -417,46 +415,31 @@ We do **not** introduce async job IDs or a job queue for sync unless we later ne
 
 **See also:** [SYNC.md](./SYNC.md) — Detailed sync implementation, optimization history, and performance analysis.
 
-**Decision:** `zmail sync` and `zmail refresh` are the user-facing sync commands. Both launch sync and indexing concurrently via `Promise.all` in a single thread:
+**Current implementation:** Sync only. Embedding/indexing and hybrid search have been removed (FTS-first architecture, [OPP-019](opportunities/OPP-019-fts-first-retire-semantic-default.md)). The following describes the prior design; it may be restored or reimplemented later.
 
-1. **Sync** (bandwidth-bound): IMAP fetch → write `.eml` to maildir → insert into SQLite with `embedding_state = 'pending'`. Optimized to saturate network bandwidth (ADR-016/017).
-2. **Indexing** (API-rate-bound): Claim pending messages from SQLite → generate embeddings via OpenAI → write to LanceDB → mark `embedding_state = 'done'`. Multiple embedding batches in-flight concurrently. Embedding API responses are cached on disk (by model and input hash) so the same string is not re-embedded. Cache lives under `ZMAIL_HOME/data/embedding-cache`.
+**Decision (prior design):** `zmail sync` and `zmail refresh` are the user-facing sync commands. Both launched sync and indexing concurrently via `Promise.all` in a single thread:
+
+1. **Sync** (bandwidth-bound): IMAP fetch → write `.eml` to maildir → insert into SQLite. Optimized to saturate network bandwidth (ADR-016/017).
+2. **Indexing** (removed): Had claimed pending messages from SQLite → generate embeddings via OpenAI → write to LanceDB. Embedding API responses were cached on disk (by model and input hash). Cache lived under `ZMAIL_HOME/data/embedding-cache`.
 
 ```
 zmail sync [--since <spec>]  (backward sync)
-├── Sync:     IMAP → maildir + SQLite  (bandwidth-bound)
-│             - Resumes from oldest synced date
-│             - Uses UID filtering to skip already-synced messages
-│             - Searches before oldest synced date when all messages from a day are synced
-└── Indexing: SQLite → OpenAI → LanceDB  (API-rate-bound, async-pipelined)
+└── Sync:     IMAP → maildir + SQLite  (bandwidth-bound)
+              - Resumes from oldest synced date
+              - Uses UID filtering to skip already-synced messages
+              - Searches before oldest synced date when all messages from a day are synced
 
 zmail refresh  (forward sync)
-├── Sync:     IMAP → maildir + SQLite  (bandwidth-bound)
-│             - Uses UID range search (UID ${last_uid + 1}:*)
-│             - Only fetches new messages since last sync
-└── Indexing: SQLite → OpenAI → LanceDB  (API-rate-bound, async-pipelined)
-    ├── batch 1 in-flight (OpenAI API call)
-    ├── batch 2 in-flight (OpenAI API call)
-    └── ... up to INDEXER_CONCURRENCY
+└── Sync:     IMAP → maildir + SQLite  (bandwidth-bound)
+              - Uses UID range search (UID ${last_uid + 1}:*)
+              - Only fetches new messages since last sync
 ```
 
-**Single-threaded, async-pipelined architecture.** Both sync and indexing run in the same OS thread. The indexing orchestrator keeps N embedding batches in-flight concurrently via `Promise.all`/`Promise.race` — the OpenAI API is the bottleneck, not CPU, so async I/O saturates the rate limit without thread overhead. Only the main thread touches SQLite, eliminating cross-thread lock contention entirely.
+**Single-threaded.** Sync runs in one process; embedding/indexing pipeline has been removed (OPP-019).
 
 This replaces an earlier multi-worker design that used Bun Workers. That design was abandoned due to SQLite single-writer contention and Bun Worker stability issues. The async-pipelined approach achieves the same throughput for I/O-bound work with a much simpler execution model.
 
-**DB-backed indexing queue.** The `messages` table tracks indexing progress per-message via an `embedding_state` column:
-
-```
-pending → claimed → done
-                  → failed
-```
-
-- `pending`: Newly synced, awaiting indexing. A partial index on this column makes queue polling fast.
-- `claimed`: Atomically claimed by `claimBatch()` inside a transaction. Prevents double-processing.
-- `done`: Embedding generated and written to LanceDB.
-- `failed`: Embedding or upsert failed (logged, not retried automatically).
-
-On startup, the indexer resets any `claimed` rows back to `pending` (stale claims from a crashed process).
+**DB-backed indexing queue (removed).** The prior design tracked indexing per-message via an `embedding_state` column (pending → claimed → done/failed). That column and the indexer have been removed.
 
 **PID-based advisory locks.** Each subsystem has a singleton status row (`sync_summary`, `indexing_status`) with `is_running` and `owner_pid` columns. Before starting:
 
@@ -467,25 +450,23 @@ On startup, the indexer resets any `claimed` rows back to `pending` (stale claim
 
 This replaces timestamp-based staleness detection. PID checks are instantaneous and deterministic — no arbitrary timeout windows, no false positives from slow runs, no false negatives from clock skew.
 
-**Progressive availability:** Synced messages are immediately available for FTS5/keyword search and direct fetch. Semantic search becomes available progressively as the indexer catches up — like a database serving queries while building an index in the background.
+**Availability:** Synced messages are immediately available for FTS5 search and direct fetch.
 
-**Hybrid search by default.** Search uses hybrid (semantic + FTS5) by default, combining results with Reciprocal Rank Fusion (RRF). Use `--fts` flag for FTS-only (exact keyword matching). Messages that have not been embedded remain discoverable through FTS.
+**Search:** FTS5 full-text search only (no hybrid/semantic in current implementation).
 
 **Observability:**
-- Both subsystems track progress in the DB (`sync_summary`, `indexing_status`).
-- `zmail status` reads both tables and reports current state.
+- Sync tracks progress in the DB (`sync_summary`).
+- `zmail status` reports current state.
 - Agents and remote clients can poll status at any time without depending on stdout.
 - Stdout progress lines are emitted periodically for environments that stream output.
 
-**No standalone indexing command.** There is no `zmail index` or backfill tool. `zmail sync` and `zmail refresh` are the only entry points for data ingestion and indexing — one command, one process.
-
-**Rationale:** Embedding via an external API (OpenAI) adds ~50–100ms latency per message. Running this inline during sync would make sync API-bound instead of bandwidth-bound, violating ADR-016. Async-pipelined indexing lets each subsystem optimize for its own bottleneck while keeping the execution model simple: one thread, one process, no IPC.
+**No standalone indexing command.** There is no `zmail index` or backfill tool. `zmail sync` and `zmail refresh` are the only entry points for data ingestion — one command, one process (indexing/embedding pipeline removed).
 
 ---
 
 ### ADR-021: Schema Drift Handling — Auto-Rebuild from Maildir
 
-**Decision:** On CLI startup, the app checks `user_version` against the current schema version. If the DB has an older version, the app automatically rebuilds the index from the local maildir cache: deletes the DB and vectors, creates a fresh DB, re-indexes all `.eml` files from `maildir/cur/`, and runs embedding/indexing. No manual resync from IMAP is required.
+**Decision:** On CLI startup, the app checks `user_version` against the current schema version. If the DB has an older version, the app automatically rebuilds the index from the local maildir cache: deletes the DB, creates a fresh DB, and re-indexes all `.eml` files from `maildir/cur/`. No manual resync from IMAP is required.
 
 **Rationale:** This project intentionally avoids in-app migrations for existing DBs. `CREATE TABLE IF NOT EXISTS` keeps fresh bootstraps simple but does not mutate older tables. The raw maildir is the durable artifact (ADR-002); rebuilding from it is faster than re-syncing from IMAP and avoids credential/network dependency during schema upgrades.
 

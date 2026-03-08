@@ -22,18 +22,18 @@ export interface LockResult {
 }
 
 /**
- * Acquire a lock on a singleton status table (sync_summary or indexing_status).
+ * Acquire a lock on a singleton status table (sync_summary).
  * Uses PID-based ownership to detect and recover from crashed processes.
  * Uses atomic transaction-based acquisition to prevent race conditions.
  *
  * @param db Database instance
- * @param table Table name ('sync_summary' or 'indexing_status')
+ * @param table Table name ('sync_summary')
  * @param currentPid Current process PID
  * @returns Lock result indicating if acquired and if takeover occurred
  */
 export function acquireLock(
   db: SqliteDatabase,
-  table: "sync_summary" | "indexing_status",
+  table: "sync_summary",
   currentPid: number
 ): LockResult {
   // Use BEGIN IMMEDIATE to acquire exclusive lock on the database
@@ -98,12 +98,12 @@ export function acquireLock(
  * Only releases if the current process owns the lock (owner-aware release).
  *
  * @param db Database instance
- * @param table Table name ('sync_summary' or 'indexing_status')
+ * @param table Table name ('sync_summary')
  * @param ownerPid Process ID that should own the lock. If provided, only releases if owner matches.
  */
 export function releaseLock(
   db: SqliteDatabase,
-  table: "sync_summary" | "indexing_status",
+  table: "sync_summary",
   ownerPid?: number
 ): void {
   if (ownerPid !== undefined) {

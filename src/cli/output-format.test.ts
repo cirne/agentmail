@@ -153,7 +153,7 @@ describe("CLI output formats (ADR-022)", () => {
     it("defaults to text output", async () => {
       const { stdout } = await runZmail(["status"], baseEnv());
       expect(isJson(stdout.trim())).toBeFalsy();
-      expect(stdout.includes("Sync:") || stdout.includes("Indexing:")).toBeTruthy();
+      expect(stdout.includes("Sync:")).toBeTruthy();
     });
 
     it("outputs JSON with --json flag", async () => {
@@ -161,7 +161,6 @@ describe("CLI output formats (ADR-022)", () => {
       expect(isJson(stdout.trim())).toBeTruthy();
       const parsed = JSON.parse(stdout.trim());
       expect(parsed).toHaveProperty("sync");
-      expect(parsed).toHaveProperty("indexing");
       expect(parsed).toHaveProperty("search");
     });
   });

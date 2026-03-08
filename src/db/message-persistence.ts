@@ -85,8 +85,8 @@ export function persistMessage(
   db.prepare(
     `INSERT INTO messages (
       message_id, thread_id, folder, uid, labels, from_address, from_name,
-      to_addresses, cc_addresses, subject, date, body_text, raw_path, embedding_state
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending')`
+      to_addresses, cc_addresses, subject, date, body_text, raw_path
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     parsed.messageId,
     threadId,

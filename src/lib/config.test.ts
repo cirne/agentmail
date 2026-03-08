@@ -74,14 +74,6 @@ describe("config", () => {
     it("maildirPath is inside dataDir", () => {
       expect(config.maildirPath).toBe(join(config.dataDir, "maildir"));
     });
-
-    it("vectorsPath is inside dataDir", () => {
-      expect(config.vectorsPath).toBe(join(config.dataDir, "vectors"));
-    });
-
-    it("embeddingCachePath is inside dataDir", () => {
-      expect(config.embeddingCachePath).toBe(join(config.dataDir, "embedding-cache"));
-    });
   });
 
   describe("hasConfig", () => {

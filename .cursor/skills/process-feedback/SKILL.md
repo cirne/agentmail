@@ -1,13 +1,13 @@
 ---
 name: process-feedback
-description: Processes feedback from the sibling ztest project, checks for duplicates in existing bugs/opportunities, and converts new feedback into tracked bugs or opportunities. Use when processing feedback from ztest, converting agent-reported issues into documentation, or managing the feedback-to-bug/opportunity workflow.
+description: Processes feedback from the sibling ztest project. Either documents feedback as bugs/opportunities or fixes issues in the codebase directly. Use when processing feedback from ztest, converting agent-reported issues into documentation, fixing simple issues from feedback, or managing the feedback workflow.
 ---
 
 # Process Feedback
 
-Processes feedback files from `../ztest/feedback/` and converts them into bugs or opportunities in `docs/bugs/` and `docs/opportunities/`.
+Processes feedback files from `../ztest/feedback/`. For each file you can either **document** it (create or match a bug/opportunity) or **fix in place** (change code/config with no new docs). If it's not clear which path the user wants, ask for direction.
 
-**IMPORTANT: Idempotency** — Assume feedback may have already been processed. Always check for existing bugs/opportunities before creating new ones. This workflow should be safe to run multiple times on the same feedback files.
+**IMPORTANT: Idempotency** — Assume feedback may have already been processed. Always check for existing bugs/opportunities before creating new ones when using the document path. This workflow should be safe to run multiple times on the same feedback files.
 
 ## Workflow
 
@@ -24,7 +24,28 @@ For each feedback file:
 - Extract key information (title, problem description, type: bug vs opportunity)
 - Identify unique identifiers (keywords, phrases that would appear in existing docs)
 
-### 2. Check for Existing Tracking (Idempotency Check)
+### 2. Choose Path: Document vs Fix in Place
+
+For each feedback file, decide which path to take:
+
+**Path A — Document (bug/opportunity):** Create or match to an existing bug or opportunity. Use when:
+- The user did not ask for an immediate fix, or
+- The issue is non-trivial (architecture, UX, multi-step, or needs product decision).
+
+**Path B — Fix in place:** Fix the issue in the codebase (or config) immediately; do not create a new bug or opportunity. Use when:
+- The user requested to fix it right away (e.g. "process feedback and fix any simple issues"), or
+- The issue is clearly simple (typo, single-file fix, obvious bug with clear fix, no product/UX ambiguity).
+
+**Unclear:** If it's not clear whether the user wants documentation or an immediate fix, or whether the change is simple enough to fix now:
+- Ask the user for direction. Example: "This feedback could be (a) documented as a bug/opportunity for later, or (b) fixed in the codebase now. Which do you prefer?" or "Should I fix this in code now or track it as a bug/opportunity?"
+- Do not assume; wait for the user's choice before proceeding.
+
+Then:
+- **Path A** → continue with step 3 (Check for existing tracking) through step 6 (Clean up).
+- **Path B** → Check `docs/feedback-processed.md`; if this feedback file is already listed, skip (already processed). Otherwise do the fix in code/config, then do **Clean up (fix-in-place)** below (annotate, update tracker, move to `submitted/`; no new bug/opportunity).
+- **Unclear** → ask and wait for user response, then follow Path A or B.
+
+### 3. Check for Existing Tracking (Idempotency Check)
 
 **CRITICAL:** Before creating any new bugs/opportunities, verify the feedback hasn't already been processed. Assume feedback may have been processed in a previous run.
 
@@ -52,7 +73,7 @@ For each feedback file:
 - Check if feedback describes something already fixed (in archive)
 - **If a match is found, skip creating a new bug/opportunity** — the feedback has already been processed
 
-### 3. Determine Action
+### 4. Determine Action
 
 For each feedback file:
 
@@ -68,7 +89,7 @@ For each feedback file:
 - Only if feedback doesn't match any existing bug/opportunity (active or archived) → Convert to new bug or opportunity
 - **Double-check**: Re-read bug/opportunity files to ensure no match was missed before creating new entry
 
-### 4. Convert Feedback to Bug/Opportunity
+### 5. Convert Feedback to Bug/Opportunity
 
 **Determine type:**
 - **Bug**: Describes a failure, broken behavior, or agent/user friction
@@ -144,9 +165,9 @@ For each feedback file:
 - [Any open questions from feedback or your analysis]
 ```
 
-### 5. Clean Up
+### 6. Clean Up
 
-After processing:
+**After processing (document path — Path A):**
 - **Annotate feedback file with bug/opportunity ID** — Before moving to `submitted/`, add a note at the top of the feedback file indicating which bug or opportunity ID it relates to:
   - If matched existing bug/opportunity: Add `**Related:** BUG-XXX` or `**Related:** OPP-XXX` at the top
   - If created new bug/opportunity: Add `**Related:** BUG-XXX` or `**Related:** OPP-XXX` at the top
@@ -157,6 +178,12 @@ After processing:
   - Move file: `mv ../ztest/feedback/<filename>.md ../ztest/feedback/submitted/<filename>.md`
 - For duplicates or already-fixed items: Still move to `submitted/` rather than deleting (maintains audit trail)
 - Update any indexes (`docs/BUGS.md`, `docs/OPPORTUNITIES.md`)
+
+**After fixing in place (Path B):**
+- **Annotate feedback file** — Add at the top: `**Processed as:** Fixed in place` (optionally add a one-line summary of what was changed).
+- **Update `docs/feedback-processed.md`** — Add entry with filename, date, action: `fixed in place`, and brief note (e.g. "CLI help text updated").
+- **Move processed feedback to `submitted/`** — Same as document path: `mkdir -p ../ztest/feedback/submitted`, then `mv ../ztest/feedback/<filename>.md ../ztest/feedback/submitted/<filename>.md`.
+- Do not create or update bug/opportunity files or indexes.
 
 ## Example Workflow
 
@@ -209,3 +236,4 @@ mv ../ztest/feedback/ux-semantic-search-guidance.md ../ztest/feedback/submitted/
 - **File cleanup**: Always move processed feedback to `../ztest/feedback/submitted/` rather than deleting. This preserves an audit trail and allows reference back to original feedback. Only process files in `../ztest/feedback/*.md` (not files already in `submitted/`).
 - **Annotate with ID**: Before moving feedback to `submitted/`, annotate the feedback file itself with the bug or opportunity ID (e.g., `**Related:** BUG-XXX` or `**Related:** OPP-XXX`). This makes it easy to trace which bug/opportunity the feedback relates to when reviewing submitted feedback. Use the bug/opportunity ID, not the filename.
 - **When in doubt**: If unsure whether feedback matches an existing bug/opportunity, err on the side of not creating a duplicate. Skip processing rather than risk duplicate entries.
+- **Document vs fix**: When it's unclear whether to document or fix in place, ask the user which path to take instead of guessing.

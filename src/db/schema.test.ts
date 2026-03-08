@@ -30,7 +30,6 @@ describe("database schema", () => {
       expect(names).toContain("sync_state");
       expect(names).toContain("sync_windows");
       expect(names).toContain("sync_summary");
-      expect(names).toContain("indexing_status");
     });
 
     it("creates messages_fts virtual table", () => {
@@ -50,29 +49,6 @@ describe("database schema", () => {
       expect(row!.total_messages).toBe(0);
     });
 
-    it("pre-seeds the indexing_status singleton row", () => {
-      const row = db
-        .prepare("SELECT * FROM indexing_status WHERE id = 1")
-        .get() as { id: number; is_running: number; indexed_so_far: number } | null;
-      expect(row).not.toBeNull();
-      expect(row!.is_running).toBe(0);
-      expect(row!.indexed_so_far).toBe(0);
-    });
-
-    it("indexing_status has expected columns", () => {
-      const cols = db
-        .prepare("PRAGMA table_info(indexing_status)")
-        .all() as { name: string }[];
-      const names = cols.map((c) => c.name);
-      expect(names).toContain("is_running");
-      expect(names).toContain("total_to_index");
-      expect(names).toContain("indexed_so_far");
-      expect(names).not.toContain("failed"); // Removed - messages table is source of truth
-      expect(names).toContain("started_at");
-      expect(names).toContain("completed_at");
-      expect(names).toContain("owner_pid");
-      expect(names).not.toContain("last_updated_at");
-    });
 
     it("sync_summary has owner_pid column", () => {
       const cols = db
@@ -83,13 +59,6 @@ describe("database schema", () => {
       expect(names).toContain("is_running");
     });
 
-    it("messages has embedding_state column", () => {
-      const cols = db
-        .prepare("PRAGMA table_info(messages)")
-        .all() as { name: string }[];
-      const names = cols.map((c) => c.name);
-      expect(names).toContain("embedding_state");
-    });
   });
 
   describe("messages", () => {
@@ -160,33 +129,6 @@ describe("database schema", () => {
     });
   });
 
-  describe("embedding_state", () => {
-    it("defaults to 'pending' on message insert", () => {
-      const messageId = insertTestMessage(db, { subject: "New email" });
-      const row = db
-        .prepare("SELECT embedding_state FROM messages WHERE message_id = ?")
-        .get(messageId) as { embedding_state: string };
-      expect(row.embedding_state).toBe("pending");
-    });
-
-    it("can transition through claim → done lifecycle", () => {
-      const messageId = insertTestMessage(db);
-      db.prepare("UPDATE messages SET embedding_state = 'claimed' WHERE message_id = ?").run(messageId);
-      let row = db.prepare("SELECT embedding_state FROM messages WHERE message_id = ?").get(messageId) as { embedding_state: string };
-      expect(row.embedding_state).toBe("claimed");
-
-      db.prepare("UPDATE messages SET embedding_state = 'done' WHERE message_id = ?").run(messageId);
-      row = db.prepare("SELECT embedding_state FROM messages WHERE message_id = ?").get(messageId) as { embedding_state: string };
-      expect(row.embedding_state).toBe("done");
-    });
-
-    it("can be marked as 'failed'", () => {
-      const messageId = insertTestMessage(db);
-      db.prepare("UPDATE messages SET embedding_state = 'failed' WHERE message_id = ?").run(messageId);
-      const row = db.prepare("SELECT embedding_state FROM messages WHERE message_id = ?").get(messageId) as { embedding_state: string };
-      expect(row.embedding_state).toBe("failed");
-    });
-  });
 
   describe("indexes", () => {
     it("creates expected indexes", () => {
@@ -201,7 +143,6 @@ describe("database schema", () => {
       expect(names).toContain("idx_messages_date");
       expect(names).toContain("idx_messages_folder");
       expect(names).toContain("idx_attachments_msg");
-      expect(names).toContain("idx_messages_embed_state");
     });
   });
 

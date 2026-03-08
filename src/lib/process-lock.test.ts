@@ -36,10 +36,10 @@ describe("acquireLock", () => {
 
   it("blocks when a live process holds the lock", () => {
     // First acquire with the current PID
-    acquireLock(db, "indexing_status", process.pid);
+    acquireLock(db, "sync_summary", process.pid);
 
     // Second acquire with the same (live) PID should fail
-    const result = acquireLock(db, "indexing_status", process.pid + 1);
+    const result = acquireLock(db, "sync_summary", process.pid + 1);
     expect(result.acquired).toBe(false);
     expect(result.takenOver).toBe(false);
   });
@@ -61,18 +61,11 @@ describe("acquireLock", () => {
   });
 
   it("acquires lock when is_running=1 but owner_pid is null (legacy crash)", () => {
-    db.exec("UPDATE indexing_status SET is_running = 1, owner_pid = NULL WHERE id = 1");
+    db.exec("UPDATE sync_summary SET is_running = 1, owner_pid = NULL WHERE id = 1");
 
-    const result = acquireLock(db, "indexing_status", process.pid);
+    const result = acquireLock(db, "sync_summary", process.pid);
     expect(result.acquired).toBe(true);
     expect(result.takenOver).toBe(true);
-  });
-
-  it("works for both sync_summary and indexing_status tables", () => {
-    const r1 = acquireLock(db, "sync_summary", process.pid);
-    const r2 = acquireLock(db, "indexing_status", process.pid);
-    expect(r1.acquired).toBe(true);
-    expect(r2.acquired).toBe(true);
   });
 
   it("prevents concurrent acquisition (atomicity)", () => {
@@ -134,10 +127,10 @@ describe("releaseLock", () => {
   });
 
   it("allows re-acquisition after release", () => {
-    acquireLock(db, "indexing_status", process.pid);
-    releaseLock(db, "indexing_status");
+    acquireLock(db, "sync_summary", process.pid);
+    releaseLock(db, "sync_summary");
 
-    const result = acquireLock(db, "indexing_status", process.pid);
+    const result = acquireLock(db, "sync_summary", process.pid);
     expect(result.acquired).toBe(true);
     expect(result.takenOver).toBe(false);
   });

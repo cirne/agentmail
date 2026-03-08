@@ -53,9 +53,6 @@ export function getDb(): SqliteDatabase {
   _db.exec(
     "INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0)"
   );
-  _db.exec(
-    "INSERT OR IGNORE INTO indexing_status (id) VALUES (1)"
-  );
 
   logger.debug("Database opened", { path: config.dbPath });
   return _db;

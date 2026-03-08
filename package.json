@@ -24,7 +24,6 @@
   "dependencies": {
     "@cedrugs/pdf-parse": "^1.0.0",
     "@inquirer/prompts": "^8.3.0",
-    "@lancedb/lancedb": "latest",
     "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.6.2",
     "double-metaphone": "^0.1.4",

@@ -52,31 +52,81 @@ Search emails using FTS5 full-text search. Returns matching messages with snippe
 
 ### `get_message`
 
-Retrieve a single message by message ID. Returns message content in LLM-friendly format. Message IDs can be passed with or without angle brackets; the server normalizes them.
+Retrieve a single message by message ID. **Returns the same JSON shape as one element of `get_messages`** — same parameters (`detail`, `maxBodyChars`) and same body/truncation logic. Use for one-off reads; use `get_messages` to batch-read multiple. Message IDs can be passed with or without angle brackets; the server normalizes them.
 
 **Parameters:**
 - `messageId` (string, required): Message ID (from `search_mail` results)
-- `raw` (boolean, optional): Return raw EML format instead of parsed content (default: false)
+- `raw` (boolean, optional): If true, return raw EML (same as `detail: "raw"`). Prefer `detail`.
+- `detail` (string, optional): `"full"` = lean message with body up to maxBodyChars (default); `"summary"` = minimal + 200-char snippet; `"raw"` = EML. Same as `get_messages`.
+- `maxBodyChars` (number, optional): When `detail` is `"full"`, max body chars (default: 2000). Same as `get_messages`. Ignored for `summary` or `raw`.
 
-**Returns:** Formatted message text (or raw EML if `raw: true`)
+**Returns:** Single JSON object (same shape as `get_messages(..., detail)[0]`), or raw EML when `raw: true` / `detail: "raw"`. Empty arrays and null/empty fields are omitted to save tokens.
 
-**Example:**
+**Example (full, default):**
 ```json
 {
-  "messageId": "<abc123@example.com>",
-  "raw": false
+  "messageId": "<abc123@example.com>"
 }
 ```
 
-### `get_thread`
+**Example (summary or custom body cap):**
+```json
+{
+  "messageId": "<abc123@example.com>",
+  "detail": "summary"
+}
+```
+```json
+{
+  "messageId": "<abc123@example.com>",
+  "detail": "full",
+  "maxBodyChars": 4000
+}
+```
 
-Retrieve a full conversation thread by thread ID. Returns all messages in the thread ordered by date. Thread IDs can be passed with or without angle brackets; the server normalizes them.
+### `get_messages`
+
+Retrieve multiple messages by message IDs. Use **detail** to control payload size: `full` (default) = lean message with body up to maxBodyChars; `summary` = minimal fields + 200-char snippet for scanning; `raw` = original EML. Caps at 20 messages per call. Empty arrays and null/empty fields are omitted to save tokens.
 
 **Parameters:**
-- `threadId` (string, required): Thread ID (from `search_mail` or `get_message` results)
-- `raw` (boolean, optional): Return raw EML format for each message instead of parsed/formatted content (default: false)
+- `messageIds` (array of strings, required): Array of message IDs (from `search_mail` results) to retrieve
+- `detail` (string, optional): `"full"` = full lean message with body (default); `"summary"` = minimal fields + 200-char snippet; `"raw"` = original EML format
+- `raw` (boolean, optional): If true, same as `detail: "raw"`. Prefer `detail`.
+- `maxBodyChars` (number, optional): Max characters of body per message when `detail` is `"full"` (default: 2000). Ignored for `summary` or `raw`.
 
-**Returns:** JSON array of message objects (same format as `get_message`)
+**Response by detail level:**
+
+- **`detail: "summary"`** — Tiny payload for scanning (e.g. 20 messages in one call). Each message: `message_id`, `subject`, `from` (combined string), `to` (array, omitted if empty), `date`, `snippet` (first 200 chars of body).
+- **`detail: "full"`** (default) — Lean message: `message_id`, `thread_id`, `from_address`, `from_name` (if present), `to_addresses`, `cc_addresses`, `subject`, `date`, `content: { markdown }`, `bodyTruncated` (only when true), `attachments`, `labels`. Empty arrays and null/empty fields omitted.
+- **`detail: "raw"`** — Full EML format per message.
+
+**Example (full):**
+```json
+{
+  "messageIds": ["<abc123@example.com>", "<def456@example.com>"],
+  "maxBodyChars": 500
+}
+```
+
+**Example (summary — for scanning):**
+```json
+{
+  "messageIds": ["<id1>", "<id2>", "<id3>", "<id4>", "<id5>"],
+  "detail": "summary"
+}
+```
+
+**Token efficiency (agents):** Prefer `detail: "summary"` when scanning 5+ messages; use `detail: "full"` with `maxBodyChars: 500` for quick confirmation or `maxBodyChars: 4000` for full reads.
+
+### `get_thread`
+
+Retrieve a full conversation thread by thread ID. Returns all messages in the thread ordered by date. When `raw` is false (default), returns the same **lean** shape as `get_messages` (detail: "full"): no noise fields, body head-truncated at 2000 chars, empty fields omitted. Thread IDs can be passed with or without angle brackets; the server normalizes them.
+
+**Parameters:**
+- `threadId` (string, required): Thread ID (from `search_mail` or `get_message` results) to retrieve
+- `raw` (boolean, optional): If true, return raw EML format for each message instead of parsed/formatted content (default: false)
+
+**Returns:** JSON array of message objects (lean shape when raw=false; same as get_messages detail: "full" with 2000-char body cap)
 
 **Example:**
 ```json

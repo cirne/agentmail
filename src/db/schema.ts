@@ -1,7 +1,7 @@
 // SQL schema — all tables and FTS5 virtual tables
 
 /** Schema version — bump this integer whenever the schema changes. */
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
 export const SCHEMA = /* sql */ `
   CREATE TABLE IF NOT EXISTS messages (
@@ -19,10 +19,8 @@ export const SCHEMA = /* sql */ `
     date         TEXT NOT NULL,
     body_text    TEXT NOT NULL DEFAULT '',
     raw_path     TEXT NOT NULL,
-    synced_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    embedding_state TEXT NOT NULL DEFAULT 'pending'
+    synced_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
-  -- embedding_state: 'pending' | 'claimed' | 'done' | 'failed'
   -- labels: JSON array of label/tag names (Gmail: X-GM-LABELS; generic: optional).
   -- Enables "inbox only", "starred", "archive" filters without re-syncing.
 
@@ -93,16 +91,6 @@ export const SCHEMA = /* sql */ `
     owner_pid            INTEGER
   );
 
-  CREATE TABLE IF NOT EXISTS indexing_status (
-    id                INTEGER PRIMARY KEY CHECK (id = 1),
-    is_running        INTEGER NOT NULL DEFAULT 0,
-    total_to_index    INTEGER NOT NULL DEFAULT 0,
-    indexed_so_far    INTEGER NOT NULL DEFAULT 0,
-    started_at        TEXT,
-    completed_at      TEXT,
-    owner_pid         INTEGER
-  );
-
   -- FTS5 full-text search index over message subjects and bodies
   CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     message_id UNINDEXED,
@@ -140,6 +128,4 @@ export const SCHEMA = /* sql */ `
   CREATE INDEX IF NOT EXISTS idx_messages_date    ON messages(date DESC);
   CREATE INDEX IF NOT EXISTS idx_messages_folder  ON messages(folder, uid);
   CREATE INDEX IF NOT EXISTS idx_attachments_msg  ON attachments(message_id);
-  CREATE INDEX IF NOT EXISTS idx_messages_embed_state ON messages(embedding_state)
-    WHERE embedding_state = 'pending';
 `;

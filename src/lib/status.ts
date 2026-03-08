@@ -70,16 +70,6 @@ export interface StatusData {
     targetStartDate: string | null;
     syncStartEarliestDate: string | null;
   };
-  indexing: {
-    isRunning: boolean;
-    totalToIndex: number;
-    indexedSoFar: number;
-    startedAt: string | null;
-    completedAt: string | null;
-    totalIndexed: number;
-    totalFailed: number;
-    pending: number;
-  };
   search: {
     ftsReady: number;
   };
@@ -111,7 +101,7 @@ export interface ImapServerComparison {
 }
 
 /**
- * Get current sync, indexing, and search status from the database.
+ * Get current sync and search status from the database.
  */
 export function getStatus(db: SqliteDatabase = getDb()): StatusData {
   const syncStatus = db.prepare("SELECT * FROM sync_summary WHERE id = 1").get() as {
@@ -124,18 +114,6 @@ export function getStatus(db: SqliteDatabase = getDb()): StatusData {
     is_running: number;
   } | undefined;
 
-  const indexStatus = db.prepare("SELECT * FROM indexing_status WHERE id = 1").get() as {
-    is_running: number;
-    total_to_index: number;
-    indexed_so_far: number;
-    started_at: string | null;
-    completed_at: string | null;
-  } | undefined;
-
-  // Get live counts from messages table
-  const totalIndexed = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'done'").get() as { count: number };
-  const totalFailed = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'failed'").get() as { count: number };
-  const pendingCount = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'pending'").get() as { count: number };
   const messagesCount = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
 
   const dateRange = db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages").get() as {
@@ -163,35 +141,12 @@ export function getStatus(db: SqliteDatabase = getDb()): StatusData {
         syncStartEarliestDate: null,
       };
 
-  const indexing = indexStatus
-    ? {
-        isRunning: indexStatus.is_running === 1,
-        totalToIndex: indexStatus.total_to_index,
-        indexedSoFar: indexStatus.indexed_so_far,
-        startedAt: indexStatus.started_at,
-        completedAt: indexStatus.completed_at,
-        totalIndexed: totalIndexed.count,
-        totalFailed: totalFailed.count,
-        pending: pendingCount.count,
-      }
-    : {
-        isRunning: false,
-        totalToIndex: 0,
-        indexedSoFar: 0,
-        startedAt: null,
-        completedAt: null,
-        totalIndexed: 0,
-        totalFailed: 0,
-        pending: 0,
-      };
-
   const search = {
     ftsReady: messagesCount.count,
   };
 
   return {
     sync,
-    indexing,
     search,
     dateRange: dateRange?.earliest && dateRange?.latest
       ? {

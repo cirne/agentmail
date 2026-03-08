@@ -18,7 +18,7 @@ npm install -g @cirne/zmail
 
 ## Tech stack
 
-Node.js 20+, TypeScript, SQLite (`better-sqlite3`), FTS5, LanceDB, imapflow. Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
+Node.js 20+, TypeScript, SQLite (`better-sqlite3`), FTS5, imapflow. Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
 
 ## Project structure
 
