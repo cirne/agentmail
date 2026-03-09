@@ -1,15 +1,14 @@
 import { searchWithMeta } from "~/search";
 import { who } from "~/search/who";
 import { runSync } from "~/sync";
-import { getDb, checkSchemaVersion } from "~/db";
-import { reindexFromMaildir } from "~/db/rebuild";
+import { getDb } from "~/db";
 import { startMcpServer } from "~/mcp";
 import { config } from "~/lib/config";
-import { logger, setLogger, SYNC_LOG_PATH, createFileLogger } from "~/lib/logger";
+import { logger, SYNC_LOG_PATH } from "~/lib/logger";
 import { parseSinceToDate } from "~/sync/parse-since";
 import type { SearchResult, WhoResult } from "~/lib/types";
 import type { SqliteDatabase } from "~/db";
-import { readFileSync, existsSync, rmSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { formatMessageForOutput, formatMessageLlmFriendly } from "~/messages/presenter";
 import { extractAndCache } from "~/attachments";
@@ -127,6 +126,7 @@ interface ParsedSearchArgs {
   timings: boolean;
   includeTopBody: boolean;
   threads: boolean;
+  includeNoise?: boolean;
 }
 
 function searchUsage() {
@@ -145,6 +145,7 @@ function searchUsage() {
   console.error("  --timings          include machine-readable search timings");
   console.error("  --text             human-readable table output (default: JSON)");
   console.error("  --no-body          suppress body text for top result (default: included)");
+  console.error("  --include-noise      include noise messages (promotional/social/forums/bulk/spam) (default: excluded)");
 }
 
 interface ParsedWhoArgs {
@@ -332,6 +333,10 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
     }
     if (arg === "--threads") {
       parsed.threads = true;
+      continue;
+    }
+    if (arg === "--include-noise") {
+      parsed.includeNoise = true;
       continue;
     }
     if (arg === "--mode") {
@@ -669,48 +674,29 @@ function printStatus(db: SqliteDatabase = getDb()): void {
 }
 
 async function main() {
-  // Check schema version and rebuild if needed (before any command that uses the DB)
-  const stale = checkSchemaVersion();
-  if (stale) {
-    process.stderr.write("Schema updated — rebuilding index from local cache (up to 20s)...\n");
-    rmSync(config.dbPath, { force: true });
-    getDb(); // creates fresh DB, sets user_version
-    
-    // Use sync log file for rebuild logging (same as sync command)
-    const fileLogger = createFileLogger("sync");
-    fileLogger.writeSeparator(process.pid);
-    
-    // Replace global logger with file logger for rebuild operations
-    const restoreLogger = setLogger(fileLogger);
-    
-    let parsed = 0;
-    try {
-      fileLogger.info("Schema rebuild starting");
-      const result = await reindexFromMaildir();
-      parsed = result.parsed;
-      fileLogger.info("Schema rebuild complete", { parsed });
-    } finally {
-      fileLogger.close();
-      restoreLogger(); // Restore original logger
-    }
-    
-    process.stderr.write(`Rebuild complete (${parsed} messages re-indexed).\n`);
-  }
+  // Schema check is now handled in src/index.ts before importing CLI
+  // This ensures all commands (including sync via npm run sync) check schema version
 
   switch (command) {
     case "sync": {
       // Sync: Initial setup, goes backward to fill gaps
-      // Usage: zmail sync [--since <spec>] [--foreground]
+      // Usage: zmail sync [<duration>] [--since <spec>] [--foreground]
       const sinceIdx = args.indexOf("--since");
-      const since = sinceIdx >= 0 ? args[sinceIdx + 1] : undefined;
+      let since = sinceIdx >= 0 ? args[sinceIdx + 1] : undefined;
       if (sinceIdx >= 0 && (since === undefined || since.startsWith("-"))) {
-        console.error("Usage: zmail sync [--since <spec>] [--foreground]");
-        console.error("  --since  relative range: 7d, 5w, 3m, 2y (days, weeks, months, years)");
+        console.error("Usage: zmail sync [<duration>] [--since <spec>] [--foreground]");
+        console.error("  duration  positional: 7d, 5w, 3m, 2y (days, weeks, months, years)");
+        console.error("  --since   same as positional duration");
         console.error("  --foreground  run synchronously (default: background subprocess)");
         console.error("");
         console.error("Syncs email going backward from most recent, filling gaps in the specified date range.");
         console.error("Typically used for initial setup. For frequent updates, use 'zmail refresh'.");
         process.exit(1);
+      }
+      // Accept positional duration arg (e.g. `zmail sync 180d` == `zmail sync --since 180d`)
+      if (!since) {
+        const positional = args.find((a) => !a.startsWith("-") && /^\d+[dwmy]?$/i.test(a));
+        if (positional) since = positional;
       }
 
       const foreground = args.includes("--foreground") || args.includes("--fg");
@@ -792,7 +778,7 @@ async function main() {
           if (count === 0) {
             process.stdout.write(`\rConnecting to IMAP server at ${imapHost}...`);
           } else {
-            process.stdout.write(`\rWaiting for email... ${count} synced (${elapsed}s)`);
+            process.stdout.write(`\rSync running... ${count.toLocaleString()} in index (${elapsed}s)`);
           }
         } else {
           if (count === 0) {
@@ -802,7 +788,7 @@ async function main() {
             }
           } else {
             if (!nonTtyPrintedProgress) {
-              process.stdout.write(`Waiting for email... ${count} synced (${elapsed}s)`);
+              process.stdout.write(`Sync running... ${count.toLocaleString()} in index (${elapsed}s)`);
               nonTtyPrintedProgress = true;
             }
           }
@@ -901,6 +887,7 @@ async function main() {
           beforeDate: parsed.beforeDate,
           limit: effectiveLimit,
           includeThreads: parsed.threads,
+          includeNoise: parsed.includeNoise,
         });
       } catch (err) {
         console.error(err instanceof Error ? err.message : String(err));
@@ -1173,26 +1160,98 @@ async function main() {
 
     case "refresh": {
       // Refresh: Frequent updates, brings local copy up to date
-      // Usage: zmail refresh
-      // No --since needed - uses last_uid checkpoint to fetch only new messages
+      // Usage: zmail refresh [--force] [--include-noise] [--text]
+      // No --since needed - uses last_uid checkpoint to fetch only new messages.
+      // Output: JSON by default; --text for human-readable.
+      // --force: skip STATUS early exit and always run SEARCH + fetch (use when you know new mail arrived).
+      // --include-noise: include promotional/social/junk in newMail (default: excluded).
 
-      // Refresh always goes forward (fetches new messages since last sync)
-      const syncOptions: { direction: 'forward' } = {
+      const force = args.includes("--force");
+      const includeNoise = args.includes("--include-noise");
+      const forceText = args.includes("--text");
+      const syncOptions: { direction: 'forward'; force?: boolean } = {
         direction: 'forward',
       };
+      if (force) syncOptions.force = true;
 
       const syncResult = await runSync(syncOptions);
 
-      const sec = (syncResult.durationMs / 1000).toFixed(2);
-      const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
-      const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
-      console.log("");
-      console.log("Refresh metrics:");
-      console.log(`  messages:  ${syncResult.synced} new, ${syncResult.messagesFetched} fetched`);
-      console.log(`  downloaded: ${mb} MB (${syncResult.bytesDownloaded} bytes)`);
-      console.log(`  bandwidth: ${kbps} KB/s`);
-      console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
-      console.log(`  duration:  ${sec}s`);
+      // New-mail preview: up to 10 summaries (headers + snippet), noise excluded unless --include-noise
+      let newMail: Array<{ messageId: string; date: string; fromAddress: string; fromName: string | null; subject: string; snippet: string }> = [];
+      if (syncResult.synced > 0 && syncResult.newMessageIds?.length) {
+        const db = getDb();
+        const placeholders = syncResult.newMessageIds.map(() => "?").join(",");
+        const rows = db
+          .prepare(
+            /* sql */ `
+            SELECT message_id AS messageId, from_address AS fromAddress, from_name AS fromName, subject, date,
+              COALESCE(TRIM(SUBSTR(body_text, 1, 200)), '') || (CASE WHEN LENGTH(TRIM(body_text)) > 200 THEN '…' ELSE '' END) AS snippet,
+              is_noise AS isNoise
+            FROM messages
+            WHERE message_id IN (${placeholders})
+            ORDER BY date DESC
+          `
+          )
+          .all(...syncResult.newMessageIds) as Array<{
+          messageId: string;
+          fromAddress: string;
+          fromName: string | null;
+          subject: string;
+          date: string;
+          snippet: string;
+          isNoise: number;
+        }>;
+        const filtered = includeNoise ? rows : rows.filter((r) => r.isNoise === 0);
+        newMail = filtered.slice(0, 10).map((r) => ({
+          messageId: r.messageId,
+          date: r.date,
+          fromAddress: r.fromAddress,
+          fromName: r.fromName,
+          subject: r.subject,
+          snippet: r.snippet.replace(/<[^>]+>/g, "").trim(),
+        }));
+      }
+
+      const output: Record<string, unknown> = {
+        synced: syncResult.synced,
+        messagesFetched: syncResult.messagesFetched,
+        bytesDownloaded: syncResult.bytesDownloaded,
+        durationMs: syncResult.durationMs,
+        bandwidthBytesPerSec: syncResult.bandwidthBytesPerSec,
+        messagesPerMinute: syncResult.messagesPerMinute,
+        newMail,
+      };
+      if (syncResult.earlyExit) output.earlyExit = true;
+
+      if (forceText) {
+        const sec = (syncResult.durationMs / 1000).toFixed(2);
+        const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
+        const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
+        console.log("");
+        if (syncResult.earlyExit) console.log("No new messages (skipped fetch).");
+        console.log("Refresh metrics:");
+        console.log(`  messages:  ${syncResult.synced} new, ${syncResult.messagesFetched} fetched`);
+        console.log(`  downloaded: ${mb} MB (${syncResult.bytesDownloaded} bytes)`);
+        console.log(`  bandwidth: ${kbps} KB/s`);
+        console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
+        console.log(`  duration:  ${sec}s`);
+        if (newMail.length > 0) {
+          console.log("");
+          console.log("New mail:");
+          console.log("  DATE        FROM                 SUBJECT                          SNIPPET");
+          console.log("  " + "-".repeat(80));
+          for (const r of newMail) {
+            const date = r.date.slice(0, 10);
+            const from = (r.fromName ? `${r.fromName} ` : "") + `<${r.fromAddress}>`;
+            const fromShort = from.length > 20 ? from.slice(0, 17) + "..." : from.padEnd(20);
+            const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
+            const snippetShort = r.snippet.length > 30 ? r.snippet.slice(0, 27) + "..." : r.snippet;
+            console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}`);
+          }
+        }
+      } else {
+        console.log(JSON.stringify(output, null, 2));
+      }
       break;
     }
 
@@ -1542,7 +1601,7 @@ async function main() {
 
 Usage:
   zmail sync [--since <spec>]     Initial sync: fill gaps going backward (e.g. --since 7d, 5w, 3m, 2y)
-  zmail refresh                    Refresh: fetch new messages since last sync (frequent updates)
+  zmail refresh [--force] [--include-noise] [--text]   Refresh: fetch new messages; JSON with newMail previews (default); --text for human output
   zmail search <query> [flags]     Search email (FTS5 full-text search)
   zmail who <query> [flags]        Find people by address or name (see --help for flags)
   zmail status [--json] [--imap]   Sync/indexing status; --imap: compare with server

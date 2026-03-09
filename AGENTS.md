@@ -67,8 +67,7 @@ npm test             # vitest run
 
 ### CLI Commands
 
-```bash
-zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--text]
+zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--text]
 zmail who <query> [--limit n] [--enrich] [--text]
 zmail read <message_id> [--raw]
 zmail thread <thread_id> [--json] [--raw]

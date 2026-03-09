@@ -1,10 +1,11 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
 import { dirname } from "path";
 import { existsSync } from "fs";
 import { config } from "~/lib/config";
-import { logger } from "~/lib/logger";
+import { logger, setLogger, createFileLogger } from "~/lib/logger";
 import { SCHEMA, SCHEMA_VERSION } from "./schema";
+import { reindexFromMaildir } from "./rebuild";
 
 export type SqliteDatabase = InstanceType<typeof Database>;
 
@@ -61,4 +62,45 @@ export function getDb(): SqliteDatabase {
 export function closeDb() {
   _db?.close();
   _db = null;
+}
+
+/**
+ * Ensure database schema is up to date. If schema version has changed, rebuilds the index
+ * from existing EML files in maildir. This should be called early in any command that uses the DB.
+ * 
+ * This is a no-op if:
+ * - No DB file exists yet (fresh install)
+ * - Schema version matches current code version
+ * 
+ * If schema needs updating, this will:
+ * - Delete the old DB
+ * - Create a fresh DB with new schema
+ * - Re-index all messages from maildir
+ */
+export async function ensureSchemaUpToDate(): Promise<void> {
+  const stale = checkSchemaVersion();
+  if (!stale) {
+    return; // Schema is up to date or fresh install
+  }
+
+  process.stderr.write("Schema updated — rebuilding index from local cache (up to 20s)...\n");
+  rmSync(config.dbPath, { force: true });
+  getDb(); // creates fresh DB, sets user_version
+  
+  // Use sync log file for rebuild logging (same as sync command)
+  const fileLogger = createFileLogger("sync");
+  fileLogger.writeSeparator(process.pid);
+  
+  // Replace global logger with file logger for rebuild operations
+  const restoreLogger = setLogger(fileLogger);
+  
+  try {
+    fileLogger.info("Schema rebuild starting");
+    const result = await reindexFromMaildir();
+    fileLogger.info("Schema rebuild complete", { parsed: result.parsed });
+    process.stderr.write(`Rebuild complete (${result.parsed} messages re-indexed).\n`);
+  } finally {
+    fileLogger.close();
+    restoreLogger(); // Restore original logger
+  }
 }

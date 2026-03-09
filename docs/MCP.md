@@ -40,6 +40,7 @@ Search emails using FTS5 full-text search. Returns matching messages with **body
 - `afterDate` (string, optional): Filter messages after this date (ISO 8601 or relative like "7d", "30d")
 - `beforeDate` (string, optional): Filter messages before this date
 - `includeThreads` (boolean, optional): When true, also return full threads (all messages per matching thread) as a `threads` array (default: false)
+- `includeNoise` (boolean, optional): When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false — noise messages are excluded by default.
 
 **Returns:** JSON array of message objects with `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, index }` when present). When `includeThreads: true`, response is an object `{ results, threads, totalMatched?, timings? }` with `threads` being an array of `{ threadId, subject, messages }` (each message has `messageId`, `fromAddress`, `fromName`, `subject`, `date`, `bodyPreview`).
 
@@ -173,7 +174,7 @@ Get sync and indexing status. Returns current state of sync (running/idle, last 
 - `indexing`: `{ isRunning, totalToIndex, indexedSoFar, startedAt, completedAt, totalIndexed, totalFailed, pending }`
 - `search`: `{ ftsReady }`
 - `dateRange`: `{ earliest, latest }` or `null`
-- `freshness`: `{ latestMailAgo, lastSyncAgo }` — each value is `null` or `{ human: string, duration: string }` (e.g. `{ human: "2h ago", duration: "PT2H" }`); `null` when not applicable
+- `freshness`: `{ latestMailAgo, lastSyncAgo }` — each value is `null` or `{ human: string, duration: string }` (e.g. `{ human: "2 hours ago", duration: "PT2H" }`); `null` when not applicable
 
 **Example:**
 ```json
@@ -305,7 +306,7 @@ Both interfaces share the same underlying index and data. A message synced via `
 
 ### CLI arguments (quick reference)
 
-- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--fields csv] [--threads] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date]`
+- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--fields csv] [--threads] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date] [--include-noise]`
 - **who:** `zmail who <query> [--limit n] [--min-sent n] [--min-received n] [--all] [--enrich] [--text]`
 - **status:** `zmail status [--json] [--imap]` — `--imap` compares local DB with IMAP server (CLI-only).
 - **stats:** `zmail stats [--json]`

@@ -34,6 +34,8 @@ export interface SearchOptions {
   filterOr?: boolean;
   /** When true, also return full threads (all messages per matching thread_id). Default false. */
   includeThreads?: boolean;
+  /** When true, includes noise messages (promotional, social, forums, bulk, spam). Defaults to false (noise excluded). */
+  includeNoise?: boolean;
 }
 
 export interface SearchTimings {
@@ -182,6 +184,72 @@ function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): { results: S
 }
 
 /**
+ * Convert space-separated words to OR-based query (Google-style search).
+ * FTS5 treats space-separated words as AND by default, but we want OR behavior
+ * where results matching more terms rank higher (via BM25).
+ * 
+ * Preserves:
+ * - Quoted phrases (kept as-is)
+ * - Explicit OR/AND operators
+ * - Special characters (quoted if needed)
+ */
+function convertToOrQuery(query: string): string {
+  // Check if query already has explicit OR/AND operators
+  const hasExplicitOperators = /\b(OR|AND)\b/i.test(query);
+  
+  // If explicit operators exist, preserve them (user intent)
+  if (hasExplicitOperators) {
+    return escapeFts5Query(query);
+  }
+  
+  // Check for quoted phrases - preserve them
+  const quotedPhrases: string[] = [];
+  const placeholder = '___QUOTED_PHRASE___';
+  let queryWithPlaceholders = query;
+  let placeholderIndex = 0;
+  
+  // Extract quoted phrases
+  queryWithPlaceholders = queryWithPlaceholders.replace(/"([^"]+)"/g, (_match, phrase) => {
+    const ph = `${placeholder}${placeholderIndex}`;
+    quotedPhrases.push(phrase);
+    placeholderIndex++;
+    return ph;
+  });
+  
+  // Split by spaces and convert to OR
+  const parts = queryWithPlaceholders.split(/\s+/).filter(p => p.trim());
+  
+  if (parts.length <= 1) {
+    // Single term or empty - return as-is (after restoring quotes)
+    let result = query;
+    quotedPhrases.forEach((phrase, idx) => {
+      result = result.replace(`${placeholder}${idx}`, `"${phrase.replace(/"/g, '""')}"`);
+    });
+    return escapeFts5Query(result);
+  }
+  
+  // Convert space-separated words to OR
+  const orParts: string[] = [];
+  for (const part of parts) {
+    if (part.startsWith(placeholder)) {
+      // Restore quoted phrase
+      const idx = parseInt(part.replace(placeholder, ''), 10);
+      const phrase = quotedPhrases[idx];
+      orParts.push(`"${phrase.replace(/"/g, '""')}"`);
+    } else {
+      // Regular word - add as-is (will be OR'd)
+      orParts.push(part);
+    }
+  }
+  
+  // Join with OR
+  const orQuery = orParts.join(' OR ');
+  
+  // Apply final escaping for special characters
+  return escapeFts5Query(orQuery);
+}
+
+/**
  * Escape FTS5 special characters in query string.
  * FTS5 treats dots (.) as token separators, which causes syntax errors.
  * We quote queries containing dots or other problematic characters to treat them as phrase searches.
@@ -201,6 +269,20 @@ function escapeFts5Query(query: string): string {
   // If query contains dots or problematic characters
   // and no operators, quote the entire query as a phrase
   if (!hasOperators && (query.includes('.') || hasProblematicChars)) {
+    // But if it's already an OR query, handle each part separately
+    if (query.includes(' OR ')) {
+      const parts = query.split(/\s+OR\s+/i);
+      const escapedParts: string[] = [];
+      for (const part of parts) {
+        if (part.includes('.') || problematicChars.test(part)) {
+          const escaped = part.replace(/"/g, '""');
+          escapedParts.push(`"${escaped}"`);
+        } else {
+          escapedParts.push(part);
+        }
+      }
+      return escapedParts.join(' OR ');
+    }
     // Escape any existing quotes and wrap in quotes
     const escaped = query.replace(/"/g, '""');
     return `"${escaped}"`;
@@ -238,8 +320,13 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
   const { query, limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
   if (!query?.trim()) return { results: [], totalCount: 0 };
 
-  // Escape FTS5 special characters
-  const escapedQuery = escapeFts5Query(query);
+  // Convert space-separated words to OR query (Google-style search)
+  // This makes queries like "advisory meeting tomorrow" match emails with any of those terms,
+  // with BM25 ranking naturally putting results matching more terms higher
+  const escapedQuery = convertToOrQuery(query);
+  if (process.env.DEBUG_SEARCH) {
+    process.stderr.write(`[search] original query: "${query}" → converted: "${escapedQuery}"\n`);
+  }
 
   // Build filter clause with FTS MATCH condition
   const filterClause = buildFilterClause(opts, true, "messages_fts MATCH ?");
@@ -264,6 +351,23 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
     const params = [escapedQuery, ...filterClause.params, limit + offset + 50];
 
     const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
+    
+    // Combine BM25 rank with date recency boost
+    // FTS5 rank: lower (more negative) values = better matches
+    // Date boost: subtract larger values for recent emails to improve their rank
+    // Formula: combined_rank = rank - dateBoost (recent emails get larger dateBoost)
+    // This makes recent emails have lower (better) combined_rank values
+    const daysAgo = `julianday('now') - julianday(m.date)`;
+    const dateBoostSql = `
+      CASE 
+        WHEN ${daysAgo} <= 1 THEN 10.0
+        WHEN ${daysAgo} <= 7 THEN 8.0 - (${daysAgo} * 0.5)
+        WHEN ${daysAgo} <= 30 THEN 4.5 - ((${daysAgo} - 7) * 0.1)
+        WHEN ${daysAgo} <= 90 THEN 1.2 - ((${daysAgo} - 30) * 0.01)
+        ELSE 0.6 - ((${daysAgo} - 90) * 0.001)
+      END
+    `;
+    
     const rows = db
       .prepare(
         /* sql */ `
@@ -276,11 +380,12 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
           m.date,
           snippet(messages_fts, 2, '<b>', '</b>', '…', 20) AS snippet,
           ${bodyPreviewSql} AS bodyPreview,
-          rank
+          rank,
+          (rank - ${dateBoostSql}) AS combined_rank
         FROM messages_fts
         JOIN messages m ON m.id = messages_fts.rowid
         ${where}
-        ORDER BY rank
+        ORDER BY combined_rank ASC, m.date DESC
         LIMIT ?
       `
       )
@@ -342,8 +447,6 @@ export async function searchWithMeta(
       effectiveOpts.filterOr = parsed.filterOr;
     }
   }
-
-  const hasFilters = !!(effectiveOpts.fromAddress || effectiveOpts.toAddress || effectiveOpts.subject || effectiveOpts.afterDate || effectiveOpts.beforeDate);
   
   // Update query in opts for search functions
   effectiveOpts.query = parsedQuery;
@@ -352,7 +455,7 @@ export async function searchWithMeta(
     totalMs: 0,
   };
 
-  if (!parsedQuery?.trim() && hasFilters) {
+  if (!parsedQuery?.trim()) {
     const { results, totalCount } = filterOnlySearch(db, effectiveOpts);
     timings.totalMs = Date.now() - startedAt;
     const resultsWithAttachments = mergeAttachmentMetadata(db, results);
@@ -367,18 +470,6 @@ export async function searchWithMeta(
       _meta: {
         hasFtsMatches: results.length > 0,
         hasAnyMatches: results.length > 0,
-      },
-    };
-  }
-
-  if (!parsedQuery?.trim()) {
-    timings.totalMs = Date.now() - startedAt;
-    return {
-      results: [],
-      timings,
-      _meta: {
-        hasFtsMatches: false,
-        hasAnyMatches: false,
       },
     };
   }

@@ -1,7 +1,7 @@
 // SQL schema — all tables and FTS5 virtual tables
 
 /** Schema version — bump this integer whenever the schema changes. */
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 4;
 
 export const SCHEMA = /* sql */ `
   CREATE TABLE IF NOT EXISTS messages (
@@ -11,6 +11,7 @@ export const SCHEMA = /* sql */ `
     folder       TEXT NOT NULL,
     uid          INTEGER NOT NULL,
     labels       TEXT NOT NULL DEFAULT '[]',
+    is_noise INTEGER NOT NULL DEFAULT 0,
     from_address TEXT NOT NULL,
     from_name    TEXT,
     to_addresses TEXT NOT NULL DEFAULT '[]',
@@ -128,4 +129,5 @@ export const SCHEMA = /* sql */ `
   CREATE INDEX IF NOT EXISTS idx_messages_date    ON messages(date DESC);
   CREATE INDEX IF NOT EXISTS idx_messages_folder  ON messages(folder, uid);
   CREATE INDEX IF NOT EXISTS idx_attachments_msg  ON attachments(message_id);
+  CREATE INDEX IF NOT EXISTS idx_messages_noise ON messages(is_noise) WHERE is_noise = 1;
 `;

@@ -19,6 +19,7 @@ export interface ParsedMessage {
   bodyText: string;
   bodyHtml: string | null;
   attachments: ParsedAttachment[];
+  isNoise: boolean;
 }
 
 export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
@@ -91,6 +92,46 @@ export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
     bodyText = htmlToMarkdown(email.html);
   }
 
+  // Detect noise signals from headers (promotional, bulk, mailing lists)
+  // postal-mime exposes headers as array of { key: string (lowercase), value: string }
+  let isNoise = false;
+  if (email.headers && Array.isArray(email.headers)) {
+    for (const header of email.headers) {
+      const key = header.key?.toLowerCase() ?? "";
+      const value = (header.value ?? "").trim();
+      
+      if (!value) continue;
+      
+      // List-Unsubscribe header (indicates mailing list)
+      if (key === "list-unsubscribe") {
+        isNoise = true;
+        break;
+      }
+      
+      // List-Id header (indicates mailing list)
+      if (key === "list-id") {
+        isNoise = true;
+        break;
+      }
+      
+      // Precedence header with bulk/list/junk/auto values
+      if (key === "precedence") {
+        const precedenceLower = value.toLowerCase();
+        if (precedenceLower === "bulk" || precedenceLower === "list" || 
+            precedenceLower === "junk" || precedenceLower === "auto") {
+          isNoise = true;
+          break;
+        }
+      }
+      
+      // X-Auto-Response-Suppress header (indicates automated/bulk mail)
+      if (key === "x-auto-response-suppress") {
+        isNoise = true;
+        break;
+      }
+    }
+  }
+
   return {
     messageId,
     fromAddress: email.from?.address ?? "",
@@ -102,5 +143,6 @@ export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
     bodyText,
     bodyHtml: email.html ?? null,
     attachments,
+    isNoise,
   };
 }

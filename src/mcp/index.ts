@@ -27,6 +27,7 @@ export const MCP_SEARCH_MAIL_PARAM_KEYS: readonly string[] = [
   "afterDate",
   "beforeDate",
   "includeThreads",
+  "includeNoise",
 ];
 
 /**
@@ -83,8 +84,9 @@ export function createMcpServer() {
       afterDate: z.string().optional().describe("Filter messages after this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
       beforeDate: z.string().optional().describe("Filter messages before this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
       includeThreads: z.boolean().optional().describe("When true, also return full threads (all messages per matching thread) to avoid get_thread calls (default: false)"),
+      includeNoise: z.boolean().optional().describe("When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false."),
     },
-    async ({ query, limit, offset, fromAddress, afterDate, beforeDate, includeThreads }) => {
+    async ({ query, limit, offset, fromAddress, afterDate, beforeDate, includeThreads, includeNoise }) => {
       const db = getDb();
       const result = await searchWithMeta(db, {
         query,
@@ -94,6 +96,7 @@ export function createMcpServer() {
         afterDate,
         beforeDate,
         includeThreads: includeThreads ?? false,
+        includeNoise: includeNoise ?? false,
       });
 
       const payload = result.threads?.length

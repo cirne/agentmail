@@ -21,6 +21,8 @@ export interface SyncOptions {
   since?: string;
   /** Sync direction: 'forward' (newest first, for updates) or 'backward' (oldest first, for backfill). Default: 'forward' */
   direction?: 'forward' | 'backward';
+  /** When true, skip STATUS early exit and always run SEARCH + fetch (for refresh when user knows new mail arrived). */
+  force?: boolean;
 }
 
 export interface SyncResult {
@@ -31,6 +33,10 @@ export interface SyncResult {
   bandwidthBytesPerSec: number;
   messagesPerMinute: number;
   logPath: string;
+  /** True when we returned without fetching because STATUS reported no new messages. */
+  earlyExit?: boolean;
+  /** Message IDs of newly synced messages (capped at 50) for preview output. */
+  newMessageIds?: string[];
 }
 
 // Batch sizes: smaller for forward sync (incremental), larger for backward sync (backfill)
@@ -302,8 +308,9 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           shouldEarlyExit: direction === 'forward' && state && statusUidNextNum && statusUidValidityNum === state.uidvalidity && statusUidNextNum - 1 <= state.last_uid,
         });
         
-        // Only early exit for forward sync (backward sync needs to search for older messages)
-        if (direction === 'forward' && state && statusUidNextNum && statusUidValidityNum === state.uidvalidity) {
+        // Only early exit for forward sync (backward sync needs to search for older messages).
+        // Skip early exit when force is set so user can force a full fetch when they know new mail arrived.
+        if (direction === 'forward' && !options?.force && state && statusUidNextNum && statusUidValidityNum === state.uidvalidity) {
           if (statusUidNextNum - 1 <= state.last_uid) {
             db.exec("UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1");
             releaseLock(db, "sync_summary", process.pid);
@@ -318,6 +325,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
             bandwidthBytesPerSec: 0,
             messagesPerMinute: 0,
             logPath: SYNC_LOG_PATH,
+            earlyExit: true,
+            newMessageIds: [],
           };
           logSyncMetrics(fileLogger, result);
           // Emit phase summary
@@ -356,7 +365,9 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       const direction = options?.direction ?? 'forward';
       let searchQuery: { since?: Date; uid?: string; before?: Date };
       let uids: number[];
-      
+      /** True when user requested a wider range than we have (backfill older UIDs, not just uid > last_uid). */
+      let isExpandingRangeBackward = false;
+
       if (state && state.uidvalidity === uidvalidity && state.last_uid > 0 && direction === 'forward') {
         // Forward sync (refresh): use UID range search for new messages
         // UID range 'N:*' means "UIDs >= N", so we use last_uid + 1 to get UIDs > last_uid
@@ -373,7 +384,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         // For backward sync, resume from the oldest already-synced message to avoid re-checking everything
         let effectiveSinceDate = sinceDate;
         let effectiveSinceDateStr = fromDate;
-        
+
         if (direction === 'backward') {
           // Find the oldest message we've already synced
           const oldestSynced = db.prepare("SELECT MIN(date) as oldest_date FROM messages WHERE folder = ?").get(mailbox) as
@@ -391,35 +402,19 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
               
               if (oldestDay > requestedDay) {
                 // User is requesting a wider range than what's already synced (oldestDay > requestedDay)
-                // Use the requested date as the search boundary to fetch the unfetched date range
-                // UID filtering will still correctly skip already-fetched messages
+                // Use the requested date as the search boundary to fetch the unfetched date range.
+                // Backfill messages have lower UIDs than what we have; we filter by "not already in DB" below.
+                isExpandingRangeBackward = true;
                 effectiveSinceDate = new Date(fromDate + "T00:00:00Z");
                 effectiveSinceDateStr = fromDate;
                 
-                // If we have a last_uid checkpoint, use UID-based filtering to avoid re-fetching messages we already have
-                // This is much more efficient than fetching all messages from the day and deduplicating
-                if (state && Number(state.uidvalidity) === uidvalidity && Number(state.last_uid) > 0) {
-                  // Search from the requested date to include the unfetched range
-                  // UID filtering will skip messages we've already synced
-                  searchQuery = { since: effectiveSinceDate };
-                  
-                  fileLogger.info("Expanding sync range backward with UID filtering", {
-                    requestedSince: fromDate,
-                    oldestSynced: oldestDateStr,
-                    searchingFrom: effectiveSinceDateStr,
-                    lastUid: state.last_uid,
-                    note: "Will filter UIDs <= last_uid to avoid re-fetching already-synced messages",
-                  });
-                } else {
-                  searchQuery = { since: effectiveSinceDate };
-                  
-                  fileLogger.info("Expanding sync range backward", {
-                    requestedSince: fromDate,
-                    oldestSynced: oldestDateStr,
-                    searchingFrom: effectiveSinceDateStr,
-                    note: "No UID checkpoint - will fetch and deduplicate",
-                  });
-                }
+                searchQuery = { since: effectiveSinceDate };
+                fileLogger.info("Expanding sync range backward", {
+                  requestedSince: fromDate,
+                  oldestSynced: oldestDateStr,
+                  searchingFrom: effectiveSinceDateStr,
+                  note: "Will fetch UIDs not already in DB (backfill + new)",
+                });
               } else if (oldestDay === requestedDay) {
                 // Same day - use UID filtering if available to avoid re-fetching everything
                 if (state && Number(state.uidvalidity) === uidvalidity && Number(state.last_uid) > 0) {
@@ -463,63 +458,77 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         }
       }
       
-      // For backward sync: if we're searching the same day as oldest synced and all UIDs are <= last_uid,
-      // we've already synced everything from that day. Skip to searching before that date.
+      // For backward sync: filter to UIDs we need to fetch (avoid re-fetching what we have).
       if (direction === 'backward' && state && state.uidvalidity === uidvalidity && state.last_uid > 0) {
-        const allUidsAreSynced = uids.length > 0 && uids.every((uid) => uid <= state.last_uid);
-        
-        if (allUidsAreSynced) {
-          // All UIDs from this search are already synced - we've completed this day
-          // Search for messages before the oldest synced date instead
-          const oldestSynced = db.prepare("SELECT MIN(date) as oldest_date FROM messages WHERE folder = ?").get(mailbox) as
-            | { oldest_date: string | null }
-            | undefined;
-          
-          if (oldestSynced?.oldest_date) {
-            const oldestDate = new Date(oldestSynced.oldest_date);
-            const dayBeforeOldest = new Date(oldestDate);
-            dayBeforeOldest.setDate(dayBeforeOldest.getDate() - 1);
-            
-            // Only search before if it's still within the requested range
-            if (dayBeforeOldest >= sinceDate) {
-              fileLogger.info("All messages from this day already synced - searching before oldest synced date", {
-                oldestSynced: oldestSynced.oldest_date.slice(0, 10),
-                searchingBefore: dayBeforeOldest.toISOString().slice(0, 10),
-                skippedUids: uids.length,
-              });
-              
-              // Re-search with before constraint
-              searchQuery = {
-                since: sinceDate,
-                before: dayBeforeOldest,
-              } as { since: Date; before: Date };
-              const { result: searchResult } = await timer(
-                "search",
-                () => client.search(searchQuery, { uid: true })
-              );
-              phaseMs("search_resolved");
-              uids = Array.isArray(searchResult) ? searchResult : [];
-            } else {
-              // Day before oldest is before requested date - nothing more to sync
-              fileLogger.info("All messages from requested date range already synced", {
-                oldestSynced: oldestSynced.oldest_date.slice(0, 10),
-                requestedSince: fromDate,
-              });
-              uids = [];
-            }
-          }
-        } else {
-          // Some UIDs might be new - filter to only those we haven't synced yet
+        if (isExpandingRangeBackward) {
+          // Expanding range: search already includes requested date. We need backfill (low UIDs) and possibly new (uid > last_uid).
+          // Filter to UIDs not already in DB (last_uid filter would drop all backfill).
+          const existingUids = db.prepare("SELECT uid FROM messages WHERE folder = ?").all(mailbox) as { uid: number }[];
+          const existingSet = new Set(existingUids.map((r) => r.uid));
           const beforeFilter = uids.length;
-          uids = uids.filter((uid) => uid > state.last_uid);
+          uids = uids.filter((uid) => !existingSet.has(uid));
           const filtered = beforeFilter - uids.length;
-          
           if (filtered > 0) {
-            fileLogger.info("Filtered UIDs using last_uid checkpoint", {
+            fileLogger.info("Filtered UIDs for range expansion (exclude already in DB)", {
               beforeFilter,
               afterFilter: uids.length,
               filtered,
             });
+          }
+        } else {
+          const allUidsAreSynced = uids.length > 0 && uids.every((uid) => uid <= state.last_uid);
+          if (allUidsAreSynced) {
+            // All UIDs from this search are already synced - we've completed this day
+            // Search for messages before the oldest synced date instead
+            const oldestSynced = db.prepare("SELECT MIN(date) as oldest_date FROM messages WHERE folder = ?").get(mailbox) as
+              | { oldest_date: string | null }
+              | undefined;
+            
+            if (oldestSynced?.oldest_date) {
+              const oldestDate = new Date(oldestSynced.oldest_date);
+              const dayBeforeOldest = new Date(oldestDate);
+              dayBeforeOldest.setDate(dayBeforeOldest.getDate() - 1);
+              
+              // Only search before if it's still within the requested range
+              if (dayBeforeOldest >= sinceDate) {
+                fileLogger.info("All messages from this day already synced - searching before oldest synced date", {
+                  oldestSynced: oldestSynced.oldest_date.slice(0, 10),
+                  searchingBefore: dayBeforeOldest.toISOString().slice(0, 10),
+                  skippedUids: uids.length,
+                });
+                
+                // Re-search with before constraint
+                searchQuery = {
+                  since: sinceDate,
+                  before: dayBeforeOldest,
+                } as { since: Date; before: Date };
+                const { result: searchResult } = await timer(
+                  "search",
+                  () => client.search(searchQuery, { uid: true })
+                );
+                phaseMs("search_resolved");
+                uids = Array.isArray(searchResult) ? searchResult : [];
+              } else {
+                // Day before oldest is before requested date - nothing more to sync
+                fileLogger.info("All messages from requested date range already synced", {
+                  oldestSynced: oldestSynced.oldest_date.slice(0, 10),
+                  requestedSince: fromDate,
+                });
+                uids = [];
+              }
+            }
+          } else {
+            // Resume (not expanding): only fetch UIDs we haven't synced yet (uid > last_uid)
+            const beforeFilter = uids.length;
+            uids = uids.filter((uid) => uid > state.last_uid);
+            const filtered = beforeFilter - uids.length;
+            if (filtered > 0) {
+              fileLogger.info("Filtered UIDs using last_uid checkpoint", {
+                beforeFilter,
+                afterFilter: uids.length,
+                filtered,
+              });
+            }
           }
         }
       }
@@ -559,6 +568,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       let bytesDownloaded = 0;
       let earliestDate: string | null = null;
       let latestDate: string | null = null;
+      const newMessageIds: string[] = [];
+      const NEW_MESSAGE_IDS_CAP = 50;
 
       // Track the highest UID we've successfully checkpointed so far.
       // Starts from the last known checkpoint (may be 0 on first run).
@@ -571,10 +582,10 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       const usePipelining = false; // Disabled: fetchAll() is simpler and more reliable
       
       // Helper function to process a single message (declared before loop so it can be used in both branches)
-      const processMessage = async (msg: any): Promise<{ isDuplicate: boolean; isNew: boolean }> => {
+      const processMessage = async (msg: any): Promise<{ isDuplicate: boolean; isNew: boolean; messageId?: string }> => {
         const raw = msg.source;
         if (!raw || !Buffer.isBuffer(raw)) {
-          return { isDuplicate: false, isNew: false };
+          return { isDuplicate: false, isNew: false, messageId: undefined };
         }
 
         messagesFetched++;
@@ -584,7 +595,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         const labelsArr = [...labelSet];
         const hasExcluded = excludeLabels.length > 0 && labelsArr.some((l) => excludeLabels.includes(String(l).toLowerCase()));
         if (hasExcluded) {
-          return { isDuplicate: false, isNew: false }; // Trash, Spam, etc. — skip storing (still counted in messagesFetched/bytesDownloaded)
+          return { isDuplicate: false, isNew: false, messageId: undefined }; // Trash, Spam, etc. — skip storing (still counted in messagesFetched/bytesDownloaded)
         }
 
         const uid = msg.uid;
@@ -607,7 +618,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           }
         } catch (err) {
           fileLogger.warn("Parse failed, skipping message", { uid, bytes: Buffer.byteLength(raw), error: String(err) });
-          return { isDuplicate: false, isNew: false };
+          return { isDuplicate: false, isNew: false, messageId: undefined };
         }
 
         const { result: existing, durationMs: duplicateCheckDuration } = await timer(
@@ -622,7 +633,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
             date: parsed.date,
             checkDurationMs: duplicateCheckDuration,
           });
-          return { isDuplicate: true, isNew: false }; // Already in DB; skip write and insert (saves disk I/O and avoids overwriting)
+          return { isDuplicate: true, isNew: false, messageId: undefined }; // Already in DB; skip write and insert (saves disk I/O and avoids overwriting)
         }
         
         synced++; // Increment before logging so order is accurate
@@ -653,7 +664,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         if (!earliestDate || parsed.date < earliestDate) earliestDate = parsed.date;
         if (!latestDate || parsed.date > latestDate) latestDate = parsed.date;
         
-        return { isDuplicate: false, isNew: true };
+        return { isDuplicate: false, isNew: true, messageId: parsed.messageId };
       };
       
       for (let i = 0; i < uids.length; i += batchSize) {
@@ -684,7 +695,10 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
             batchMessagesProcessed++;
             const result = await processMessage(msg);
             if (result.isDuplicate) batchDuplicates++;
-            if (result.isNew) batchNew++;
+            if (result.isNew) {
+              batchNew++;
+              if (result.messageId && newMessageIds.length < NEW_MESSAGE_IDS_CAP) newMessageIds.push(result.messageId);
+            }
           }
           
           const batchDuration = Date.now() - batchStart;
@@ -723,7 +737,10 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           for (const msg of messages) {
             const result = await processMessage(msg);
             if (result.isDuplicate) batchDuplicates++;
-            if (result.isNew) batchNew++;
+            if (result.isNew) {
+              batchNew++;
+              if (result.messageId && newMessageIds.length < NEW_MESSAGE_IDS_CAP) newMessageIds.push(result.messageId);
+            }
           }
         }
         
@@ -777,6 +794,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         bandwidthBytesPerSec: durationSec > 0 ? bytesDownloaded / durationSec : 0,
         messagesPerMinute: durationSec > 0 ? (messagesFetched / durationSec) * 60 : 0,
         logPath: SYNC_LOG_PATH,
+        newMessageIds: newMessageIds.length > 0 ? newMessageIds.slice(0, NEW_MESSAGE_IDS_CAP) : undefined,
       };
       logSyncMetrics(fileLogger, result);
       
@@ -817,7 +835,12 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
 
 const __filename = fileURLToPath(import.meta.url);
 if (process.argv[1] && resolve(process.argv[1]) === resolve(__filename)) {
-  runSync().catch((err) => {
+  // Ensure schema is up to date before running sync
+  (async () => {
+    const { ensureSchemaUpToDate } = await import("~/db");
+    await ensureSchemaUpToDate();
+    await runSync();
+  })().catch((err) => {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(1);
   });

@@ -39,22 +39,22 @@ export function formatTimeAgo(isoDate: string | null): TimeAgo | null {
     human = "just now";
     duration = "PT0S";
   } else if (min < 60) {
-    human = `${min}m ago`;
+    human = `${min} ${min === 1 ? "minute" : "minutes"} ago`;
     duration = `PT${min}M`;
   } else if (hr < 24) {
-    human = `${hr}h ago`;
+    human = `${hr} ${hr === 1 ? "hour" : "hours"} ago`;
     duration = `PT${hr}H`;
   } else if (day < 7) {
-    human = `${day}d ago`;
+    human = `${day} ${day === 1 ? "day" : "days"} ago`;
     duration = `P${day}D`;
   } else if (week < 4) {
-    human = `${week}w ago`;
+    human = `${week} ${week === 1 ? "week" : "weeks"} ago`;
     duration = `P${week}W`;
   } else if (month < 12) {
-    human = `${month}mo ago`;
+    human = `${month} ${month === 1 ? "month" : "months"} ago`;
     duration = `P${month * 30}D`; // approximate
   } else {
-    human = `${year}y ago`;
+    human = `${year} ${year === 1 ? "year" : "years"} ago`;
     duration = `P${year}Y`;
   }
   return { human, duration };

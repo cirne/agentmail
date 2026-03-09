@@ -12,6 +12,8 @@ export interface FilterClause {
   params: (string | number)[];
   /** Whether to join conditions with OR (true) or AND (false) */
   useOr: boolean;
+  /** Conditions that should always be AND'd (e.g., noise filter) */
+  alwaysAndConditions?: string[];
 }
 
 /**
@@ -42,6 +44,7 @@ export function buildFilterClause(
     afterDate,
     beforeDate,
     filterOr = false,
+    includeNoise = false,
   } = opts;
 
   const conditions: string[] = [];
@@ -87,10 +90,17 @@ export function buildFilterClause(
     params.push(beforeDate);
   }
 
+  // Noise filter: exclude by default (always AND, independent of filterOr)
+  const alwaysAndConditions: string[] = [];
+  if (!includeNoise) {
+    alwaysAndConditions.push("m.is_noise = 0");
+  }
+
   return {
     conditions,
     params,
     useOr: filterOr,
+    alwaysAndConditions: alwaysAndConditions.length > 0 ? alwaysAndConditions : undefined,
   };
 }
 
@@ -101,10 +111,28 @@ export function buildFilterClause(
  * @returns WHERE clause string (without WHERE keyword) or empty string if no conditions
  */
 export function buildWhereClause(clause: FilterClause): string {
-  if (clause.conditions.length === 0) {
+  if (clause.conditions.length === 0 && !clause.alwaysAndConditions?.length) {
     return "";
   }
 
-  const joinOp = clause.useOr ? " OR " : " AND ";
-  return clause.conditions.join(joinOp);
+  const parts: string[] = [];
+  
+  // Build main conditions (OR or AND based on filterOr)
+  if (clause.conditions.length > 0) {
+    const joinOp = clause.useOr ? " OR " : " AND ";
+    const mainClause = clause.conditions.join(joinOp);
+    // If using OR and we have always-AND conditions, wrap in parentheses
+    if (clause.useOr && clause.alwaysAndConditions && clause.alwaysAndConditions.length > 0) {
+      parts.push(`(${mainClause})`);
+    } else {
+      parts.push(mainClause);
+    }
+  }
+  
+  // Add always-AND conditions (e.g., noise filter)
+  if (clause.alwaysAndConditions && clause.alwaysAndConditions.length > 0) {
+    parts.push(...clause.alwaysAndConditions);
+  }
+  
+  return parts.join(" AND ");
 }

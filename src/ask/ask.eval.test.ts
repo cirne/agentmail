@@ -8,7 +8,7 @@ import { config } from "~/lib/config";
 /**
  * Helper to run ask and capture the answer as a string.
  * When stream=false, runAsk uses console.log for the answer.
- * We intercept console.log to capture it.
+ * We capture only the answer, not our eval logging.
  */
 async function runAskAndCapture(
   question: string,
@@ -17,12 +17,19 @@ async function runAskAndCapture(
 ): Promise<{ answer: string; latencyMs: number }> {
   const startTime = Date.now();
   const capturedLogs: string[] = [];
+  let captureCount = 0;
 
   // Intercept console.log to capture the answer
+  // runAsk calls console.log once with the answer when stream=false
   const originalLog = console.log;
   console.log = (...args: any[]) => {
     const text = args.map((a) => String(a)).join(" ");
-    capturedLogs.push(text);
+    // Capture all console.log calls during runAsk execution
+    // Filter out eval logging markers
+    if (!text.startsWith("[Eval]") && !text.includes("[Eval]")) {
+      capturedLogs.push(text);
+      captureCount++;
+    }
     // Still call original to see output during tests
     originalLog(...args);
   };
@@ -33,9 +40,11 @@ async function runAskAndCapture(
     console.log = originalLog;
   }
 
-  // The answer is the last console.log call (or combine all if needed)
-  // runAsk logs the answer via console.log when stream=false
-  const answer = capturedLogs.join("\n").trim();
+  // The answer should be the last non-empty console.log call from runAsk
+  // Filter out empty lines and get the actual answer
+  const answer = capturedLogs
+    .filter((line) => line.trim().length > 0 && !line.startsWith("[Eval]"))
+    .slice(-1)[0] || capturedLogs.join("\n").trim();
 
   const latencyMs = Date.now() - startTime;
   return { answer, latencyMs };
@@ -236,6 +245,34 @@ const EVAL_CASES: EvalCase[] = [
     maxLatencyMs: 20000,
   },
   {
+    question: "What are the 5 most recent messages in my inbox?",
+    description: "Recent messages listing with count",
+    setup: (db) => {
+      const subjects = [
+        "Weekly Newsletter",
+        "Project Update",
+        "Meeting Tomorrow",
+        "Invoice #99001",
+        "Lunch Plans",
+        "Older Message",
+      ];
+      subjects.forEach((subject, i) => {
+        insertTestMessage(db, {
+          messageId: `<recent${i}@example.com>`,
+          subject,
+          fromAddress: `sender${i}@example.com`,
+          bodyText: `Body of email: ${subject}`,
+          date: new Date(Date.now() - i * 24 * 60 * 60 * 1000).toISOString(),
+        });
+      });
+    },
+    criteria: {
+      expectedTopics: ["Weekly Newsletter", "Project Update", "Meeting Tomorrow", "Invoice", "Lunch Plans"],
+      minLength: 50,
+    },
+    maxLatencyMs: 20000,
+  },
+  {
     question: "find any emails about invoices",
     description: "Broad search without date filter",
     setup: (db) => {
@@ -288,67 +325,75 @@ describe("zmail ask evaluation suite", () => {
   }
 
   for (const testCase of EVAL_CASES) {
-    it(`should answer: "${testCase.question}"${testCase.description ? ` (${testCase.description})` : ""}`, async () => {
-      if (!hasOpenAIKey) {
-        return; // Skip if no API key
-      }
+    it(
+      `should answer: "${testCase.question}"${testCase.description ? ` (${testCase.description})` : ""}`,
+      async () => {
+        if (!hasOpenAIKey) {
+          return; // Skip if no API key
+        }
 
-      // Setup test data
-      if (testCase.setup) {
-        await testCase.setup(db);
-      }
+        // Setup test data
+        if (testCase.setup) {
+          await testCase.setup(db);
+        }
 
-      // Run ask and capture answer
-      const { answer, latencyMs } = await runAskAndCapture(testCase.question, db, { stream: false });
+        // Run ask and capture answer
+        const { answer, latencyMs } = await runAskAndCapture(testCase.question, db, { stream: false });
 
-      // Check latency
-      if (testCase.maxLatencyMs) {
-        expect(latencyMs).toBeLessThan(testCase.maxLatencyMs);
-      }
+        // Check latency
+        if (testCase.maxLatencyMs) {
+          expect(latencyMs).toBeLessThan(testCase.maxLatencyMs);
+        }
 
-      // Check basic requirements
-      if (testCase.criteria.minLength) {
-        expect(answer.length).toBeGreaterThanOrEqual(testCase.criteria.minLength);
-      }
-      if (testCase.criteria.maxLength) {
-        expect(answer.length).toBeLessThanOrEqual(testCase.criteria.maxLength);
-      }
+        // Check basic requirements
+        if (testCase.criteria.minLength) {
+          expect(answer.length).toBeGreaterThanOrEqual(testCase.criteria.minLength);
+        }
+        if (testCase.criteria.maxLength) {
+          expect(answer.length).toBeLessThanOrEqual(testCase.criteria.maxLength);
+        }
 
-      // Use LLM-as-a-judge to evaluate answer quality
-      const evaluation = await evaluateAnswerWithLLM(testCase.question, answer, testCase.criteria);
-      const minScore = testCase.minScore ?? 0.7;
+        // Use LLM-as-a-judge to evaluate answer quality
+        const evaluation = await evaluateAnswerWithLLM(testCase.question, answer, testCase.criteria);
+        const minScore = testCase.minScore ?? 0.7;
 
-      // Log evaluation details for debugging
-      console.log(`\n[Eval] Question: ${testCase.question}`);
-      console.log(`[Eval] Answer length: ${answer.length} chars`);
-      console.log(`[Eval] Latency: ${latencyMs}ms`);
-      console.log(`[Eval] LLM Score: ${evaluation.score.toFixed(2)}/1.0`);
-      console.log(`[Eval] Reasoning: ${evaluation.reasoning}`);
-      console.log(`[Eval] Answer: ${answer.substring(0, 200)}${answer.length > 200 ? "..." : ""}`);
+        // Log evaluation details for debugging
+        console.log(`\n[Eval] Question: ${testCase.question}`);
+        console.log(`[Eval] Answer length: ${answer.length} chars`);
+        console.log(`[Eval] Latency: ${latencyMs}ms`);
+        console.log(`[Eval] LLM Score: ${evaluation.score.toFixed(2)}/1.0`);
+        console.log(`[Eval] Reasoning: ${evaluation.reasoning}`);
+        console.log(`[Eval] Answer: ${answer.substring(0, 200)}${answer.length > 200 ? "..." : ""}`);
 
-      // Assert minimum score
-      expect(evaluation.score).toBeGreaterThanOrEqual(minScore);
-      expect(evaluation.passed).toBe(true);
-    });
+        // Assert minimum score
+        expect(evaluation.score).toBeGreaterThanOrEqual(minScore);
+        expect(evaluation.passed).toBe(true);
+      },
+      30000 // 30 second timeout for LLM calls
+    );
   }
 
   describe("performance benchmarks", () => {
-    it("should complete simple queries in reasonable time", async () => {
-      if (!hasOpenAIKey) {
-        return;
-      }
+    it(
+      "should complete simple queries in reasonable time",
+      async () => {
+        if (!hasOpenAIKey) {
+          return;
+        }
 
-      insertTestMessage(db, {
-        messageId: "<simple@example.com>",
-        subject: "Test",
-        bodyText: "Test content",
-      });
+        insertTestMessage(db, {
+          messageId: "<simple@example.com>",
+          subject: "Test",
+          bodyText: "Test content",
+        });
 
-      const { latencyMs } = await runAskAndCapture("what is this email about?", db, { stream: false });
+        const { latencyMs } = await runAskAndCapture("what is this email about?", db, { stream: false });
 
-      // Simple queries should complete quickly
-      expect(latencyMs).toBeLessThan(15000);
-      console.log(`\n[Benchmark] Simple query latency: ${latencyMs}ms`);
-    });
+        // Simple queries should complete quickly
+        expect(latencyMs).toBeLessThan(15000);
+        console.log(`\n[Benchmark] Simple query latency: ${latencyMs}ms`);
+      },
+      30000 // 30 second timeout
+    );
   });
 });

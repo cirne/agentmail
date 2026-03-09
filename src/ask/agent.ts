@@ -265,11 +265,13 @@ export async function runAsk(
         "- If a search returns 0 results, DO NOT stop - try simpler queries with fewer words. Remove action words - just use nouns.\n" +
         "- IMPORTANT: If a filtered search (with fromAddress/toAddress) returns 0 results, try the same query WITHOUT filters. The person might have used a different email address.\n" +
         "- If query asks for emails 'from X', try: 1) company name, 2) domain name (X.com), 3) fromAddress filter, 4) remove date filters if you added them.\n" +
+        "- BROWSING RECENT MESSAGES: If the user asks for recent/latest/newest messages without a specific topic (e.g., 'what are my 5 most recent messages?', 'what did I get today?'), call search() with NO query (omit it or leave blank) and use afterDate + limit to browse by date. Example: search({limit: 10}) to get recent messages, or search({afterDate: '1d', limit: 5}) for today's messages. This works because the search tool supports filter-only queries.\n" +
         "- If the question asks for \"latest\", \"recent\", or \"newest\", prioritize messages by date (newer first).\n" +
         "- If search results show attachments (e.g., 'attachments: [{\"id\": 107, \"filename\": \"...xlsx\"}]'), note them for phase 2.\n\n" +
         "IMPORTANT:\n" +
         "- For date filters, use 'afterDate' and 'beforeDate' parameters with relative dates (e.g., '7d', '30d', '1w', '3m') or ISO dates (YYYY-MM-DD).\n" +
         "- Only add date filters if the question explicitly mentions a time period (e.g., 'last month', 'this week', 'in February', 'in January'). If no time period is mentioned, search all emails without date filters.\n" +
+        "- IMPORTANT: Date words like 'tomorrow', 'today', 'yesterday', 'next week', 'this week', 'last week' in the question or query are AUTOMATICALLY extracted and converted to date filters. You don't need to include them in your search query - focus on the content words (e.g., for 'advisory meeting tomorrow', search for 'advisory meeting' and the system will automatically filter by tomorrow's date).\n" +
         "- IMPORTANT: Do NOT use hardcoded old dates like '2023-02-08' or '2024-01-01'. Always use relative dates (30d, 7d) or dates based on the current year (${currentYear}). If you need to search all emails, omit date filters entirely.\n" +
         "- IMPORTANT: Use the current date provided above to interpret relative dates. 'last month' means the previous calendar month from the current date.\n" +
         "- Use keyword searches in the 'query' field. Do NOT use operators like 'category:' that don't exist.\n" +

@@ -144,7 +144,7 @@ async function executeSearchTool(
   db: SqliteDatabase,
   args: Record<string, unknown>
 ): Promise<string> {
-  const query = args.query as string;
+  const query = (args.query as string | undefined) ?? "";
   const limit = (args.limit as number) ?? 50;
   const fromAddress = args.fromAddress as string | undefined;
   const toAddress = args.toAddress as string | undefined;
@@ -394,6 +394,7 @@ export function getInvestigationToolDefinitions() {
         name: "search",
         description:
           "Search emails by full-text and filters. Returns message list with headers/metadata only (messageId, threadId, from, subject, date, short snippet). No body content.\n\n" +
+          "Noise messages (promotional, social, forums, bulk, spam) are excluded by default (Gmail categories: Promotions, Social, Forums, Spam). Use includeNoise: true to include them.\n\n" +
           "FTS5 QUERY CONSTRUCTION:\n" +
           "- FTS5 treats space-separated words as AND (all must match). Use OR operator for alternatives.\n" +
           "- Good: 'dan cabo' (2 key terms), 'invoice OR receipt' (alternatives), 'funds request' (2 related terms)\n" +
@@ -412,7 +413,7 @@ export function getInvestigationToolDefinitions() {
           properties: {
             query: {
               type: "string",
-              description: "Full-text search query. Construct FTS5 queries using OR for alternatives. Examples: 'dan cabo', 'invoice OR receipt', 'funds request'. Supports inline operators: from:, to:, subject:, after:, before:",
+              description: "Full-text search query. Construct FTS5 queries using OR for alternatives. Examples: 'dan cabo', 'invoice OR receipt', 'funds request'. Supports inline operators: from:, to:, subject:, after:, before:. OMIT or leave empty to browse by date/filters only (e.g. to get recent messages, use afterDate + limit without a query).",
             },
             limit: {
               type: "number",
@@ -447,7 +448,7 @@ export function getInvestigationToolDefinitions() {
               description: "When true, use OR logic between filters (e.g., fromAddress OR toAddress) instead of AND. Useful when searching for emails where a person is either sender or recipient.",
             },
           },
-          required: ["query"],
+          required: [],
         },
       },
     },

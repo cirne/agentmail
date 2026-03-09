@@ -81,18 +81,44 @@ export function persistMessage(
   // TODO: Implement proper conversation threading based on In-Reply-To/References headers
   const threadId = parsed.messageId;
 
+  // Check labels for Gmail noise categories: Promotions, Social, Forums, Spam
+  // Note: We exclude "Updates" category as it contains important transactional emails (bills, receipts, confirmations)
+  let labelIsNoise = false;
+  try {
+    const labelsArray = JSON.parse(labels) as string[];
+    if (Array.isArray(labelsArray)) {
+      const noiseLabels = [
+        "promotions", "\\promotions",
+        "social", "\\social",
+        "forums", "\\forums",
+        "spam", "\\spam",
+        "junk", "\\junk",
+        "bulk"
+      ];
+      labelIsNoise = labelsArray.some(label => 
+        noiseLabels.includes(label.toLowerCase())
+      );
+    }
+  } catch {
+    // Invalid JSON or not an array - ignore, use header-based detection only
+  }
+
+  // Final noise flag: header-based OR label-based
+  const isNoise = parsed.isNoise || labelIsNoise ? 1 : 0;
+
   // Insert message
   db.prepare(
     `INSERT INTO messages (
-      message_id, thread_id, folder, uid, labels, from_address, from_name,
+      message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name,
       to_addresses, cc_addresses, subject, date, body_text, raw_path
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     parsed.messageId,
     threadId,
     mailbox,
     uid,
     labels,
+    isNoise,
     parsed.fromAddress,
     parsed.fromName,
     JSON.stringify(parsed.toAddresses),
