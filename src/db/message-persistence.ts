@@ -81,23 +81,25 @@ export function persistMessage(
   // TODO: Implement proper conversation threading based on In-Reply-To/References headers
   const threadId = parsed.messageId;
 
-  // Check labels for Gmail noise categories: Promotions, Social, Forums, Spam
-  // Note: We exclude "Updates" category as it contains important transactional emails (bills, receipts, confirmations)
+  // Check labels for noise categories (Gmail native + Superhuman AI)
+  // Excludes: Gmail "Updates" (transactional), Superhuman "Respond"/"Meeting" (actionable)
   let labelIsNoise = false;
   try {
     const labelsArray = JSON.parse(labels) as string[];
     if (Array.isArray(labelsArray)) {
-      const noiseLabels = [
-        "promotions", "\\promotions",
-        "social", "\\social",
-        "forums", "\\forums",
-        "spam", "\\spam",
-        "junk", "\\junk",
-        "bulk"
-      ];
-      labelIsNoise = labelsArray.some(label => 
-        noiseLabels.includes(label.toLowerCase())
-      );
+      labelIsNoise = labelsArray.some(label => {
+        const lower = label.toLowerCase();
+        // Gmail native categories
+        if (["promotions", "\\promotions", "social", "\\social",
+             "forums", "\\forums", "spam", "\\spam",
+             "junk", "\\junk", "bulk"].includes(lower)) return true;
+        // Superhuman AI categories (noise subset)
+        if (lower.startsWith("[superhuman]/ai/")) {
+          const category = lower.slice("[superhuman]/ai/".length);
+          return ["marketing", "news", "social", "pitch"].includes(category);
+        }
+        return false;
+      });
     }
   } catch {
     // Invalid JSON or not an array - ignore, use header-based detection only

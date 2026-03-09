@@ -224,4 +224,62 @@ No sidecar file for this one.`
     expect(noSidecar.is_noise).toBe(0);
     expect(JSON.parse(noSidecar.labels)).toEqual([]);
   });
+
+  it("classifies Superhuman AI marketing/news/social labels as noise", async () => {
+    const maildirCur = join(testTempDir, "data", "maildir", "cur");
+
+    const marketingEml = Buffer.from(
+      `Message-ID: <marketing@example.com>
+From: deals@nytimes.com
+To: user@example.com
+Subject: Special Offer
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+Content-Type: text/plain
+
+Subscribe now!`
+    );
+    const marketingFile = join(maildirCur, "100_marketing@example.com.eml");
+    writeFileSync(marketingFile, marketingEml);
+    writeMessageMeta(marketingFile, { labels: ["[Superhuman]/AI/AutoArchived", "[Superhuman]/AI/Marketing"] });
+
+    const newsEml = Buffer.from(
+      `Message-ID: <news@example.com>
+From: newsletter@athletic.com
+To: user@example.com
+Subject: Sports News
+Date: Mon, 1 Jan 2024 13:00:00 +0000
+Content-Type: text/plain
+
+Headlines today.`
+    );
+    const newsFile = join(maildirCur, "200_news@example.com.eml");
+    writeFileSync(newsFile, newsEml);
+    writeMessageMeta(newsFile, { labels: ["[Superhuman]/AI/AutoArchived", "[Superhuman]/AI/News"] });
+
+    const respondEml = Buffer.from(
+      `Message-ID: <respond@example.com>
+From: boss@company.com
+To: user@example.com
+Subject: Need your input
+Date: Mon, 1 Jan 2024 14:00:00 +0000
+Content-Type: text/plain
+
+Please review.`
+    );
+    const respondFile = join(maildirCur, "300_respond@example.com.eml");
+    writeFileSync(respondFile, respondEml);
+    writeMessageMeta(respondFile, { labels: ["[Superhuman]/AI/Respond", "\\Inbox"] });
+
+    await reindexFromMaildir();
+
+    const db = getDb();
+    const marketing = db.prepare("SELECT is_noise FROM messages WHERE message_id = ?").get("<marketing@example.com>") as any;
+    expect(marketing.is_noise).toBe(1);
+
+    const news = db.prepare("SELECT is_noise FROM messages WHERE message_id = ?").get("<news@example.com>") as any;
+    expect(news.is_noise).toBe(1);
+
+    const respond = db.prepare("SELECT is_noise FROM messages WHERE message_id = ?").get("<respond@example.com>") as any;
+    expect(respond.is_noise).toBe(0);
+  });
 });

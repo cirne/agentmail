@@ -16,7 +16,7 @@ Recommendation: start with **filter** (e.g. a search/ask option like "exclude pr
 
 **Signals to consider:**
 
-- **Labels (when present):** e.g. Gmail `Promotions`, `Social`, `Forums`, or provider-specific "spam"/"bulk" labels. Already in `messages.labels`; can filter or down-rank by label. Note: We exclude "Updates" category as it contains important transactional emails.
+- **Labels (when present):** e.g. Gmail `Promotions`, `Social`, `Forums`, or provider-specific "spam"/"bulk" labels; also Superhuman AI categories (`[Superhuman]/AI/Marketing`, `News`, `Social`, `Pitch`). Already in `messages.labels`; can filter or down-rank by label. Note: We exclude Gmail "Updates" category and Superhuman "Respond"/"Meeting" as they contain actionable content.
 - **List / bulk headers:** e.g. `List-Unsubscribe`, `List-Id`, `Precedence: auto|list|junk`, `X-Auto-Response-Suppress`. Could be stored at index time (new column or JSON) and used in filter/ranking.
 - **Heuristics:** Sender domain or subject patterns (e.g. "Unsubscribe", "Manage preferences", "%%") as a fallback when headers are missing. Lower priority to avoid false positives.
 
