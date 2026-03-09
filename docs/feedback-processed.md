@@ -38,6 +38,8 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `bakeoff-004-tech-news.md` | 2026-03-07 | Created opportunity | [OPP-018](opportunities/OPP-018-reduce-agent-round-trips.md) — primary source: batch get_message + richer search output |
 | `bakeoff-005-entrepreneur-rematch.md` | 2026-03-07 | Created opportunity + bug, updated existing bug | [OPP-019](opportunities/OPP-019-fts-first-retire-semantic-default.md) (FTS-first); [BUG-018](bugs/BUG-018-who-timings-unknown-flag.md) (who --timings); [BUG-017](bugs/BUG-017-semantic-recall-gap-intent-queries.md) updated with resolution path |
 | `bakeoff-results.md` (updated v2) | 2026-03-07 | Index update noted | Bakeoff #5 added to index; strategic insight → OPP-019 |
+| `bug-read-prepare-error.md` | 2026-03-09 | Created bug | [BUG-021](bugs/BUG-021-read-prepare-error.md) — `read`/`get_messages` crash with prepare error |
+| `ux-ask-default-detail-level.md` | 2026-03-09 | Created opportunity | [OPP-022](opportunities/OPP-022-ask-synthesis-detail-level.md) — Mini synthesis too shallow for broad queries |
 
 ---
 

@@ -277,7 +277,7 @@ async function executeGetMessageTool(
   }
 
   const useRaw = raw || detail === "raw";
-  const shaped = await formatMessageForOutput(message, useRaw);
+  const shaped = await formatMessageForOutput(message, useRaw, db);
   const out = shapeShapedToOutput([shaped], { useRaw, detail, maxBodyChars });
   return JSON.stringify(out[0]);
 }

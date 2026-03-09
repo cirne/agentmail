@@ -6,7 +6,7 @@
 
 import { readFileSync } from "fs";
 import { join } from "path";
-import { getDb } from "~/db";
+import { getDb, type SqliteDatabase } from "~/db";
 import { config } from "~/lib/config";
 import { parseRawMessage } from "~/sync/parse-message";
 import { htmlToMarkdown } from "~/lib/content-normalize";
@@ -55,14 +55,16 @@ function readRawEmail(rawPath: string): Buffer | null {
  *
  * @param message Message row from database
  * @param raw If true, include raw EML content instead of parsed markdown
+ * @param db Optional database instance (defaults to getDb() for production use)
  * @returns Shaped message object ready for formatting or JSON output
  */
 export async function formatMessageForOutput(
   message: MessageRow,
-  raw: boolean
+  raw: boolean,
+  db?: SqliteDatabase
 ): Promise<Record<string, unknown> & ShapedContent> {
-  const db = getDb();
-  const attachments = db
+  const database = db ?? getDb();
+  const attachments = database
     .prepare(
       `SELECT id, filename, mime_type, size, stored_path, extracted_text
        FROM attachments WHERE message_id = ? ORDER BY filename`

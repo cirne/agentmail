@@ -100,7 +100,7 @@ async function assembleContext(
 
     verboseLog(`[context assembler] found ${messages.length} messages in DB\n`);
     for (const msg of messages) {
-      const shaped = await formatMessageForOutput(msg, false);
+      const shaped = await formatMessageForOutput(msg, false, db);
       const lean = toLeanMessage(shaped as any, maxBodyChars);
       const content = lean.content as { markdown?: string } | undefined;
       const markdown = content?.markdown || "";
