@@ -41,6 +41,7 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `bug-read-prepare-error.md` | 2026-03-09 | Created bug | [BUG-021](bugs/BUG-021-read-prepare-error.md) — `read`/`get_messages` crash with prepare error |
 | `ux-ask-default-detail-level.md` | 2026-03-09 | Created opportunity | [OPP-022](opportunities/OPP-022-ask-synthesis-detail-level.md) — Mini synthesis too shallow for broad queries |
 | `ux-ask-inbox-includes-spam.md` | 2026-03-09 | Matched existing opportunity; partially fixed | [OPP-021](opportunities/OPP-021-ask-spam-promo-awareness.md) — Schema version bumped (4→5) to force re-index with noise classification |
+| `bug-attachments-missing-from-email.md` | 2026-03-09 | Created bug | [BUG-023](bugs/BUG-023-attachments-missing-from-synced-email.md) — Forwarded email missing attachments (on original, not the forward) |
 
 ---
 
