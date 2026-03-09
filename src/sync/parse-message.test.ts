@@ -116,4 +116,112 @@ Content-Type: text/html
     expect(parsed.bodyText).not.toContain("<p>");
     expect(parsed.bodyHtml).toContain("<h1>Receipt</h1>");
   });
+
+  describe("noise classification", () => {
+    it("does NOT mark transactional email with List-Unsubscribe alone as noise", async () => {
+      // Apple Store receipt, GitHub payment receipt, etc. include List-Unsubscribe for CAN-SPAM compliance
+      const raw = Buffer.from(
+        `From: noreply@apple.com
+To: user@example.com
+Subject: Your Apple Store receipt
+List-Unsubscribe: <https://apple.com/unsubscribe>
+Content-Type: text/plain
+
+Thank you for your purchase. Total: $99.00`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.isNoise).toBe(false);
+    });
+
+    it("marks mailing list with List-Id as noise", async () => {
+      const raw = Buffer.from(
+        `From: newsletter@example.com
+To: user@example.com
+Subject: Weekly Newsletter
+List-Id: <newsletter.example.com>
+Content-Type: text/plain
+
+This week's updates...`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.isNoise).toBe(true);
+    });
+
+    it("marks mailing list with both List-Unsubscribe and List-Id as noise", async () => {
+      const raw = Buffer.from(
+        `From: newsletter@example.com
+To: user@example.com
+Subject: Weekly Newsletter
+List-Unsubscribe: <https://example.com/unsubscribe>
+List-Id: <newsletter.example.com>
+Content-Type: text/plain
+
+This week's updates...`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.isNoise).toBe(true);
+    });
+
+    it("marks email with Precedence: bulk as noise", async () => {
+      const raw = Buffer.from(
+        `From: marketing@example.com
+To: user@example.com
+Subject: Special Offer
+Precedence: bulk
+Content-Type: text/plain
+
+Limited time offer...`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.isNoise).toBe(true);
+    });
+
+    it("marks email with Precedence: list as noise", async () => {
+      const raw = Buffer.from(
+        `From: list@example.com
+To: user@example.com
+Subject: Discussion Thread
+Precedence: list
+Content-Type: text/plain
+
+Message content...`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.isNoise).toBe(true);
+    });
+
+    it("marks email with X-Auto-Response-Suppress as noise", async () => {
+      const raw = Buffer.from(
+        `From: noreply@example.com
+To: user@example.com
+Subject: Automated Notification
+X-Auto-Response-Suppress: All
+Content-Type: text/plain
+
+This is an automated message...`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.isNoise).toBe(true);
+    });
+
+    it("does NOT mark normal email without noise signals as noise", async () => {
+      const raw = Buffer.from(
+        `From: alice@example.com
+To: bob@example.com
+Subject: Meeting Tomorrow
+Content-Type: text/plain
+
+Can we meet tomorrow?`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.isNoise).toBe(false);
+    });
+  });
 });

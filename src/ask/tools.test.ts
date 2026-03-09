@@ -244,48 +244,6 @@ describe("executeNanoTool", () => {
     });
   });
 
-  describe("who tool", () => {
-    it("returns people matching query", async () => {
-      insertTestMessage(db, {
-        fromAddress: "alice@example.com",
-        fromName: "Alice Smith",
-        subject: "Hello",
-        bodyText: "content",
-      });
-
-      const result = await executeNanoTool(db, "who", {
-        query: "alice",
-        limit: 10,
-      });
-
-      const parsed = JSON.parse(result);
-      expect(parsed.people).toBeDefined();
-      expect(Array.isArray(parsed.people)).toBe(true);
-    });
-
-    it("respects limit parameter", async () => {
-      // Create multiple people
-      for (let i = 0; i < 5; i++) {
-        insertTestMessage(db, {
-          fromAddress: `person${i}@example.com`,
-          fromName: `Person ${i}`,
-          subject: "Hello",
-          bodyText: "content",
-        });
-      }
-
-      const result = await executeNanoTool(db, "who", {
-        query: "person",
-        limit: 3,
-      });
-
-      const parsed = JSON.parse(result);
-      if (parsed.people) {
-        expect(parsed.people.length).toBeLessThanOrEqual(3);
-      }
-    });
-  });
-
   describe("get_thread_headers tool", () => {
     it("returns thread headers", async () => {
       const threadId = "<thread-123>";

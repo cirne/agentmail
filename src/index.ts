@@ -76,19 +76,19 @@ if (!command) {
   console.log("");
   console.log("Run 'zmail --help' for all commands and flags.");
   process.exit(0);
-  } else {
-    // Command provided, check for config before proceeding
-    if (!hasConfig()) {
-      console.error("No config found. Run 'zmail setup' or 'zmail wizard' first.");
-      process.exit(1);
-    }
-    try {
-      // Ensure schema is up to date before any command that uses the DB
-      const { ensureSchemaUpToDate } = await import("~/db");
-      await ensureSchemaUpToDate();
-      
-      await import("~/cli");
-    } catch (err) {
-      handleMissingConfig(err);
-    }
+} else {
+  // Command provided, check for config before proceeding
+  if (!hasConfig()) {
+    console.error("No config found. Run 'zmail setup' or 'zmail wizard' first.");
+    process.exit(1);
   }
+  try {
+    // Ensure schema is up to date before any command that uses the DB
+    const { ensureSchemaUpToDate } = await import("~/db");
+    await ensureSchemaUpToDate();
+
+    await import("~/cli");
+  } catch (err) {
+    handleMissingConfig(err);
+  }
+}

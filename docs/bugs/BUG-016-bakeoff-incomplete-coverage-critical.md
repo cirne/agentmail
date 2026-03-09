@@ -1,12 +1,13 @@
 # BUG-016: Bakeoff Failure — Incomplete Coverage vs Google Adapter — Agent-Reported
 
-**Status:** Open. **Updated:** 2026-03-07 (deep analysis after second retest). **Tags:** semantic
+**Status:** Open. **Updated:** 2026-03-09 (eval test failure confirms issue persists). **Tags:** semantic, eval
 
 **Design lens:** [Agent-first](../../VISION.md) — For transactional queries requiring complete coverage (financial, legal, compliance), zmail must return all matching results. Missing half the data makes it unsuitable for critical workflows, regardless of search speed advantage.
 
 **Reported context:**
 - **Initial bakeoff (2026-03-07):** "summarize my spending on apple.com in the last 30 days". zmail found 18 receipts ($808) vs Gmail 36 receipts ($1,762). zmail hit FTS5 crash on "apple.com" query; agent improvised workarounds.
 - **Post-fix retest (2026-03-07):** After truncation + FTS5 fixes, zmail found only **9 of 37 receipts** (worse than before). Gmail 36 of 37. FTS5 "fix" inadvertently made querying more restrictive.
+- **Eval test failure (2026-03-09):** Eval test case "summarize my spending on apple.com in the last 30 days" scored 0.50/1.0 (required: 0.70+). Answer stated "The provided emails do not contain detailed information" despite 22 Apple receipts ($1,387.80) existing in test fixtures within date range. Judge reasoning: "lacks a comprehensive summary of total spending and does not clearly address the question." Confirms search/aggregation issues persist in eval environment with realistic fixtures.
 
 ---
 
@@ -251,3 +252,4 @@ This ensures a receipt at FTS position 48 and semantic position 62 both make it 
 - **2026-03-07 (initial):** Created — 18 vs 36 receipts (50% miss), FTS5 crash, silent truncation
 - **2026-03-07 (post-fix retest):** Updated — truncation and FTS5 syntax fixed, but results worsened to 9 vs 37 (75% miss)
 - **2026-03-07 (deep analysis):** Full root cause analysis added — 5 distinct bugs identified; FTS5 phrase-quote is the regression cause; domain auto-routing to `from:` is the primary fix
+- **2026-03-09 (eval test failure):** Eval test case confirms issue persists — scored 0.50/1.0 (required 0.70+). Answer stated "no detailed information" despite 22 Apple receipts ($1,387.80) existing in test fixtures. Judge: "lacks comprehensive summary of total spending." Confirms search/aggregation issues affect answer quality in eval environment with realistic fixtures (525 messages, 81 Apple messages in last 30 days).

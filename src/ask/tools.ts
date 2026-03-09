@@ -1,6 +1,5 @@
 import type { SqliteDatabase } from "~/db";
 import { searchWithMeta } from "~/search";
-import { who } from "~/search/who";
 import { normalizeMessageId } from "~/mcp";
 import { parseSinceToDate } from "~/sync/parse-since";
 import { formatMessageForOutput } from "~/messages/presenter";
@@ -153,6 +152,7 @@ async function executeSearchTool(
   const beforeDate = parseDateParam(args.beforeDate as string | undefined);
   const includeThreads = (args.includeThreads as boolean) ?? false;
   const filterOr = (args.filterOr as boolean) ?? false;
+  const includeNoise = (args.includeNoise as boolean) ?? false;
 
   const result = await searchWithMeta(db, {
     query,
@@ -164,6 +164,7 @@ async function executeSearchTool(
     beforeDate,
     includeThreads,
     filterOr,
+    includeNoise,
   });
 
   const metadataResults = toMetadataResults(result.results);
@@ -184,26 +185,6 @@ async function executeSearchTool(
       ? { threads: formatThreadResults(result.threads) }
       : {}),
   });
-}
-
-/**
- * Execute who tool.
- */
-async function executeWhoTool(
-  db: SqliteDatabase,
-  args: Record<string, unknown>
-): Promise<string> {
-  const query = args.query as string;
-  const limit = (args.limit as number) ?? 10;
-
-  const result = await who(db, {
-    query,
-    limit,
-    includeNoreply: false,
-    enrich: false, // No LLM enrichment for nano
-  });
-
-  return JSON.stringify(result);
 }
 
 /**
@@ -281,8 +262,6 @@ export async function executeNanoTool(
     switch (name) {
       case "search":
         return await executeSearchTool(db, args);
-      case "who":
-        return await executeWhoTool(db, args);
       case "get_thread_headers":
         return executeGetThreadHeadersTool(db, args);
       case "get_message":
@@ -364,30 +343,12 @@ export function getInvestigationToolDefinitions() {
               type: "boolean",
               description: "When true, use OR logic between filters (e.g., fromAddress OR toAddress) instead of AND. Useful when searching for emails where a person is either sender or recipient.",
             },
+            includeNoise: {
+              type: "boolean",
+              description: "When true, includes noise messages (promotional, social, forums, bulk, spam) in results. Defaults to false (noise excluded).",
+            },
           },
           required: [],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "who",
-        description:
-          "Find people by email or display name. Returns addresses and contact stats (sent/received counts, last contact). Use to resolve 'who is X' or to get addresses before searching by sender.",
-        parameters: {
-          type: "object",
-          properties: {
-            query: {
-              type: "string",
-              description: "Search query to match against email addresses or display names",
-            },
-            limit: {
-              type: "number",
-              description: "Maximum number of results (default: 10)",
-            },
-          },
-          required: ["query"],
         },
       },
     },

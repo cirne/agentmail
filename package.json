@@ -25,7 +25,6 @@
   "dependencies": {
     "@cedrugs/pdf-parse": "^1.0.0",
     "@inquirer/prompts": "^8.3.0",
-    "@lancedb/lancedb-linux-arm64-gnu": "^0.26.2",
     "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.6.2",
     "double-metaphone": "^0.1.4",
@@ -49,6 +48,7 @@
     "tsc-alias": "^1.8.10",
     "tsx": "^4.19.2",
     "typescript": "latest",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "yaml": "^2.8.2"
   }
 }

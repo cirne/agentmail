@@ -6,6 +6,7 @@ import { formatMessageForOutput } from "~/messages/presenter";
 import { toLeanMessage, DEFAULT_BODY_CAP } from "~/messages/lean-shape";
 import { extractAndCache } from "~/attachments";
 import { executeNanoTool } from "./tools";
+import { setVerbose, verboseLog } from "./verbose";
 
 let openaiClient: OpenAI | null = null;
 
@@ -16,10 +17,6 @@ function getOpenAIClient(): OpenAI {
   }
   return openaiClient;
 }
-
-/**
- * Determine if attachments should be included based on query analysis.
- */
 
 /**
  * Determine if attachments should be included based on query analysis.
@@ -95,13 +92,13 @@ async function assembleContext(
   // Fetch messages by messageId
   if (messageIds && messageIds.length > 0) {
     const messageIdsToFetch = messageIds.slice(0, maxMessages);
-    process.stderr.write(`[context assembler] fetching ${messageIdsToFetch.length} messages by ID\n`);
+    verboseLog(`[context assembler] fetching ${messageIdsToFetch.length} messages by ID\n`);
     const placeholders = messageIdsToFetch.map(() => "?").join(",");
     const messages = db
       .prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
       .all(...messageIdsToFetch) as any[];
 
-    process.stderr.write(`[context assembler] found ${messages.length} messages in DB\n`);
+    verboseLog(`[context assembler] found ${messages.length} messages in DB\n`);
     for (const msg of messages) {
       const shaped = await formatMessageForOutput(msg, false);
       const lean = toLeanMessage(shaped as any, maxBodyChars);
@@ -132,7 +129,7 @@ async function assembleContext(
             if (!specificAttachmentIds) {
               const shouldInclude = shouldIncludeAttachment(att, totalAttachmentChars);
               if (!shouldInclude.include) {
-                process.stderr.write(`[context assembler] skipping attachment ${att.filename}: ${shouldInclude.reason}\n`);
+                verboseLog(`[context assembler] skipping attachment ${att.filename}: ${shouldInclude.reason}\n`);
                 continue;
               }
             }
@@ -148,7 +145,7 @@ async function assembleContext(
                 
                 // Check size after extraction
                 if (extractedText.length > 50000) {
-                  process.stderr.write(`[context assembler] extracted text too long (${extractedText.length} chars), truncating\n`);
+                  verboseLog(`[context assembler] extracted text too long (${extractedText.length} chars), truncating\n`);
                   extractedText = extractedText.slice(0, 50000) + "\n[... truncated ...]";
                 }
               } catch (err) {
@@ -186,11 +183,16 @@ async function assembleContext(
  * Context Assembly: Fetches full email bodies and attachments from candidates.
  * Phase 2: Mini synthesizes the answer from assembled context.
  */
+/**
+ * Run the ask pipeline. When stream is false, returns the answer string for programmatic use (e.g. tests).
+ * When stream is true, writes the answer to stdout and returns undefined.
+ */
 export async function runAsk(
   question: string,
   db: SqliteDatabase,
-  opts?: { stream?: boolean }
-): Promise<void> {
+  opts?: { stream?: boolean; verbose?: boolean }
+): Promise<string | undefined> {
+  setVerbose(!!opts?.verbose);
   const startTime = Date.now();
   const client = getOpenAIClient();
   const stream = opts?.stream ?? true;
@@ -209,10 +211,10 @@ export async function runAsk(
 
   // ============================================================================
   // PHASE 1: INVESTIGATION - Search and explore to find relevant messages
-  // Nano uses metadata-only tools (search, who, get_message, get_thread_headers)
+  // Nano uses metadata-only tools (search, get_message, get_thread_headers)
   // to discover candidate messages and attachments without fetching full bodies.
   // ============================================================================
-  process.stderr.write(`[phase 1] investigation: searching for relevant messages\n`);
+  verboseLog(`[phase 1] investigation: searching for relevant messages\n`);
   
   const investigationMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     {
@@ -224,7 +226,7 @@ export async function runAsk(
         `IMPORTANT: Always use ${currentYear} as the current year when interpreting dates. Do NOT use 2024 or other years unless explicitly specified by the user.\n\n` +
         "You are an email investigator. Your job is to search and explore emails to find messages and attachments relevant to answering the user's question.\n\n" +
         "PHASE 1 - INVESTIGATION ONLY:\n" +
-        "- Use 'search' and 'who' to discover relevant messages. Search results show metadata (subject, from, date, snippet, attachments) but NOT full body content.\n" +
+        "- Use 'search' to discover relevant messages. Search results show metadata (subject, from, date, snippet, attachments) but NOT full body content.\n" +
         "- Use 'get_message' to read full message content when you need to understand what a message says.\n" +
         "- Use 'get_thread_headers' to explore thread structure.\n" +
         "- When you have found the relevant messages and attachments, summarize what you found and say \"investigation complete\".\n\n" +
@@ -233,7 +235,7 @@ export async function runAsk(
         "- Extract core nouns/concepts from the question. Remove action words (suggest, recommend, said, want, need, did, does, show, find).\n" +
         "- Construct queries intelligently:\n" +
         "  * Question mentions alternatives → use OR: 'invoice or receipt' → 'invoice OR receipt'\n" +
-        "  * Question has person + topic → try both: 'dan cabo' OR 'cabo' (if filtered by dan's email)\n" +
+        "  * Question has person + topic → try 'dan cabo' OR 'cabo'\n" +
         "  * Question has multiple related terms → use OR for flexibility: 'funds request' OR 'request funds'\n" +
         "  * Question asks 'what did X suggest/recommend' → remove action word: 'dan cabo' (not 'dan suggest cabo')\n" +
         "- Query construction examples:\n" +
@@ -247,19 +249,13 @@ export async function runAsk(
         "- For company/domain queries: try domain names (e.g., 'apple' → 'apple.com'), email patterns, brand variations.\n" +
         "- For event/trip queries: try event names, locations, dates, organizers, related terms.\n" +
         "- For spending/purchase queries: try synonyms ('spending', 'purchases', 'receipts', 'invoices', 'payments'), company domains.\n" +
-        "- For person queries: use 'who' first to find email addresses, then search with 'fromAddress'.\n" +
-        "- CRITICAL: If the question mentions a person's name (e.g., 'kristi', 'john', 'sarah'), you MUST:\n" +
-        "  1) Call 'who' with that name to find their email addresses (people can have multiple addresses)\n" +
-        "  2) Try filtered searches with 'fromAddress' set to addresses from step 1, using SIMPLE queries like 'person topic' (e.g., 'dan cabo')\n" +
-        "  3) If filtered searches return 0 results, IMMEDIATELY try the SAME query WITHOUT filters\n" +
-        "  4) Also try broader searches: person name + topic (e.g., 'dan cabo'), just topic, person name alone\n" +
-        "  5) DO NOT give up after filtered searches fail - always try unfiltered searches\n" +
+        "- For person + topic questions (e.g. 'what is the situation for Dan and Cabo?'), search with both terms: 'dan cabo' or 'dan cabo' OR 'cabo'. Do not require fromAddress/toAddress — relevant emails may be from other participants.\n" +
         "- Use HIGH limits (50-100+) for broad queries. You have ~80k tokens available for metadata results total.\n" +
         "- If a search returns 0 results, DO NOT stop - try simpler queries with fewer words. Remove action words - just use nouns.\n" +
-        "- IMPORTANT: If a filtered search (with fromAddress/toAddress) returns 0 results, try the same query WITHOUT filters. The person might have used a different email address.\n" +
-        "- If query asks for emails 'from X', try: 1) company name, 2) domain name (X.com), 3) fromAddress filter, 4) remove date filters if you added them.\n" +
-        "- BROWSING RECENT MESSAGES: If the user asks for recent/latest/newest messages without a specific topic (e.g., 'what are my 5 most recent messages?', 'what did I get today?'), call search() with NO query (omit it or leave blank) and use afterDate + limit to browse by date. Example: search({limit: 10}) to get recent messages, or search({afterDate: '1d', limit: 5}) for today's messages. This works because the search tool supports filter-only queries.\n" +
-        "- If the question asks for \"latest\", \"recent\", or \"newest\", prioritize messages by date (newer first).\n" +
+        "- If query asks for emails 'from X', you can use fromAddress when you have an address; try company/domain or broader search if needed.\n" +
+        "- TOPIC-BASED QUESTIONS: If the question asks for emails about a topic (e.g. 'find any emails about invoices', 'emails about receipts', 'who is X', 'meeting with Y'), you MUST call search() WITH a query containing that topic. Use the topic as the query (e.g. query: 'invoice' or 'invoice OR receipt'). Do NOT use filter-only search (no query) for topic-based questions — that returns only recent messages by date and will miss the relevant emails.\n" +
+        "- BROWSING RECENT MESSAGES: Only when the user asks for recent/latest/newest messages WITHOUT a specific topic (e.g., 'what are my 5 most recent messages?', 'what did I get today?'), call search() with NO query and use afterDate + limit to browse by date. Example: search({limit: 10}) or search({afterDate: '1d', limit: 5}) for today. Do not use browse-by-date when the user asked for a topic (invoices, person, company, etc.).\n" +
+        "- If the question asks for \"latest\", \"recent\", or \"newest\" and also a topic, use query with the topic and omit or widen date filters so you don't exclude matches.\n" +
         "- If search results show attachments (e.g., 'attachments: [{\"id\": 107, \"filename\": \"...xlsx\"}]'), note them for context assembly.\n\n" +
         "IMPORTANT:\n" +
         "- For date filters, use 'afterDate' and 'beforeDate' parameters with relative dates (e.g., '7d', '30d', '1w', '3m') or ISO dates (YYYY-MM-DD).\n" +
@@ -268,7 +264,6 @@ export async function runAsk(
         "- IMPORTANT: Do NOT use hardcoded old dates like '2023-02-08' or '2024-01-01'. Always use relative dates (30d, 7d) or dates based on the current year (${currentYear}). If you need to search all emails, omit date filters entirely.\n" +
         "- IMPORTANT: Use the current date provided above to interpret relative dates. 'last month' means the previous calendar month from the current date.\n" +
         "- Use keyword searches in the 'query' field. Do NOT use operators like 'category:' that don't exist.\n" +
-        "- MANDATORY WORKFLOW: After calling 'who' and getting results, your NEXT search call MUST include 'fromAddress' set to one of the email addresses returned by 'who'. Do not search without 'fromAddress' after finding a person.\n" +
         "- Pay attention to search result hints: they tell you if you need more results or different terms.",
     },
     {
@@ -281,12 +276,51 @@ export async function runAsk(
   const candidateMessageIds = new Set<string>();
   const candidateAttachmentIds = new Set<number>();
   
-  // Track who results to enforce fromAddress usage
-  let lastWhoResults: Array<{ primaryAddress: string; addresses: string[] }> | null = null;
-  let whoResultsAttemptCount = 0;
+  // Track search calls for retry fallback (if Phase 1 finds nothing, retry with includeNoise=true)
+  const searchHistory: Array<{ query?: string; args: Record<string, unknown> }> = [];
   
   // Track consecutive failed filtered searches to prompt for broader searches
   let consecutiveFilteredFailures = 0;
+
+  /**
+   * Collect candidate messageIds and attachmentIds from a tool result.
+   * Handles both search results (array) and get_message results (single object).
+   */
+  function collectCandidatesFromResult(result: string): { resultCount: number; newMessages: number } {
+    try {
+      const parsed = JSON.parse(result);
+      let resultCount = 0;
+      const beforeCount = candidateMessageIds.size;
+
+      if (parsed.results && Array.isArray(parsed.results)) {
+        // Search results: array of messages
+        resultCount = parsed.results.length;
+        for (const r of parsed.results) {
+          if (r.messageId) candidateMessageIds.add(r.messageId);
+          if (r.attachments && Array.isArray(r.attachments)) {
+            for (const att of r.attachments) {
+              if (att.id) candidateAttachmentIds.add(att.id);
+            }
+          }
+        }
+      } else if (parsed.messageId) {
+        // get_message result: single message
+        resultCount = 1;
+        candidateMessageIds.add(parsed.messageId);
+        if (parsed.attachments && Array.isArray(parsed.attachments)) {
+          for (const att of parsed.attachments) {
+            if (att.id) candidateAttachmentIds.add(att.id);
+          }
+        }
+      }
+
+      const newMessages = candidateMessageIds.size - beforeCount;
+      return { resultCount, newMessages };
+    } catch {
+      // Ignore parse errors
+      return { resultCount: 0, newMessages: 0 };
+    }
+  }
 
   // Phase 1: Investigation loop
   let investigationAttemptCount = 0;
@@ -309,18 +343,12 @@ export async function runAsk(
 
     if (message.tool_calls && message.tool_calls.length > 0) {
       investigationAttemptCount++;
-      if (lastWhoResults) {
-        whoResultsAttemptCount++;
-      }
-      process.stderr.write(`[phase 1 investigation ${investigationAttemptCount}/${MAX_TRIES}] tool calls: ${message.tool_calls.length}\n`);
+      verboseLog(`[phase 1 investigation ${investigationAttemptCount}/${MAX_TRIES}] tool calls: ${message.tool_calls.length}\n`);
 
       for (const toolCall of message.tool_calls) {
         if (toolCall.type !== "function") continue;
         const toolName = toolCall.function.name;
         let toolArgs = JSON.parse(toolCall.function.arguments || "{}");
-        
-        // Track if we auto-inject fromAddress in this call
-        let autoInjectedFromAddress = false;
         
         // Validate and clean up date filters for search queries
         if (toolName === "search") {
@@ -337,7 +365,7 @@ export async function runAsk(
               const dateYear = parseInt(afterDateStr.substring(0, 4), 10);
               if (dateYear < currentYear - 1 && !queryLower.includes(String(dateYear))) {
                 // Nano generated an old date that wasn't requested - remove it
-                process.stderr.write(`[nano] rejecting old date ${afterDateStr}\n`);
+                verboseLog(`[nano] rejecting old date ${afterDateStr}\n`);
                 delete toolArgs.afterDate;
               }
             }
@@ -345,160 +373,57 @@ export async function runAsk(
           
           // Remove dates if query explicitly asks for "any"/"all"
           if (asksForAll && (toolArgs.afterDate || toolArgs.beforeDate)) {
-            process.stderr.write(`[nano] query asks for "any/all" - removing date filters\n`);
+            verboseLog(`[nano] query asks for "any/all" - removing date filters\n`);
             delete toolArgs.afterDate;
             delete toolArgs.beforeDate;
           }
+          
+          // Track search calls for retry fallback
+          searchHistory.push({
+            query: toolArgs.query,
+            args: { ...toolArgs },
+          });
         }
         
-        // Automatically inject fromAddress and/or toAddress if who was recently called
-        // Treat empty string as missing (nano might try to clear it)
-        const hasFromAddress = toolArgs.fromAddress && String(toolArgs.fromAddress).trim() !== "";
-        const hasToAddress = toolArgs.toAddress && String(toolArgs.toAddress).trim() !== "";
-        if (toolName === "search" && lastWhoResults && lastWhoResults.length > 0 && whoResultsAttemptCount < 3) {
-          // Use ALL addresses from the who result, not just primary
-          const person = lastWhoResults[0];
-          const allAddresses = person.addresses || [person.primaryAddress];
-          
-          // If neither is set, inject addresses with OR logic
-          if (!hasFromAddress && !hasToAddress) {
-            // If multiple addresses, use first as fromAddress and second as toAddress with OR
-            // This will match emails from ANY of the person's addresses
-            toolArgs.fromAddress = allAddresses[0];
-            if (allAddresses.length > 1) {
-              toolArgs.toAddress = allAddresses[1];
-              toolArgs.filterOr = true; // fromAddress OR toAddress
-            } else {
-              toolArgs.toAddress = allAddresses[0];
-              toolArgs.filterOr = true; // fromAddress OR toAddress (same address)
-            }
-            autoInjectedFromAddress = true;
-            process.stderr.write(`[phase 1] auto-injecting addresses: ${allAddresses.join(", ")} (from 'who' result ${whoResultsAttemptCount} attempts ago)\n`);
-          }
-          // If only fromAddress is set, also add toAddress with OR logic
-          else if (hasFromAddress && !hasToAddress) {
-            // If the fromAddress matches one of the person's addresses, add the other(s) as toAddress
-            const matchingAddressIndex = allAddresses.findIndex(addr => addr === toolArgs.fromAddress);
-            if (matchingAddressIndex >= 0 && allAddresses.length > 1) {
-              // Use a different address as toAddress
-              const otherAddress = allAddresses.find(addr => addr !== toolArgs.fromAddress) || allAddresses[0];
-              toolArgs.toAddress = otherAddress;
-              toolArgs.filterOr = true;
-              autoInjectedFromAddress = true;
-              process.stderr.write(`[phase 1] auto-injecting toAddress: ${otherAddress} (OR with existing fromAddress)\n`);
-            }
-          }
-          // If only toAddress is set, also add fromAddress with OR logic
-          else if (!hasFromAddress && hasToAddress) {
-            const matchingAddressIndex = allAddresses.findIndex(addr => addr === toolArgs.toAddress);
-            if (matchingAddressIndex >= 0 && allAddresses.length > 1) {
-              const otherAddress = allAddresses.find(addr => addr !== toolArgs.toAddress) || allAddresses[0];
-              toolArgs.fromAddress = otherAddress;
-              toolArgs.filterOr = true;
-              autoInjectedFromAddress = true;
-              process.stderr.write(`[phase 1] auto-injecting fromAddress: ${otherAddress} (OR with existing toAddress)\n`);
-            }
-          }
-        }
+        const hasFromAddress = toolName === "search" && toolArgs.fromAddress && String(toolArgs.fromAddress).trim() !== "";
+        const hasToAddress = toolName === "search" && toolArgs.toAddress && String(toolArgs.toAddress).trim() !== "";
 
-        process.stderr.write(`[phase 1] calling ${toolName}(${JSON.stringify(toolArgs)})\n`);
+        verboseLog(`[phase 1] calling ${toolName}(${JSON.stringify(toolArgs)})\n`);
 
         // Phase 1: Investigation only
         const result = await executeNanoTool(db, toolName, toolArgs);
         
-        // Collect candidate messageIds and attachmentIds from search results
-        if (toolName === "search") {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed.results && Array.isArray(parsed.results)) {
-              const resultCount = parsed.results.length;
-              const beforeCount = candidateMessageIds.size;
-              for (const r of parsed.results) {
-                if (r.messageId) candidateMessageIds.add(r.messageId);
-                if (r.attachments && Array.isArray(r.attachments)) {
-                  for (const att of r.attachments) {
-                    if (att.id) candidateAttachmentIds.add(att.id);
-                  }
-                }
-              }
-              const newMessages = candidateMessageIds.size - beforeCount;
-              process.stderr.write(`[phase 1] search returned ${resultCount} results (${newMessages} new candidates), total: ${candidateMessageIds.size} messages, ${candidateAttachmentIds.size} attachments\n`);
+        // Collect candidate messageIds and attachmentIds from tool results
+        if (toolName === "search" || toolName === "get_message") {
+          const { resultCount, newMessages } = collectCandidatesFromResult(result);
+          
+          if (toolName === "search") {
+            verboseLog(`[phase 1] search returned ${resultCount} results (${newMessages} new candidates), total: ${candidateMessageIds.size} messages, ${candidateAttachmentIds.size} attachments\n`);
+            
+            // If search with filters returned 0 results, track it
+            if (resultCount === 0 && (hasFromAddress || hasToAddress)) {
+              consecutiveFilteredFailures++;
+              verboseLog(`[phase 1] filtered search returned 0 results (${consecutiveFilteredFailures} consecutive failures) - filtered by ${hasFromAddress ? `fromAddress=${toolArgs.fromAddress}` : ""} ${hasToAddress ? `toAddress=${toolArgs.toAddress}` : ""}\n`);
               
-              // If search with filters returned 0 results, track it
-              if (resultCount === 0 && (hasFromAddress || hasToAddress)) {
-                consecutiveFilteredFailures++;
-                process.stderr.write(`[phase 1] filtered search returned 0 results (${consecutiveFilteredFailures} consecutive failures) - filtered by ${hasFromAddress ? `fromAddress=${toolArgs.fromAddress}` : ""} ${hasToAddress ? `toAddress=${toolArgs.toAddress}` : ""}\n`);
-                
-                // After 2 consecutive filtered failures, prompt to try without filters
-                if (consecutiveFilteredFailures >= 2 && investigationAttemptCount < MAX_TRIES - 1) {
-                  process.stderr.write(`[phase 1] prompting to try searches without filters after ${consecutiveFilteredFailures} filtered failures\n`);
-                  investigationMessages.push({
-                    role: "tool",
-                    tool_call_id: toolCall.id,
-                    content: result,
-                  });
-                  investigationMessages.push({
-                    role: "user",
-                    content: `You've tried ${consecutiveFilteredFailures} filtered searches and got 0 results. IMMEDIATELY try the same queries WITHOUT fromAddress/toAddress filters. For example, if you searched "dan suggest cabo" with filters, try "dan cabo" without any filters. Also try just "cabo" alone.`,
-                  });
-                  consecutiveFilteredFailures = 0; // Reset counter
-                  continue; // Skip adding tool result again below
-                }
-              } else if (resultCount > 0) {
-                // Reset counter on success
-                consecutiveFilteredFailures = 0;
+              // After 2 consecutive filtered failures, prompt to try without filters
+              if (consecutiveFilteredFailures >= 2 && investigationAttemptCount < MAX_TRIES - 1) {
+                verboseLog(`[phase 1] prompting to try searches without filters after ${consecutiveFilteredFailures} filtered failures\n`);
+                investigationMessages.push({
+                  role: "tool",
+                  tool_call_id: toolCall.id,
+                  content: result,
+                });
+                investigationMessages.push({
+                  role: "user",
+                  content: `You've tried ${consecutiveFilteredFailures} filtered searches and got 0 results. IMMEDIATELY try the same queries WITHOUT fromAddress/toAddress filters. For example, if you searched "dan suggest cabo" with filters, try "dan cabo" without any filters. Also try just "cabo" alone.`,
+                });
+                consecutiveFilteredFailures = 0; // Reset counter
+                continue; // Skip adding tool result again below
               }
+            } else if (resultCount > 0) {
+              // Reset counter on success
+              consecutiveFilteredFailures = 0;
             }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-        
-        // Also collect from get_message results
-        if (toolName === "get_message") {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed.messageId) candidateMessageIds.add(parsed.messageId);
-            if (parsed.attachments && Array.isArray(parsed.attachments)) {
-              for (const att of parsed.attachments) {
-                if (att.id) candidateAttachmentIds.add(att.id);
-              }
-            }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-
-        // Track who results for automatic fromAddress injection
-        if (toolName === "who") {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed.people && Array.isArray(parsed.people) && parsed.people.length > 0) {
-              lastWhoResults = parsed.people.map((p: any) => ({
-                primaryAddress: p.primaryAddress,
-                addresses: p.addresses || [p.primaryAddress],
-              }));
-              whoResultsAttemptCount = 0; // Reset counter when who is called
-              process.stderr.write(`[nano] stored ${parsed.people.length} people from 'who' result - will auto-inject fromAddress in next searches\n`);
-            }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-
-        // Clear who results if search with fromAddress/toAddress returned results (successful search)
-        // Don't clear if we auto-injected and got 0 results (might need to try different terms)
-        const hasPersonFilter = hasFromAddress || hasToAddress;
-        if (toolName === "search" && lastWhoResults && hasPersonFilter && !autoInjectedFromAddress) {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed.results && Array.isArray(parsed.results) && parsed.results.length > 0) {
-              process.stderr.write(`[nano] search with fromAddress returned ${parsed.results.length} results - clearing who results cache\n`);
-              lastWhoResults = null;
-              whoResultsAttemptCount = 0;
-            }
-          } catch {
-            // Ignore parse errors
           }
         }
 
@@ -506,9 +431,7 @@ export async function runAsk(
         try {
           const parsed = JSON.parse(result);
           if (parsed.results) {
-            process.stderr.write(`[phase 1] ${toolName} returned ${parsed.results.length} results\n`);
-          } else if (parsed.people) {
-            process.stderr.write(`[phase 1] ${toolName} returned ${parsed.people.length} people\n`);
+            verboseLog(`[phase 1] ${toolName} returned ${parsed.results.length} results\n`);
           }
         } catch {
           // Ignore parse errors
@@ -533,7 +456,7 @@ export async function runAsk(
           .map((p) => p.text)
           .join("\n");
       }
-      process.stderr.write(`[phase 1] final message: ${finalContent.substring(0, 200)}${finalContent.length > 200 ? "..." : ""}\n`);
+      verboseLog(`[phase 1] final message: ${finalContent.substring(0, 200)}${finalContent.length > 200 ? "..." : ""}\n`);
       
       // Check if investigation is complete
       const contentLower = finalContent.toLowerCase();
@@ -542,7 +465,7 @@ export async function runAsk(
           contentLower.includes("ready to assemble") ||
           candidateMessageIds.size > 0) {
         investigationComplete = true;
-        process.stderr.write(`[phase 1] investigation complete. Found ${candidateMessageIds.size} candidate messages, ${candidateAttachmentIds.size} candidate attachments\n`);
+        verboseLog(`[phase 1] investigation complete. Found ${candidateMessageIds.size} candidate messages, ${candidateAttachmentIds.size} candidate attachments\n`);
         break;
       }
       
@@ -550,7 +473,7 @@ export async function runAsk(
       if (candidateMessageIds.size === 0 && investigationAttemptCount < MAX_TRIES - 1) {
         investigationMessages.push(message);
         investigationAttemptCount++;
-        process.stderr.write(`[phase 1] no candidates found yet, prompting to try broader searches (attempt ${investigationAttemptCount}/${MAX_TRIES})\n`);
+        verboseLog(`[phase 1] no candidates found yet, prompting to try broader searches (attempt ${investigationAttemptCount}/${MAX_TRIES})\n`);
         
         // Extract person name and topic from question for more specific guidance
         const questionLower = question.toLowerCase();
@@ -577,9 +500,31 @@ export async function runAsk(
       investigationAttemptCount++;
       if (investigationAttemptCount >= MAX_TRIES) {
         investigationComplete = true;
-        process.stderr.write(`[phase 1] reached max attempts, moving to context assembly with ${candidateMessageIds.size} candidates\n`);
+        verboseLog(`[phase 1] reached max attempts, moving to context assembly with ${candidateMessageIds.size} candidates\n`);
         break;
       }
+    }
+  }
+
+  // ============================================================================
+  // RETRY FALLBACK - If Phase 1 found nothing, retry searches with includeNoise=true
+  // ============================================================================
+  if (candidateMessageIds.size === 0 && searchHistory.length > 0) {
+    verboseLog(`[phase 1 retry] no candidates found, retrying ${searchHistory.length} searches with includeNoise=true\n`);
+    
+    for (const search of searchHistory) {
+      const retryArgs = { ...search.args, includeNoise: true };
+      verboseLog(`[phase 1 retry] retrying search(${JSON.stringify(retryArgs)})\n`);
+      
+      const result = await executeNanoTool(db, "search", retryArgs);
+      const { resultCount, newMessages } = collectCandidatesFromResult(result);
+      verboseLog(`[phase 1 retry] search returned ${resultCount} results (${newMessages} new candidates)\n`);
+    }
+    
+    if (candidateMessageIds.size > 0) {
+      verboseLog(`[phase 1 retry] found ${candidateMessageIds.size} candidates after retry with includeNoise=true\n`);
+    } else {
+      verboseLog(`[phase 1 retry] still no candidates after retry\n`);
     }
   }
 
@@ -589,19 +534,19 @@ export async function runAsk(
   const messageIdsToFetch = Array.from(candidateMessageIds);
   const attachmentIdsToFetch = Array.from(candidateAttachmentIds);
   
-  process.stderr.write(`[context assembly] using ${messageIdsToFetch.length} candidate messages, ${attachmentIdsToFetch.length} candidate attachments\n`);
+  verboseLog(`[context assembly] using ${messageIdsToFetch.length} candidate messages, ${attachmentIdsToFetch.length} candidate attachments\n`);
   
   if (messageIdsToFetch.length === 0) {
-    process.stderr.write(`[context assembly] WARNING: no candidate messages found. This may result in an incomplete answer.\n`);
+    verboseLog(`[context assembly] WARNING: no candidate messages found. This may result in an incomplete answer.\n`);
   }
 
   // Assemble context using the candidates from Phase 1
   const context = await assembleContext(db, messageIdsToFetch, attachmentIdsToFetch, { question });
   const messageCount = messageIdsToFetch.length;
   const attachmentCount = attachmentIdsToFetch.length;
-  process.stderr.write(`[context] assembled ${context.length} chars from ${messageCount} messageIds, ${attachmentCount} attachments\n`);
+  verboseLog(`[context] assembled ${context.length} chars from ${messageCount} messageIds, ${attachmentCount} attachments\n`);
   if (context.length === 0) {
-    process.stderr.write(`[context] WARNING: empty context - no emails fetched\n`);
+    verboseLog(`[context] WARNING: empty context - no emails fetched\n`);
   }
 
   // ============================================================================
@@ -634,6 +579,10 @@ export async function runAsk(
       }
     }
     process.stdout.write("\n");
+    // Print timing to stderr (stream path)
+    const pipelineMs = Date.now() - startTime;
+    verboseLog(`\npipelineMs: ${pipelineMs}\n`);
+    return undefined;
   } else {
     const response = await client.chat.completions.create({
       model: "gpt-4.1-mini",
@@ -641,13 +590,13 @@ export async function runAsk(
       stream: false,
     });
 
-    const answer = response.choices[0]?.message?.content;
+    const answer = response.choices[0]?.message?.content ?? "";
+    // Print timing to stderr
+    const pipelineMs = Date.now() - startTime;
+    verboseLog(`\npipelineMs: ${pipelineMs}\n`);
     if (answer) {
       console.log(answer);
     }
+    return answer;
   }
-
-  // Print timing to stderr
-  const pipelineMs = Date.now() - startTime;
-  process.stderr.write(`\npipelineMs: ${pipelineMs}\n`);
 }

@@ -250,12 +250,12 @@ describe("runAsk", () => {
       const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
       try {
-        await runAsk("test query", db, { stream: false });
+        await runAsk("test query", db, { stream: false, verbose: true });
       } catch (e) {
         // If it fails due to missing mocks, that's ok - we're just testing date rejection logging
       }
 
-      // Should log rejection of old date
+      // Should log rejection of old date (verbose must be true for this to appear)
       const stderrCalls = stderrSpy.mock.calls.map((call: any) => call[0]).join("");
       expect(stderrCalls).toContain("rejecting old date");
 
@@ -618,6 +618,14 @@ describe("runAsk", () => {
 
       stdoutSpy.mockRestore();
       stderrSpy.mockRestore();
+    });
+  });
+
+  describe("retry fallback with includeNoise", () => {
+    it.skip("retries searches with includeNoise=true when Phase 1 finds no candidates", async () => {
+      // TODO: Test retry fallback - requires mocking executeNanoTool to return different results
+      // for first call (0 results) vs retry (with includeNoise=true, finds noise messages)
+      // This is covered by integration tests (eval suite) for now
     });
   });
 

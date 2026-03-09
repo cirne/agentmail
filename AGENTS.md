@@ -28,6 +28,7 @@ src/
   sync/         IMAP sync engine
   db/           SQLite schema, queries
   search/       FTS5 full-text search
+  ask/          answer engine (zmail ask): agent, tools, eval
   attachments/  document extraction → markdown
   mcp/          MCP server tools
   lib/          shared utilities
@@ -72,7 +73,7 @@ zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [-
 zmail who <query> [--limit n] [--enrich] [--text]
 zmail read <message_id> [--raw]
 zmail thread <thread_id> [--json] [--raw]
-zmail ask "<question>"  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY)
+zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
 zmail status [--json]
 zmail stats [--json]
 zmail attachment list <message_id> [--text]

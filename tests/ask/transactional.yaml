@@ -1,0 +1,64 @@
+# Transactional emails — receipts, invoices, confirmations, orders
+# These are realistic transactional emails that should NOT be marked as noise
+# even if they have List-Unsubscribe headers (they're transactional, not promotional)
+
+messages:
+  # --- Receipts (various vendors) ---
+  - subject: "Receipt from Acme Corp"
+    fromAddress: "receipts@stripe.com"
+    bodyText: "Thank you for your payment of $49.99 to Acme Corp. Transaction ID: ch_1234567890"
+    date: "-10d"
+
+  - subject: "Your receipt from Coffee Shop"
+    fromAddress: "noreply@square.com"
+    bodyText: "You paid $12.50 at Coffee Shop on March 1, 2024. Receipt #SQ-987654321"
+    date: "-8d"
+
+  - subject: "Your Amazon.com order #123-4567890-1234567"
+    fromAddress: "auto-confirm@amazon.com"
+    bodyText: "Hello, Your order has been shipped. Order total: $89.99. Expected delivery: March 5, 2024."
+    date: "-15d"
+
+  # --- Invoices (various services) ---
+  - subject: "AWS Invoice - February 2024"
+    fromAddress: "aws-noreply@amazon.com"
+    bodyText: "Your AWS invoice for February 2024 is ready. Total amount: $234.56. Payment due: March 15, 2024."
+    date: "-5d"
+
+  - subject: "GitHub Invoice #INV-2024-001"
+    fromAddress: "billing@github.com"
+    bodyText: "Invoice for GitHub Team plan. Amount: $44.00. Due date: March 10, 2024."
+    date: "-3d"
+
+  # --- Confirmations (bookings, reservations) ---
+  - subject: "Reservation confirmed - Grand Hotel"
+    fromAddress: "reservations@grandhotel.com"
+    bodyText: "Your reservation is confirmed for March 20-22, 2024. Confirmation code: GH-789456. Total: $299.00"
+    date: "-20d"
+
+  - subject: "Reservation confirmed - The Bistro"
+    fromAddress: "noreply@opentable.com"
+    bodyText: "Your table reservation is confirmed for March 12, 2024 at 7:00 PM. Party of 4. Confirmation: OT-123456"
+    date: "-2d"
+
+  # --- Shipping notifications ---
+  - subject: "Your package has shipped"
+    fromAddress: "noreply@ups.com"
+    bodyText: "Tracking number: 1Z999AA10123456784. Estimated delivery: March 8, 2024. Shipped from: Acme Warehouse"
+    date: "-12d"
+
+  - subject: "Shipment notification"
+    fromAddress: "fedex@notifications.fedex.com"
+    bodyText: "Your shipment 123456789012 is on the way. Expected delivery: March 6, 2024 by end of day."
+    date: "-14d"
+
+  # --- Payment confirmations ---
+  - subject: "You sent a payment"
+    fromAddress: "service@paypal.com"
+    bodyText: "You sent $150.00 USD to freelancer@example.com. Transaction ID: 5TY05013RJ002414M"
+    date: "-7d"
+
+  - subject: "You paid Alice $25.00"
+    fromAddress: "venmo@venmo.com"
+    bodyText: "You paid Alice $25.00 for 'Dinner'. Transaction completed."
+    date: "-1d"

@@ -1551,19 +1551,22 @@ async function main() {
     }
 
     case "ask": {
+      const verbose = args.includes("--verbose") || args.includes("-v");
+      const askArgs = args.filter((a) => a !== "--verbose" && a !== "-v");
       // Parse question: handle -- separator
       let question: string;
-      if (args[0] === "--") {
-        question = args.slice(1).join(" ");
+      if (askArgs[0] === "--") {
+        question = askArgs.slice(1).join(" ");
       } else {
-        question = args.join(" ");
+        question = askArgs.join(" ");
       }
 
       if (!question.trim()) {
-        console.error("Usage: zmail ask <question>");
+        console.error("Usage: zmail ask <question> [--verbose]");
         console.error("  Answer a question about your email using an internal agent (requires ZMAIL_OPENAI_API_KEY).");
         console.error("");
         console.error("Example: zmail ask \"summarize my tech news this week\"");
+        console.error("  Use --verbose (or -v) to log pipeline progress (phase 1, context assembly, etc.).");
         process.exit(1);
       }
 
@@ -1582,7 +1585,7 @@ async function main() {
 
       const db = getDb();
       const { runAsk } = await import("~/ask/agent");
-      await runAsk(question, db, { stream: true });
+      await runAsk(question, db, { stream: true, verbose });
       break;
     }
 
