@@ -10,6 +10,7 @@ import { getDb } from "./index";
 import { parseRawMessage } from "~/sync/parse-message";
 import { logger } from "~/lib/logger";
 import { persistMessage, persistAttachmentsFromDisk } from "./message-persistence";
+import { readMessageMeta } from "~/lib/message-meta";
 
 /** Get mailbox name (same logic as sync). */
 function getSyncMailbox(host: string): string {
@@ -80,8 +81,12 @@ export async function reindexFromMaildir(): Promise<{ parsed: number; failed: nu
 
       const relPath = join("cur", filename);
 
+      // Read sidecar metadata (labels, etc.) if available
+      const meta = readMessageMeta(filePath);
+      const labelsJson = meta.labels?.length ? JSON.stringify(meta.labels) : "[]";
+
       // Persist message and thread using shared helper
-      persistMessage(db, parsedMsg, mailbox, uid, "[]", relPath); // Labels not available from EML files alone
+      persistMessage(db, parsedMsg, mailbox, uid, labelsJson, relPath);
 
       // Persist attachments using shared helper
       persistAttachmentsFromDisk(db, parsedMsg.messageId, attachmentsBasePath);

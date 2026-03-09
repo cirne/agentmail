@@ -4,6 +4,7 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { reindexFromMaildir } from "./rebuild";
 import { getDb, closeDb } from "./index";
+import { writeMessageMeta } from "~/lib/message-meta";
 
 describe("reindexFromMaildir", () => {
   let testTempDir: string;
@@ -163,5 +164,64 @@ Invalid message.`
     const result = await reindexFromMaildir();
     expect(result.parsed).toBe(0);
     expect(result.failed).toBe(0);
+  });
+
+  it("reads sidecar labels and classifies noise from Gmail categories", async () => {
+    const maildirCur = join(testTempDir, "data", "maildir", "cur");
+
+    const promoEml = Buffer.from(
+      `Message-ID: <promo@example.com>
+From: deals@store.com
+To: user@example.com
+Subject: Big Sale Today
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+Content-Type: text/plain
+
+50% off everything!`
+    );
+    const promoFile = join(maildirCur, "100_promo@example.com.eml");
+    writeFileSync(promoFile, promoEml);
+    writeMessageMeta(promoFile, { labels: ["\\Inbox", "Promotions"] });
+
+    const normalEml = Buffer.from(
+      `Message-ID: <normal@example.com>
+From: colleague@company.com
+To: user@example.com
+Subject: Meeting Tomorrow
+Date: Mon, 1 Jan 2024 13:00:00 +0000
+Content-Type: text/plain
+
+Let's meet at 2pm.`
+    );
+    const normalFile = join(maildirCur, "200_normal@example.com.eml");
+    writeFileSync(normalFile, normalEml);
+    writeMessageMeta(normalFile, { labels: ["\\Inbox", "\\Important"] });
+
+    const noSidecarEml = Buffer.from(
+      `Message-ID: <nosidecar@example.com>
+From: other@example.com
+To: user@example.com
+Subject: No Sidecar
+Date: Mon, 1 Jan 2024 14:00:00 +0000
+Content-Type: text/plain
+
+No sidecar file for this one.`
+    );
+    writeFileSync(join(maildirCur, "300_nosidecar@example.com.eml"), noSidecarEml);
+
+    const result = await reindexFromMaildir();
+    expect(result.parsed).toBe(3);
+
+    const db = getDb();
+    const promo = db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?").get("<promo@example.com>") as any;
+    expect(promo.is_noise).toBe(1);
+    expect(JSON.parse(promo.labels)).toContain("Promotions");
+
+    const normal = db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?").get("<normal@example.com>") as any;
+    expect(normal.is_noise).toBe(0);
+
+    const noSidecar = db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?").get("<nosidecar@example.com>") as any;
+    expect(noSidecar.is_noise).toBe(0);
+    expect(JSON.parse(noSidecar.labels)).toEqual([]);
   });
 });

@@ -466,9 +466,11 @@ This replaces timestamp-based staleness detection. PID checks are instantaneous 
 
 ### ADR-021: Schema Drift Handling — Auto-Rebuild from Maildir
 
-**Decision:** On CLI startup, the app checks `user_version` against the current schema version. If the DB has an older version, the app automatically rebuilds the index from the local maildir cache: deletes the DB, creates a fresh DB, and re-indexes all `.eml` files from `maildir/cur/`. No manual resync from IMAP is required.
+**Decision:** On CLI startup, the app checks `user_version` against the current schema version. If the DB has an older version, the app automatically rebuilds the index from the local maildir cache: deletes the DB (plus any `-shm`/`-wal` WAL files), creates a fresh DB, and re-indexes all `.eml` files from `maildir/cur/`. No manual resync from IMAP is required.
 
 **Rationale:** This project intentionally avoids in-app migrations for existing DBs. `CREATE TABLE IF NOT EXISTS` keeps fresh bootstraps simple but does not mutate older tables. The raw maildir is the durable artifact (ADR-002); rebuilding from it is faster than re-syncing from IMAP and avoids credential/network dependency during schema upgrades.
+
+**Sidecar metadata:** EML files lack IMAP-only data (e.g. Gmail labels/categories). During sync, a companion `.meta.json` sidecar is written alongside each `.eml` (same basename, e.g. `100_msg.meta.json`) containing a JSON catch-all for non-standard metadata (`{ "labels": [...] }`). Rebuild reads sidecars to restore label-based noise classification and any future metadata. The sidecar format is extensible — add new fields without creating additional files.
 
 **Result:** Fresh environments bootstrap directly from source schema. Stale local DBs trigger an automatic rebuild from maildir (typically under 20s for moderate mailboxes). If maildir is empty or missing, rebuild completes with 0 messages and the user can run `zmail sync` to fetch from IMAP.
 

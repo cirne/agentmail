@@ -40,7 +40,8 @@ Recommendation: start with **filter** (e.g. a search/ask option like "exclude pr
 - **Filter, not ranking.** Predictable and easy to reason about. Ranking can come later if users want promotional results sometimes.
 - **`is_noise` column.** Computed at sync time from headers and labels; stored for fast, zero-cost filtering at query time. Detects promotional, social, forums, bulk, and spam messages (Gmail categories: Promotions, Social, Forums, Spam). Excludes "Updates" category as it contains important transactional emails.
 - **Default-on for both `ask` and `search`.** Noise messages are excluded by default everywhere. Pass `--include-noise` (CLI) or `includeNoise: true` (API/MCP) to opt back in.
-- **Schema bump, not migration.** Bump `SCHEMA_VERSION` to 4; the DB rebuild + resync populates `is_noise` for all messages. No ALTER TABLE, no migration files, consistent with project rules.
+- **Schema bump, not migration.** Bump `SCHEMA_VERSION` (initially 4; bumped to 5 then 6 for rebuild fixes); the DB rebuild + resync populates `is_noise` for all messages. No ALTER TABLE, no migration files, consistent with project rules.
+- **Sidecar metadata for rebuild.** Sync writes a `.meta.json` sidecar alongside each `.eml` in maildir containing Gmail labels and any future non-EML metadata. Rebuild reads sidecars to restore label-based noise classification. Without sidecars (pre-existing EMLs), rebuild falls back to header-only detection.
 
 ### Step 1 — Schema
 

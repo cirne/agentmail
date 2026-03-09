@@ -10,6 +10,7 @@ import { parseSinceToDate } from "./parse-since";
 import { createFileLogger, SYNC_LOG_PATH, setLogger, type FileLogger } from "~/lib/logger";
 import { withTimer } from "~/lib/timer";
 import { persistMessage, persistAttachmentsFromParsed } from "~/db/message-persistence";
+import { writeMessageMeta } from "~/lib/message-meta";
 
 /** Mailbox to sync: All Mail for Gmail (per ADR-011), INBOX for others. */
 function getSyncMailbox(host: string): string {
@@ -653,6 +654,11 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         }
 
         const labelsJson = JSON.stringify(labelsArr);
+
+        // Write sidecar metadata (labels, etc.) alongside EML for rebuild
+        if (labelsArr.length > 0) {
+          writeMessageMeta(absPath, { labels: labelsArr });
+        }
         
         // Persist message and thread using shared helper
         persistMessage(db, parsed, mailbox, uid, labelsJson, relPath);

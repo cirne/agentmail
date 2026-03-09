@@ -85,6 +85,8 @@ export async function ensureSchemaUpToDate(): Promise<void> {
 
   process.stderr.write("Schema updated — rebuilding index from local cache (up to 20s)...\n");
   rmSync(config.dbPath, { force: true });
+  rmSync(`${config.dbPath}-shm`, { force: true });
+  rmSync(`${config.dbPath}-wal`, { force: true });
   getDb(); // creates fresh DB, sets user_version
   
   // Use sync log file for rebuild logging (same as sync command)
