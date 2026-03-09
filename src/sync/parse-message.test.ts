@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import { readFileSync } from "fs";
+import { join } from "path";
 import { parseRawMessage } from "./parse-message";
 
 describe("parseRawMessage", () => {
@@ -222,6 +224,98 @@ Can we meet tomorrow?`
 
       const parsed = await parseRawMessage(raw);
       expect(parsed.isNoise).toBe(false);
+    });
+  });
+
+  describe("attachment filtering", () => {
+    it("preserves attachments with disposition=attachment even when related=true", async () => {
+      // Real EML from bug report where postal-mime sets related: true on PDF attachments
+      const emlPath = join(__dirname, "__fixtures__", "attachment-related-true.eml");
+      const raw = readFileSync(emlPath);
+      const parsed = await parseRawMessage(raw);
+      
+      // Should have 2 PDF attachments (both have disposition: attachment but related: true)
+      expect(parsed.attachments.length).toBe(2);
+      expect(parsed.attachments[0].filename).toContain("Will.pdf");
+      expect(parsed.attachments[1].filename).toContain("ancillaries.pdf");
+      expect(parsed.attachments[0].mimeType).toBe("application/pdf");
+      expect(parsed.attachments[1].mimeType).toBe("application/pdf");
+    });
+
+    it("filters inline attachments (disposition=inline)", async () => {
+      const raw = Buffer.from(
+        `Message-ID: <test@example.com>
+From: sender@example.com
+To: recipient@example.com
+Subject: Test Inline Image
+Content-Type: multipart/related; boundary="boundary"
+
+--boundary
+Content-Type: text/html
+
+<html><body><img src="cid:image"></body></html>
+--boundary
+Content-Type: image/png
+Content-Disposition: inline; filename="image.png"
+
+[image data]
+--boundary--`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.attachments.length).toBe(0);
+    });
+
+    it("preserves normal attachments (disposition=attachment, related=false)", async () => {
+      const raw = Buffer.from(
+        `Message-ID: <test@example.com>
+From: sender@example.com
+To: recipient@example.com
+Subject: Test Attachment
+Content-Type: multipart/mixed; boundary="boundary"
+
+--boundary
+Content-Type: text/plain
+
+Body text.
+--boundary
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="document.pdf"
+
+%PDF-1.4
+test content
+--boundary--`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.attachments.length).toBe(1);
+      expect(parsed.attachments[0].filename).toBe("document.pdf");
+      expect(parsed.attachments[0].mimeType).toBe("application/pdf");
+    });
+
+    it("filters related attachments without explicit disposition=attachment", async () => {
+      const raw = Buffer.from(
+        `Message-ID: <test@example.com>
+From: sender@example.com
+To: recipient@example.com
+Subject: Test Related
+Content-Type: multipart/related; boundary="boundary"
+
+--boundary
+Content-Type: text/html
+
+<html><body><img src="cid:logo"></body></html>
+--boundary
+Content-Type: image/png
+Content-ID: <logo>
+
+[image data]
+--boundary--`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      // Related images without explicit attachment disposition should be filtered
+      expect(parsed.attachments.length).toBe(0);
     });
   });
 });

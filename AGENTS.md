@@ -40,6 +40,23 @@ src/
 - **No migrations.** Schema is applied on DB creation. For schema changes: run manual `ALTER TABLE` / SQL against the live DB to save a resync. Full reset (`rm -rf ~/.zmail/data/` + resync) also works. Do not create or maintain migration files.
 - When testing search, **use the standard search interface** (`search(db, { query })` from `~/search`). Do not query the DB directly unless debugging or explicitly asked.
 
+## Planning and test coverage
+
+**When creating a plan (plan mode), you must articulate the test coverage strategy.** No plan is complete without specifying:
+
+- **What tests must be created** — new test files or test cases needed
+- **What tests must be changed** — existing tests that need updates due to behavior changes
+- **What tests must be passing** — acceptance criteria: which existing and new tests must pass to consider the work done
+
+The test strategy should cover:
+- Unit tests for new/changed functions/modules
+- Integration tests for CLI commands or MCP tools
+- Eval tests (LLM-based) for `zmail ask` functionality when applicable
+- Edge cases and error handling
+- Backward compatibility (if applicable)
+
+A plan without a clear test coverage strategy is incomplete and should not be considered ready for implementation.
+
 ## Processing ztest feedback
 
 The sibling project `../ztest` hosts Claude Code config for manual testing. When agents discover issues, they write feedback files to `../ztest/feedback/`. Process this feedback using the **process-feedback** skill:

@@ -9,7 +9,7 @@ import { config } from "~/lib/config";
 import { getDb } from "./index";
 import { parseRawMessage } from "~/sync/parse-message";
 import { logger } from "~/lib/logger";
-import { persistMessage, persistAttachmentsFromDisk } from "./message-persistence";
+import { persistMessage, persistAttachmentsFromDisk, persistAttachmentsFromParsed } from "./message-persistence";
 import { readMessageMeta } from "~/lib/message-meta";
 
 /** Get mailbox name (same logic as sync). */
@@ -88,8 +88,13 @@ export async function reindexFromMaildir(): Promise<{ parsed: number; failed: nu
       // Persist message and thread using shared helper
       persistMessage(db, parsedMsg, mailbox, uid, labelsJson, relPath);
 
-      // Persist attachments using shared helper
-      persistAttachmentsFromDisk(db, parsedMsg.messageId, attachmentsBasePath);
+      // Persist attachments: prefer parsed attachments (from EML), fallback to disk (if already synced)
+      if (parsedMsg.attachments.length > 0) {
+        persistAttachmentsFromParsed(db, parsedMsg.messageId, parsedMsg.attachments);
+      } else {
+        // Fallback: check if attachments were already written to disk from a previous sync
+        persistAttachmentsFromDisk(db, parsedMsg.messageId, attachmentsBasePath);
+      }
 
       parsed++;
       if (!earliestDate || parsedMsg.date < earliestDate) earliestDate = parsedMsg.date;

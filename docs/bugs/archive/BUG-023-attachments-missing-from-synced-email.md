@@ -1,6 +1,6 @@
 # BUG-023: Attachments Missing from Synced Email — Agent-Reported
 
-**Status:** Open.
+**Status:** Fixed (2026-03-09).
 
 **Design lens:** [Agent-first](../../VISION.md) — attachment extraction is a core workflow (search → find email → read attachments → summarize). When the email body says "attached are the draft documents" but no attachments are available, the agent promises something it can't deliver.
 
@@ -10,9 +10,9 @@
 
 ## Summary
 
-An email whose body explicitly references attachments ("attached are the draft Will, DPOA & MPOA documents for your review") has zero attachments in the database. The raw EML file on disk also has no multipart structure and no `Content-Disposition: attachment` headers — the attachment data was never received via IMAP.
+An email whose body explicitly references attachments ("attached are the draft Will, DPOA & MPOA documents for your review") has zero attachments in the database. The raw EML file **does** contain the attachments (613KB, `multipart/mixed` with 2 PDFs), but they were incorrectly filtered out during parsing.
 
-This means the issue is upstream of zmail's attachment parser: the synced message simply doesn't contain attachment MIME parts.
+**Root cause:** The attachment filter in `parse-message.ts` dropped any attachment with `related: true`, even when `disposition === "attachment"`. postal-mime sets `related: true` on attachments in certain multipart structures (e.g., `multipart/mixed` containing `multipart/alternative`), causing real user-facing attachments to be filtered as if they were embedded HTML images.
 
 ---
 
@@ -24,17 +24,43 @@ This means the issue is upstream of zmail's attachment parser: the synced messag
 
 ---
 
-## Root cause
+## Root cause (corrected)
 
-The synced message is Donna's **forward** of Mike Baldwin's email. The original email from the attorney contained the attachments (Will, DPOA, MPOA documents), but when Donna forwarded it, Gmail created a new message with the quoted text only — the attachment MIME parts weren't carried over into the forward. The raw EML on disk is `text/plain` with no multipart structure.
+The synced message **does** contain the attachments — the EML is 613KB with a proper `multipart/mixed` structure and 2 PDF attachments (`CIRNE L_K - Katelyn's Will.pdf` and `CIRNE L_K - Katelyn's 2026 ancillaries.pdf`). postal-mime correctly parsed them, setting `disposition: "attachment"` and `related: true` (due to the nested `multipart/alternative` structure).
 
-This is not a zmail bug — the attachments genuinely aren't in the forwarded message. They exist on the **original** message (from mbaldwin@jw.com), which may or may not be in the user's mailbox depending on whether they were CC'd or the original was shared separately.
+**The bug:** In [`src/sync/parse-message.ts`](src/sync/parse-message.ts) line 56, the filter was:
 
-**Agent-side gap:** The `ask` pipeline has no way to distinguish "email has no attachments" from "email body references attachments that live on a different message." The body says "attached are the draft documents" but `attachments: []` — the agent tells the user about attachments it can't deliver.
+```typescript
+if (att.disposition === "inline" || att.related) {
+```
+
+This dropped **any** attachment with `related: true`, even when `disposition === "attachment"`. The filter was intended to exclude embedded HTML images (which have `related: true` and no explicit `disposition: "attachment"`), but it was too aggressive.
+
+**Impact:** 14 attachments across 6 messages were incorrectly filtered, including invoices, legal documents, and presentation files. Superhuman (the user's email client) correctly showed these as attachments, but zmail filtered them out.
 
 ---
 
-## Implementation plan
+## Fix
+
+**Fixed in:** Schema version 8 (2026-03-09)
+
+Changed the filter condition from:
+```typescript
+if (att.disposition === "inline" || att.related) {
+```
+
+to:
+```typescript
+if (att.disposition === "inline" || (att.related && att.disposition !== "attachment")) {
+```
+
+This preserves the inline image filter while allowing attachments with explicit `disposition: "attachment"` to pass through, regardless of postal-mime's `related` flag.
+
+**Verification:** After schema bump and rebuild, all 14 previously-dropped attachments are now indexed.
+
+---
+
+## Original implementation plan (superseded)
 
 ### Step 1 — Detect phantom attachments at context assembly time
 

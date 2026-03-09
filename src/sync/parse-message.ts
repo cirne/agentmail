@@ -50,10 +50,13 @@ export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
 
   // Extract attachments, filtering out inline images (disposition: "inline" or related: true)
   // These are embedded in HTML body, not user-facing attachments
+  // Note: postal-mime sets related: true on some attachments in multipart structures, even when
+  // disposition: "attachment". We preserve those attachments (they're real user-facing files).
   const attachments: ParsedAttachment[] = [];
   for (const att of email.attachments ?? []) {
     // Skip inline attachments (embedded images in HTML)
-    if (att.disposition === "inline" || att.related) {
+    // But preserve attachments with explicit disposition: "attachment" even if related: true
+    if (att.disposition === "inline" || (att.related && att.disposition !== "attachment")) {
       continue;
     }
 
