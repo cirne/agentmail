@@ -3,7 +3,7 @@ import { who } from "~/search/who";
 import { runSync } from "~/sync";
 import { getDb } from "~/db";
 import { startMcpServer } from "~/mcp";
-import { config } from "~/lib/config";
+import { config, requireImapConfig } from "~/lib/config";
 import { logger, SYNC_LOG_PATH } from "~/lib/logger";
 import { parseSinceToDate } from "~/sync/parse-since";
 import type { SearchResult, WhoResult } from "~/lib/types";
@@ -14,6 +14,7 @@ import { formatMessageForOutput, formatMessageLlmFriendly } from "~/messages/pre
 import { extractAndCache } from "~/attachments";
 import { getStatus, getImapServerStatus, formatTimeAgo } from "~/lib/status";
 import { spawn } from "child_process";
+import { ImapFlow } from "imapflow";
 import { isProcessAlive } from "~/lib/process-lock";
 
 /**
@@ -793,6 +794,28 @@ async function main() {
         console.log(`Sync already running (PID: ${syncRow.owner_pid})\n`);
         printStatus(db);
         process.exit(0);
+      }
+
+      // Pre-validate IMAP credentials before spawning background process.
+      // Catches auth failures immediately rather than spawning a subprocess that silently crashes.
+      try {
+        const imap = requireImapConfig();
+        const authTestClient = new ImapFlow({
+          host: imap.host,
+          port: imap.port,
+          secure: imap.port === 993,
+          auth: { user: imap.user, pass: imap.password },
+          logger: false,
+          connectionTimeout: 10_000,
+        });
+        await authTestClient.connect();
+        authTestClient.close();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        console.error(`Sync failed: Could not authenticate with IMAP server.`);
+        console.error(`  Error: ${message}`);
+        console.error(`  Check your credentials with 'zmail setup'.`);
+        process.exit(1);
       }
 
       // Detect first-time indexing

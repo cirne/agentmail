@@ -67,13 +67,14 @@ After running `zmail setup --no-validate` with invalid credentials, `zmail sync`
 
 ## Fix
 
-Fixed by:
-1. Explicitly catching and logging IMAP connection errors in `src/sync/index.ts`
-2. Adding `checkSyncLogForErrors()` function to parse sync log for errors
-3. Checking sync log before printing success message in background sync mode
-4. Adding warnings when 0 messages are synced (may indicate auth failure)
+Fixed by pre-validating IMAP credentials in the foreground process before spawning the background sync subprocess. The CLI makes a lightweight IMAP connect/auth/disconnect attempt; if auth fails, it reports the error immediately (exit 1) and never spawns the background process. This eliminates the entire class of "silent background auth failure" regardless of timing, log parsing, or first-time vs. repeat sync.
 
-Test case: `src/cli/sync-auth-failure.test.ts` verifies the fix.
+Additionally:
+1. Explicitly catching and logging IMAP connection errors in `src/sync/index.ts`
+2. `checkSyncLogForErrors()` function as a safety net for non-auth errors in background sync
+3. Warnings when 0 messages are synced (may indicate other issues)
+
+Test case: `src/cli/sync-auth-failure.test.ts` verifies the fix (pre-auth prevents background process from spawning).
 
 ## References
 

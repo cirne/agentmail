@@ -96,6 +96,10 @@ describe("BUG-007: Sync with invalid credentials", () => {
     // BUG-007 fix: Should print error message about authentication failure
     expect(output).toMatch(/sync.*fail|auth.*fail|credential|imap.*fail/i);
 
+    // Pre-auth validation: no background process should be spawned
+    expect(output).not.toContain("Sync running in background");
+    expect(output).not.toMatch(/PID:\s+\d+/);
+
     // BUG-007 fix: Should log error to sync log file
     const logPath = join(testHome, "logs", "sync.log");
     if (existsSync(logPath)) {
