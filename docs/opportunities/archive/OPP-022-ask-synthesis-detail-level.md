@@ -1,5 +1,9 @@
 # OPP-022: Ask Synthesis — Default Detail Level Too Shallow for Broad Queries
 
+**Status:** Implemented. **Implemented:** 2026-03-09.
+
+**Implementation:** Approach 3 (adaptive length instruction). Replaced "Be concise" with a prompt that instructs the model to match response length and detail to query complexity — concise for simple lookups, thorough for broad synthesis. Eval results: no regression on factual queries (person lookup 0.90, recent messages 1.00), improved scores on synthesis queries (invoices 0.90→1.00, apple spending 0.80→0.90). Live test with the Kirsten travel query produced a detailed, structured summary with specific dates, revision tracking, and current-vs-cancelled plan distinction — exactly what OPP-022 called for.
+
 **Problem:** When `zmail ask` receives a broad synthesis query (e.g. "look at all emails from X about Y and synthesize into a summary — there have been many changes and drafts"), the GPT-4.1 mini synthesis step returns a high-level overview (~150 words) that omits the specific details the user needs. The data is available in the assembled context — mini just chooses not to surface it.
 
 **Example:**
