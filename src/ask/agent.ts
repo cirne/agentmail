@@ -18,18 +18,7 @@ function getOpenAIClient(): OpenAI {
 }
 
 /**
- * Context set that nano builds incrementally.
- * Nano adds messages and attachments to this set as it discovers what's needed.
- */
-interface ContextSet {
-  messageIds: Set<string>;
-  attachmentIds: Set<number>; // Specific attachments to include (by attachment ID)
-  done: boolean; // Nano sets this to true when context is complete
-}
-
-/**
- * Parse nano's final message to extract recommended fetch list.
- * Looks for JSON structure with messageIds and/or threadIds.
+ * Determine if attachments should be included based on query analysis.
  */
 
 /**
@@ -192,7 +181,10 @@ async function assembleContext(
 }
 
 /**
- * Run the ask pipeline: Nano → Context assembler → Mini.
+ * Run the ask pipeline: Nano (investigation) → Context assembler → Mini (synthesis).
+ * Phase 1: Nano explores emails using metadata-only tools to find relevant candidates.
+ * Context Assembly: Fetches full email bodies and attachments from candidates.
+ * Phase 2: Mini synthesizes the answer from assembled context.
  */
 export async function runAsk(
   question: string,
@@ -213,10 +205,12 @@ export async function runAsk(
   const lastMonthYear = currentMonth === 1 ? currentYear - 1 : currentYear;
 
   // Import tool definitions
-  const { getInvestigationToolDefinitions, getContextAssemblyToolDefinitions } = await import("./tools");
+  const { getInvestigationToolDefinitions } = await import("./tools");
 
   // ============================================================================
   // PHASE 1: INVESTIGATION - Search and explore to find relevant messages
+  // Nano uses metadata-only tools (search, who, get_message, get_thread_headers)
+  // to discover candidate messages and attachments without fetching full bodies.
   // ============================================================================
   process.stderr.write(`[phase 1] investigation: searching for relevant messages\n`);
   
@@ -233,8 +227,7 @@ export async function runAsk(
         "- Use 'search' and 'who' to discover relevant messages. Search results show metadata (subject, from, date, snippet, attachments) but NOT full body content.\n" +
         "- Use 'get_message' to read full message content when you need to understand what a message says.\n" +
         "- Use 'get_thread_headers' to explore thread structure.\n" +
-        "- DO NOT use 'add_message' or 'add_attachment' in this phase - that comes in phase 2.\n" +
-        "- When you have found the relevant messages and attachments, summarize what you found and say \"investigation complete\" or \"ready for context assembly\".\n\n" +
+        "- When you have found the relevant messages and attachments, summarize what you found and say \"investigation complete\".\n\n" +
         "SEARCH STRATEGY - Construct effective FTS5 queries:\n" +
         "- CRITICAL: FTS5 treats space-separated words as AND (all must match). Use OR operator (uppercase) for alternatives.\n" +
         "- Extract core nouns/concepts from the question. Remove action words (suggest, recommend, said, want, need, did, does, show, find).\n" +
@@ -267,7 +260,7 @@ export async function runAsk(
         "- If query asks for emails 'from X', try: 1) company name, 2) domain name (X.com), 3) fromAddress filter, 4) remove date filters if you added them.\n" +
         "- BROWSING RECENT MESSAGES: If the user asks for recent/latest/newest messages without a specific topic (e.g., 'what are my 5 most recent messages?', 'what did I get today?'), call search() with NO query (omit it or leave blank) and use afterDate + limit to browse by date. Example: search({limit: 10}) to get recent messages, or search({afterDate: '1d', limit: 5}) for today's messages. This works because the search tool supports filter-only queries.\n" +
         "- If the question asks for \"latest\", \"recent\", or \"newest\", prioritize messages by date (newer first).\n" +
-        "- If search results show attachments (e.g., 'attachments: [{\"id\": 107, \"filename\": \"...xlsx\"}]'), note them for phase 2.\n\n" +
+        "- If search results show attachments (e.g., 'attachments: [{\"id\": 107, \"filename\": \"...xlsx\"}]'), note them for context assembly.\n\n" +
         "IMPORTANT:\n" +
         "- For date filters, use 'afterDate' and 'beforeDate' parameters with relative dates (e.g., '7d', '30d', '1w', '3m') or ISO dates (YYYY-MM-DD).\n" +
         "- Only add date filters if the question explicitly mentions a time period (e.g., 'last month', 'this week', 'in February', 'in January'). If no time period is mentioned, search all emails without date filters.\n" +
@@ -410,8 +403,8 @@ export async function runAsk(
 
         process.stderr.write(`[phase 1] calling ${toolName}(${JSON.stringify(toolArgs)})\n`);
 
-        // Phase 1: No context set - investigation only (pass undefined for add_message/add_attachment which shouldn't be called)
-        const result = await executeNanoTool(db, toolName, toolArgs, undefined);
+        // Phase 1: Investigation only
+        const result = await executeNanoTool(db, toolName, toolArgs);
         
         // Collect candidate messageIds and attachmentIds from search results
         if (toolName === "search") {
@@ -591,160 +584,18 @@ export async function runAsk(
   }
 
   // ============================================================================
-  // PHASE 2: CONTEXT ASSEMBLY - Build context set using add_message/add_attachment
+  // CONTEXT ASSEMBLY - Use Phase 1 candidates directly
   // ============================================================================
-  process.stderr.write(`[phase 2] context assembly: building context from ${candidateMessageIds.size} candidates\n`);
+  const messageIdsToFetch = Array.from(candidateMessageIds);
+  const attachmentIdsToFetch = Array.from(candidateAttachmentIds);
   
-  // Initialize context set
-  const contextSet: ContextSet = {
-    messageIds: new Set<string>(),
-    attachmentIds: new Set<number>(),
-    done: false,
-  };
-  
-  // Create context assembly messages with investigation summary
-  const assemblyMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
-    {
-      role: "system",
-      content:
-        `TODAY'S DATE: ${currentDateStr} (${now.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}).\n` +
-        `CURRENT YEAR: ${currentYear}. CURRENT MONTH: ${currentMonth}.\n\n` +
-        "You are a context assembler. Your job is to build the context set by adding relevant messages and attachments.\n\n" +
-        "PHASE 2 - CONTEXT ASSEMBLY ONLY:\n" +
-        "- You have access to candidate messageIds and attachmentIds from the investigation phase.\n" +
-        "- Use 'add_message' to add relevant messages to the context set.\n" +
-        "- Use 'add_attachment' to add specific attachments that contain information needed to answer the question.\n" +
-        "- Review the investigation results and add the messages/attachments that are most relevant.\n" +
-        "- If the question asks for \"latest\", prioritize newer messages.\n" +
-        "- If the question asks about line items, breakdowns, or details, prioritize messages with attachments.\n" +
-        "- When you have added enough messages/attachments, say \"context assembly complete\" or \"done\".\n\n" +
-        `INVESTIGATION SUMMARY:\n` +
-        `- Found ${candidateMessageIds.size} candidate messages\n` +
-        `- Found ${candidateAttachmentIds.size} candidate attachments\n` +
-        `- Question: ${question}\n\n` +
-        `CANDIDATE MESSAGE IDs (from investigation):\n${Array.from(candidateMessageIds).slice(0, 20).map(id => `- ${id}`).join("\n")}${candidateMessageIds.size > 20 ? `\n... and ${candidateMessageIds.size - 20} more` : ""}\n\n` +
-        `CANDIDATE ATTACHMENT IDs (from investigation):\n${Array.from(candidateAttachmentIds).slice(0, 10).map(id => `- ${id}`).join("\n")}${candidateAttachmentIds.size > 10 ? `\n... and ${candidateAttachmentIds.size - 10} more` : ""}\n\n` +
-        "Now add the relevant messages and attachments using 'add_message' and 'add_attachment' with the IDs above.",
-    },
-    {
-      role: "user",
-      content: `Based on the investigation, add the relevant messages and attachments to answer: ${question}`,
-    },
-  ];
-  
-  // Phase 2: Context assembly loop
-  let assemblyAttemptCount = 0;
-  let assemblyComplete = false;
-  
-  while (assemblyAttemptCount < MAX_TRIES && !assemblyComplete && contextSet.messageIds.size === 0) {
-    const response = await client.chat.completions.create({
-      model: "gpt-4.1-nano",
-      messages: assemblyMessages,
-      tools: getContextAssemblyToolDefinitions(),
-      tool_choice: "auto",
-    });
-
-    const message = response.choices[0]?.message;
-    if (!message) {
-      throw new Error("No response from nano");
-    }
-
-    assemblyMessages.push(message);
-
-    if (message.tool_calls && message.tool_calls.length > 0) {
-      assemblyAttemptCount++;
-      process.stderr.write(`[phase 2 assembly ${assemblyAttemptCount}/${MAX_TRIES}] tool calls: ${message.tool_calls.length}\n`);
-
-      for (const toolCall of message.tool_calls) {
-        if (toolCall.type !== "function") continue;
-        const toolName = toolCall.function.name;
-        const toolArgs = JSON.parse(toolCall.function.arguments || "{}");
-
-        process.stderr.write(`[phase 2] calling ${toolName}(${JSON.stringify(toolArgs)})\n`);
-
-        const result = await executeNanoTool(db, toolName, toolArgs, contextSet);
-        
-        // Log when messages/attachments are added or when errors occur
-        if (toolName === "add_message" || toolName === "add_attachment") {
-          try {
-            const parsed = JSON.parse(result);
-            if (parsed.added) {
-              if (toolName === "add_message") {
-                process.stderr.write(`[phase 2] added message ${parsed.messageId} (total: ${parsed.totalMessages})\n`);
-              } else {
-                process.stderr.write(`[phase 2] added attachment ${parsed.attachmentId} (total: ${parsed.totalAttachments})\n`);
-              }
-            } else if (parsed.error) {
-              process.stderr.write(`[phase 2] ${toolName} error: ${parsed.error}\n`);
-            }
-          } catch {
-            // Ignore parse errors
-          }
-        }
-
-        assemblyMessages.push({
-          role: "tool",
-          tool_call_id: toolCall.id,
-          content: result,
-        });
-      }
-
-    } else {
-      // Final message from assembly phase
-      let finalContent = "";
-      const msgContent: string | Array<{ type?: string; text?: string }> | null | undefined = message.content as any;
-      if (typeof msgContent === "string") {
-        finalContent = msgContent;
-      } else if (Array.isArray(msgContent)) {
-        finalContent = msgContent
-          .filter((p): p is { type: "text"; text: string } => p?.type === "text" && typeof p?.text === "string")
-          .map((p) => p.text)
-          .join("\n");
-      }
-      process.stderr.write(`[phase 2] final message: ${finalContent.substring(0, 200)}${finalContent.length > 200 ? "..." : ""}\n`);
-      
-      // Check if assembly is complete
-      const contentLower = finalContent.toLowerCase();
-      if (contentLower.includes("context assembly complete") || 
-          contentLower.includes("done") ||
-          contentLower.includes("complete") ||
-          contextSet.messageIds.size > 0) {
-        assemblyComplete = true;
-        process.stderr.write(`[phase 2] assembly complete. Context set: ${contextSet.messageIds.size} messages, ${contextSet.attachmentIds.size} attachments\n`);
-        break;
-      }
-      
-      // If no messages added yet, prompt again
-      if (contextSet.messageIds.size === 0) {
-        assemblyMessages.push(message);
-        assemblyAttemptCount++;
-        if (assemblyAttemptCount >= MAX_TRIES) {
-          process.stderr.write(`[phase 2] reached max attempts without adding messages\n`);
-          break;
-        }
-        assemblyMessages.push({
-          role: "user",
-          content: `You must add messages using 'add_message'. You have ${candidateMessageIds.size} candidate messageIds from the investigation. Add the relevant ones now.`,
-        });
-        continue;
-      }
-      
-      assemblyComplete = true;
-      break;
-    }
-  }
-
-  // Final context set
-  const messageIdsToFetch = Array.from(contextSet.messageIds);
-  const attachmentIdsToFetch = Array.from(contextSet.attachmentIds);
-  
-  process.stderr.write(`[context set] final: ${messageIdsToFetch.length} messages, ${attachmentIdsToFetch.length} attachments\n`);
+  process.stderr.write(`[context assembly] using ${messageIdsToFetch.length} candidate messages, ${attachmentIdsToFetch.length} candidate attachments\n`);
   
   if (messageIdsToFetch.length === 0) {
-    process.stderr.write(`[context set] WARNING: no messages were added. This may result in an incomplete answer.\n`);
+    process.stderr.write(`[context assembly] WARNING: no candidate messages found. This may result in an incomplete answer.\n`);
   }
 
-  // Step 2: Assemble context using the curated context set
+  // Assemble context using the candidates from Phase 1
   const context = await assembleContext(db, messageIdsToFetch, attachmentIdsToFetch, { question });
   const messageCount = messageIdsToFetch.length;
   const attachmentCount = attachmentIdsToFetch.length;
@@ -753,7 +604,9 @@ export async function runAsk(
     process.stderr.write(`[context] WARNING: empty context - no emails fetched\n`);
   }
 
-  // Step 3: Mini synthesis
+  // ============================================================================
+  // PHASE 2: MINI SYNTHESIS - Generate answer from assembled context
+  // ============================================================================
   const miniMessages: OpenAI.Chat.Completions.ChatCompletionMessageParam[] = [
     {
       role: "system",

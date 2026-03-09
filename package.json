@@ -10,6 +10,7 @@
     "install-cli": "tsx scripts/install-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "eval": "vitest run --config vitest.eval.config.ts",
     "lint": "tsc --noEmit",
     "publish:alpha": "bash scripts/publish.sh latest",
     "publish:beta": "bash scripts/publish.sh beta"

@@ -269,86 +269,13 @@ async function executeGetMessageTool(
 }
 
 /**
- * Execute add_message tool - add a message to the context set.
- * Returns confirmation and message summary.
- */
-function executeAddMessageTool(
-  db: SqliteDatabase,
-  args: Record<string, unknown>,
-  contextSet: { messageIds: Set<string> }
-): string {
-  const messageIdArg = args.messageId as string;
-  
-  // Validate messageId is provided and not empty
-  if (!messageIdArg || typeof messageIdArg !== "string" || messageIdArg.trim() === "") {
-    return JSON.stringify({ error: "messageId is required and cannot be empty", added: false });
-  }
-  
-  const messageId = normalizeMessageId(messageIdArg);
-  
-  // Verify message exists
-  const exists = db.prepare("SELECT 1 FROM messages WHERE message_id = ?").get(messageId);
-  if (!exists) {
-    return JSON.stringify({ error: `Message ${messageId} not found`, added: false });
-  }
-  
-  contextSet.messageIds.add(messageId);
-  
-  // Return summary
-  const msg = db.prepare("SELECT subject, from_address, from_name, date FROM messages WHERE message_id = ?").get(messageId) as any;
-  return JSON.stringify({
-    added: true,
-    messageId,
-    subject: msg.subject,
-    from: msg.from_name ? `${msg.from_name} <${msg.from_address}>` : msg.from_address,
-    date: msg.date,
-    totalMessages: contextSet.messageIds.size,
-  });
-}
-
-/**
- * Execute add_attachment tool - add a specific attachment to the context set.
- * Returns confirmation and attachment metadata.
- */
-async function executeAddAttachmentTool(
-  db: SqliteDatabase,
-  args: Record<string, unknown>,
-  contextSet: { attachmentIds: Set<number> }
-): Promise<string> {
-  const attachmentId = args.attachmentId as number;
-  
-  // Verify attachment exists and get metadata
-  const att = db.prepare(`
-    SELECT id, message_id, filename, mime_type, size, extracted_text 
-    FROM attachments WHERE id = ?
-  `).get(attachmentId) as any | undefined;
-  
-  if (!att) {
-    return JSON.stringify({ error: `Attachment ${attachmentId} not found`, added: false });
-  }
-  
-  contextSet.attachmentIds.add(attachmentId);
-  
-  return JSON.stringify({
-    added: true,
-    attachmentId,
-    filename: att.filename,
-    mimeType: att.mime_type,
-    size: att.size,
-    extracted: att.extracted_text !== null,
-    totalAttachments: contextSet.attachmentIds.size,
-  });
-}
-
-/**
- * Execute a nano tool (metadata-only + context building).
+ * Execute a nano tool (metadata-only investigation).
  * Returns JSON string for the LLM.
  */
 export async function executeNanoTool(
   db: SqliteDatabase,
   name: string,
-  args: Record<string, unknown>,
-  contextSet?: { messageIds: Set<string>; attachmentIds: Set<number> }
+  args: Record<string, unknown>
 ): Promise<string> {
   try {
     switch (name) {
@@ -360,16 +287,6 @@ export async function executeNanoTool(
         return executeGetThreadHeadersTool(db, args);
       case "get_message":
         return await executeGetMessageTool(db, args);
-      case "add_message":
-        if (!contextSet) {
-          return JSON.stringify({ error: "Context set not provided" });
-        }
-        return executeAddMessageTool(db, args, contextSet);
-      case "add_attachment":
-        if (!contextSet) {
-          return JSON.stringify({ error: "Context set not provided" });
-        }
-        return await executeAddAttachmentTool(db, args, contextSet);
       default:
         return JSON.stringify({ error: `Unknown tool: ${name}` });
     }
@@ -519,92 +436,12 @@ export function getInvestigationToolDefinitions() {
         },
       },
     },
-    {
-      type: "function" as const,
-      function: {
-        name: "add_message",
-        description:
-          "Add a message to the context set that will be sent to mini. Use this when you've found a message that's relevant to answering the question. You can add multiple messages. Call this after reviewing search results or reading a message with get_message.",
-        parameters: {
-          type: "object",
-          properties: {
-            messageId: {
-              type: "string",
-              description: "Message ID to add to context",
-            },
-          },
-          required: ["messageId"],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "add_attachment",
-        description:
-          "Add a specific attachment to the context set. Use this when you've identified an attachment (from search results or get_message) that contains information needed to answer the question. Only add attachments that are relevant - don't add all attachments from a message.",
-        parameters: {
-          type: "object",
-          properties: {
-            attachmentId: {
-              type: "number",
-              description: "Attachment ID (from search results or get_message attachments array)",
-            },
-          },
-          required: ["attachmentId"],
-        },
-      },
-    },
   ];
 }
 
 /**
- * Tools for context assembly phase: only add_message and add_attachment
- */
-export function getContextAssemblyToolDefinitions() {
-  return [
-    {
-      type: "function" as const,
-      function: {
-        name: "add_message",
-        description:
-          "Add a message to the context set that will be sent to mini. Use this when you've found a message that's relevant to answering the question. You can add multiple messages. Call this with messageIds from your investigation phase.",
-        parameters: {
-          type: "object",
-          properties: {
-            messageId: {
-              type: "string",
-              description: "Message ID to add to context",
-            },
-          },
-          required: ["messageId"],
-        },
-      },
-    },
-    {
-      type: "function" as const,
-      function: {
-        name: "add_attachment",
-        description:
-          "Add a specific attachment to the context set. Use this when you've identified an attachment (from investigation phase) that contains information needed to answer the question. Only add attachments that are relevant - don't add all attachments from a message.",
-        parameters: {
-          type: "object",
-          properties: {
-            attachmentId: {
-              type: "number",
-              description: "Attachment ID (from investigation phase search results or get_message attachments array)",
-            },
-          },
-          required: ["attachmentId"],
-        },
-      },
-    },
-  ];
-}
-
-/**
- * Legacy function - returns all tools (for backward compatibility during transition)
+ * Get all nano tool definitions (same as investigation tools now that Phase 2 is removed).
  */
 export function getNanoToolDefinitions() {
-  return getInvestigationToolDefinitions().concat(getContextAssemblyToolDefinitions());
+  return getInvestigationToolDefinitions();
 }

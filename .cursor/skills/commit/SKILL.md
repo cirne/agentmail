@@ -1,6 +1,7 @@
 ---
 name: commit
 description: Pre-commit checklist to ensure code quality, test coverage, linting, and documentation accuracy. Use when preparing commits, reviewing changes before commit, or when the user asks about commit requirements or pre-commit checks. When invoked: run the full checklist; if everything is clean, commit and push. Only hold off when there are failures that you are unable to fix — then report them to the user.
+disable-model-invocation: true
 ---
 
 # Commit Checklist
@@ -34,6 +35,21 @@ Before committing any changes, verify all items in this checklist are satisfied.
   - Changed behavior is covered by updated or new tests
   - Edge cases and error paths are tested
   - Use `npm test` to verify tests exist and pass
+  - **MANDATORY: All code changes must have test coverage in the regular test suite**
+
+### 2a. LLM Code Changes (if applicable)
+- [ ] **If changes were made to code that calls LLMs (OpenAI API), verify eval suite coverage**
+  - **Detect LLM code changes:** Check if any files were modified that contain:
+    - `chat.completions.create` calls
+    - `OpenAI` client usage
+    - Files: `src/ask/agent.ts`, `src/search/infer-name-llm.ts`, `src/search/who-dynamic.ts` (enrich functionality)
+  - **Eval suite must pass:** Run `npm run eval` and verify all eval tests pass
+  - **Eval coverage:** Ensure the eval suite (`src/ask/ask.eval.test.ts`) has test cases that cover the changed LLM behavior
+    - If you changed `ask` functionality → verify eval cases test the new behavior
+    - If you changed name inference → verify `infer-name.eval.test.ts` covers the changes
+    - If you changed `who` enrich behavior → verify eval cases test enriched results
+  - **Add eval cases if needed:** If the changes introduce new LLM behavior or change existing behavior, add or update eval test cases in the appropriate `*.eval.test.ts` file
+  - **Regular test coverage still required:** LLM code changes still need unit tests in the regular test suite (e.g., `src/ask/agent.test.ts`)
 
 ### 3. Linting
 - [ ] **Lint must be clean**
@@ -46,6 +62,7 @@ Before committing any changes, verify all items in this checklist are satisfied.
   - Run `npm test` and verify all tests pass
   - No failing tests, no skipped tests (unless intentionally)
   - Test output shows all green checkmarks
+  - **If LLM code changed:** Also run `npm run eval` and verify all eval tests pass
 
 ## Quick Commands
 
@@ -53,11 +70,14 @@ Before committing any changes, verify all items in this checklist are satisfied.
 # Run linting
 npm run lint
 
-# Run tests
+# Run regular test suite
 npm test
 
-# Run both (recommended before commit)
-npm run lint && npm test
+# Run eval suite (if LLM code changed)
+npm run eval
+
+# Run both test suites (recommended before commit)
+npm run lint && npm test && npm run eval
 ```
 
 ## Documentation DRY Principle
@@ -100,6 +120,9 @@ Before committing, confirm:
 - ✅ All checklist items are satisfied
 - ✅ `npm run lint` passes with no errors
 - ✅ `npm test` passes with all tests green
+- ✅ **If LLM code changed:** `npm run eval` passes with all eval tests green
+- ✅ **Test coverage exists** for all code changes in the regular test suite
+- ✅ **If LLM code changed:** Eval suite has coverage for the changes
 - ✅ Documentation is updated, organized, and follows DRY principles
 - ✅ Bug backlog is organized (fixed bugs archived, superseded bugs noted)
 - ✅ Opportunities are organized (implemented opportunities moved to archive)

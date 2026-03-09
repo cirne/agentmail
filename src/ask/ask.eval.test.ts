@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from "vitest";
+import { describe, it, expect, beforeAll } from "vitest";
 import type { SqliteDatabase } from "~/db";
 import { createTestDb, insertTestMessage } from "~/db/test-helpers";
 import { runAsk } from "./agent";
@@ -305,8 +305,15 @@ const EVAL_CASES: EvalCase[] = [
 describe("zmail ask evaluation suite", () => {
   let db: SqliteDatabase;
 
-  beforeEach(() => {
+  // Setup database once for all tests (readonly tests share the same DB)
+  beforeAll(async () => {
     db = createTestDb();
+    // Populate database with all test data upfront
+    for (const testCase of EVAL_CASES) {
+      if (testCase.setup) {
+        await testCase.setup(db);
+      }
+    }
   });
 
   // Skip if OpenAI API key is not configured
@@ -325,17 +332,14 @@ describe("zmail ask evaluation suite", () => {
   }
 
   for (const testCase of EVAL_CASES) {
-    it(
+    it.concurrent(
       `should answer: "${testCase.question}"${testCase.description ? ` (${testCase.description})` : ""}`,
       async () => {
         if (!hasOpenAIKey) {
           return; // Skip if no API key
         }
 
-        // Setup test data
-        if (testCase.setup) {
-          await testCase.setup(db);
-        }
+        // Test data already set up in beforeAll
 
         // Run ask and capture answer
         const { answer, latencyMs } = await runAskAndCapture(testCase.question, db, { stream: false });
@@ -374,19 +378,23 @@ describe("zmail ask evaluation suite", () => {
   }
 
   describe("performance benchmarks", () => {
-    it(
+    beforeAll(async () => {
+      // Setup benchmark test data (readonly, so safe to share)
+      insertTestMessage(db, {
+        messageId: "<simple@example.com>",
+        subject: "Test",
+        bodyText: "Test content",
+      });
+    });
+
+    it.concurrent(
       "should complete simple queries in reasonable time",
       async () => {
         if (!hasOpenAIKey) {
           return;
         }
 
-        insertTestMessage(db, {
-          messageId: "<simple@example.com>",
-          subject: "Test",
-          bodyText: "Test content",
-        });
-
+        // Test data already set up in beforeAll
         const { latencyMs } = await runAskAndCapture("what is this email about?", db, { stream: false });
 
         // Simple queries should complete quickly

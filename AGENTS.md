@@ -62,7 +62,8 @@ npm run refresh      # refresh: fetch new messages (or: npm run zmail -- refresh
 npm run build        # compile to dist/ (tsc + tsc-alias) for npm global install
 npm run install-cli  # install wrapper to ~/.local/bin so `zmail` runs source from any cwd
 npm run lint         # tsc --noEmit (no ESLint)
-npm test             # vitest run
+npm test             # run test suite (excludes eval tests)
+npm run eval         # run eval suite (LLM-based evaluation tests, requires ZMAIL_OPENAI_API_KEY)
 ```
 
 ### CLI Commands
