@@ -154,6 +154,21 @@ async function executeSearchTool(
   const filterOr = (args.filterOr as boolean) ?? false;
   const includeNoise = (args.includeNoise as boolean) ?? false;
 
+  // #region agent log
+  fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+    body: JSON.stringify({
+      sessionId: "7c1ba9",
+      location: "ask/tools.ts:executeSearchTool",
+      message: "search tool args (before search)",
+      data: { query, fromAddress, afterDate, beforeDate, limit },
+      timestamp: Date.now(),
+      hypothesisId: "H1_H2_H3_H5",
+    }),
+  }).catch(() => {});
+  // #endregion
+
   const result = await searchWithMeta(db, {
     query,
     limit,
@@ -168,6 +183,24 @@ async function executeSearchTool(
   });
 
   const metadataResults = toMetadataResults(result.results);
+
+  // #region agent log
+  fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+    body: JSON.stringify({
+      sessionId: "7c1ba9",
+      location: "ask/tools.ts:executeSearchTool",
+      message: "search tool result",
+      data: {
+        totalMatched: result.totalMatched,
+        resultCount: metadataResults.length,
+      },
+      timestamp: Date.now(),
+      hypothesisId: "H1_H3_H4",
+    }),
+  }).catch(() => {});
+  // #endregion
 
   const response: any = {
     results: metadataResults,
@@ -290,7 +323,7 @@ export function getInvestigationToolDefinitions() {
         name: "search",
         description:
           "Search emails by full-text and filters. Returns message list with headers/metadata only (messageId, threadId, from, subject, date, short snippet). No body content.\n\n" +
-          "Noise messages (promotional, social, forums, bulk, spam) are excluded by default (Gmail categories: Promotions, Social, Forums, Spam). Use includeNoise: true to include them.\n\n" +
+          "NO JUNK FIRST: Noise (promotional, social, forums, bulk, spam; Gmail categories Promotions/Social/Forums/Spam) is excluded by default. So you get only non-promotional messages; for vendor/domain queries (e.g. spending, receipts) use fromAddress with the domain to get the exhaustive list of transactional emails from that sender — that list typically fits in the default limit. Use includeNoise: true only to include noise.\n\n" +
           "FTS5 QUERY CONSTRUCTION:\n" +
           "- FTS5 treats space-separated words as AND (all must match). Use OR operator for alternatives.\n" +
           "- Good: 'dan cabo' (2 key terms), 'invoice OR receipt' (alternatives), 'funds request' (2 related terms)\n" +
@@ -317,7 +350,7 @@ export function getInvestigationToolDefinitions() {
             },
             fromAddress: {
               type: "string",
-              description: "Filter by sender email address",
+              description: "Filter by sender email or domain (substring match). E.g. 'apple.com' matches noreply@apple.com, no_reply@email.apple.com. Use for vendor/spending questions to get all non-noise messages from that sender; with noise excluded by default, that set usually fits in the limit.",
             },
             toAddress: {
               type: "string",

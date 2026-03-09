@@ -327,6 +327,22 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
   if (process.env.DEBUG_SEARCH) {
     process.stderr.write(`[search] original query: "${query}" → converted: "${escapedQuery}"\n`);
   }
+  // #region agent log
+  if (/apple/i.test(query)) {
+    fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+      body: JSON.stringify({
+        sessionId: "7c1ba9",
+        location: "search/index.ts:ftsSearch",
+        message: "FTS escaped query (apple-related)",
+        data: { originalQuery: query, escapedQuery },
+        timestamp: Date.now(),
+        hypothesisId: "H1",
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
 
   // Build filter clause with FTS MATCH condition
   const filterClause = buildFilterClause(opts, true, "messages_fts MATCH ?");
@@ -450,6 +466,22 @@ export async function searchWithMeta(
   
   // Update query in opts for search functions
   effectiveOpts.query = parsedQuery;
+
+  // #region agent log
+  const path = !parsedQuery?.trim() ? "filterOnly" : "fts";
+  fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+    body: JSON.stringify({
+      sessionId: "7c1ba9",
+      location: "search/index.ts:searchWithMeta",
+      message: "effective opts and path",
+      data: { effectiveQuery: effectiveOpts.query, fromAddress: effectiveOpts.fromAddress, afterDate: effectiveOpts.afterDate, path },
+      timestamp: Date.now(),
+      hypothesisId: "H1_H2",
+    }),
+  }).catch(() => {});
+  // #endregion
   
   const timings: SearchTimings = {
     totalMs: 0,
@@ -477,6 +509,22 @@ export async function searchWithMeta(
   // FTS search only
   const ftsStart = Date.now();
   const { results, totalCount } = ftsSearch(db, effectiveOpts);
+  // #region agent log
+  if (/apple/i.test(effectiveOpts.query ?? "")) {
+    fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+      body: JSON.stringify({
+        sessionId: "7c1ba9",
+        location: "search/index.ts:searchWithMeta after ftsSearch",
+        message: "FTS result count (apple-related query)",
+        data: { ftsTotalCount: totalCount, ftsResultsLength: results.length },
+        timestamp: Date.now(),
+        hypothesisId: "H1",
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
   timings.ftsMs = Date.now() - ftsStart;
   timings.totalMs = Date.now() - startedAt;
   const resultsWithAttachments = mergeAttachmentMetadata(db, results);

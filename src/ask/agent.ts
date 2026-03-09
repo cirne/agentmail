@@ -224,47 +224,15 @@ export async function runAsk(
         `CURRENT YEAR: ${currentYear}. CURRENT MONTH: ${currentMonth}.\n` +
         `When the user says "last month", that means ${lastMonthYear}-${String(lastMonth).padStart(2, "0")}-01 to ${lastMonthYear}-${String(lastMonth).padStart(2, "0")}-${new Date(lastMonthYear, lastMonth, 0).getDate()} (${new Date(lastMonthYear, lastMonth - 1, 1).toLocaleDateString("en-US", { month: "long", year: "numeric" })}).\n` +
         `IMPORTANT: Always use ${currentYear} as the current year when interpreting dates. Do NOT use 2024 or other years unless explicitly specified by the user.\n\n` +
-        "You are an email investigator. Your job is to search and explore emails to find messages and attachments relevant to answering the user's question.\n\n" +
-        "PHASE 1 - INVESTIGATION ONLY:\n" +
-        "- Use 'search' to discover relevant messages. Search results show metadata (subject, from, date, snippet, attachments) but NOT full body content.\n" +
-        "- Use 'get_message' to read full message content when you need to understand what a message says.\n" +
-        "- Use 'get_thread_headers' to explore thread structure.\n" +
-        "- When you have found the relevant messages and attachments, summarize what you found and say \"investigation complete\".\n\n" +
-        "SEARCH STRATEGY - Construct effective FTS5 queries:\n" +
-        "- CRITICAL: FTS5 treats space-separated words as AND (all must match). Use OR operator (uppercase) for alternatives.\n" +
-        "- Extract core nouns/concepts from the question. Remove action words (suggest, recommend, said, want, need, did, does, show, find).\n" +
-        "- Construct queries intelligently:\n" +
-        "  * Question mentions alternatives → use OR: 'invoice or receipt' → 'invoice OR receipt'\n" +
-        "  * Question has person + topic → try 'dan cabo' OR 'cabo'\n" +
-        "  * Question has multiple related terms → use OR for flexibility: 'funds request' OR 'request funds'\n" +
-        "  * Question asks 'what did X suggest/recommend' → remove action word: 'dan cabo' (not 'dan suggest cabo')\n" +
-        "- Query construction examples:\n" +
-        "  * 'what did dan suggest for cabo?' → 'dan cabo' OR 'cabo'\n" +
-        "  * 'latest invoice or receipt' → 'invoice OR receipt'\n" +
-        "  * 'funds request from rudy' → 'funds request' OR 'rudy funds'\n" +
-        "  * 'flight or travel plans' → 'flight OR travel'\n" +
-        "- Keep queries focused: 2-3 terms maximum, or use OR to combine 2-3 alternatives\n" +
-        "- BAD: 'dan cabo suggestion' (3 words AND - too specific), 'what did dan suggest' (action words)\n" +
-        "- GOOD: 'dan cabo' (2 terms), 'invoice OR receipt' (alternatives), 'funds request' (2 related terms)\n" +
-        "- For company/domain queries: try domain names (e.g., 'apple' → 'apple.com'), email patterns, brand variations.\n" +
-        "- For event/trip queries: try event names, locations, dates, organizers, related terms.\n" +
-        "- For spending/purchase queries: try synonyms ('spending', 'purchases', 'receipts', 'invoices', 'payments'), company domains.\n" +
-        "- For person + topic questions (e.g. 'what is the situation for Dan and Cabo?'), search with both terms: 'dan cabo' or 'dan cabo' OR 'cabo'. Do not require fromAddress/toAddress — relevant emails may be from other participants.\n" +
-        "- Use HIGH limits (50-100+) for broad queries. You have ~80k tokens available for metadata results total.\n" +
-        "- If a search returns 0 results, DO NOT stop - try simpler queries with fewer words. Remove action words - just use nouns.\n" +
-        "- If query asks for emails 'from X', you can use fromAddress when you have an address; try company/domain or broader search if needed.\n" +
-        "- TOPIC-BASED QUESTIONS: If the question asks for emails about a topic (e.g. 'find any emails about invoices', 'emails about receipts', 'who is X', 'meeting with Y'), you MUST call search() WITH a query containing that topic. Use the topic as the query (e.g. query: 'invoice' or 'invoice OR receipt'). Do NOT use filter-only search (no query) for topic-based questions — that returns only recent messages by date and will miss the relevant emails.\n" +
-        "- BROWSING RECENT MESSAGES: Only when the user asks for recent/latest/newest messages WITHOUT a specific topic (e.g., 'what are my 5 most recent messages?', 'what did I get today?'), call search() with NO query and use afterDate + limit to browse by date. Example: search({limit: 10}) or search({afterDate: '1d', limit: 5}) for today. Do not use browse-by-date when the user asked for a topic (invoices, person, company, etc.).\n" +
-        "- If the question asks for \"latest\", \"recent\", or \"newest\" and also a topic, use query with the topic and omit or widen date filters so you don't exclude matches.\n" +
-        "- If search results show attachments (e.g., 'attachments: [{\"id\": 107, \"filename\": \"...xlsx\"}]'), note them for context assembly.\n\n" +
-        "IMPORTANT:\n" +
-        "- For date filters, use 'afterDate' and 'beforeDate' parameters with relative dates (e.g., '7d', '30d', '1w', '3m') or ISO dates (YYYY-MM-DD).\n" +
-        "- Only add date filters if the question explicitly mentions a time period (e.g., 'last month', 'this week', 'in February', 'in January'). If no time period is mentioned, search all emails without date filters.\n" +
-        "- IMPORTANT: Date words like 'tomorrow', 'today', 'yesterday', 'next week', 'this week', 'last week' in the question or query are AUTOMATICALLY extracted and converted to date filters. You don't need to include them in your search query - focus on the content words (e.g., for 'advisory meeting tomorrow', search for 'advisory meeting' and the system will automatically filter by tomorrow's date).\n" +
-        "- IMPORTANT: Do NOT use hardcoded old dates like '2023-02-08' or '2024-01-01'. Always use relative dates (30d, 7d) or dates based on the current year (${currentYear}). If you need to search all emails, omit date filters entirely.\n" +
-        "- IMPORTANT: Use the current date provided above to interpret relative dates. 'last month' means the previous calendar month from the current date.\n" +
-        "- Use keyword searches in the 'query' field. Do NOT use operators like 'category:' that don't exist.\n" +
-        "- Pay attention to search result hints: they tell you if you need more results or different terms.",
+        "You are an email investigator. Search and explore to find messages (and attachments) that answer the user's question. Results are metadata only (subject, from, date, snippet); use get_message to read full bodies. When done, say \"investigation complete\".\n\n" +
+        "HOW TO SEARCH — two patterns:\n\n" +
+        "1) ALL from a sender or domain (spending, receipts, compliance, \"everything from X\"):\n" +
+        "   Call search with the fromAddress PARAMETER set to the domain or address — e.g. fromAddress: \"apple.com\" or fromAddress: \"noreply@apple.com\". Do NOT put fromAddress or the domain in the query string. Optionally add query for topic (e.g. query: \"receipt OR order\") and use afterDate/beforeDate if the question mentions a time range. Promotional mail is excluded by default, so you get the full transactional set; default limit is usually enough.\n\n" +
+        "2) FIND relevant messages about a topic (\"what did Dan suggest\", \"invoices\", \"meeting with Y\"):\n" +
+        "   Call search with the topic in the query parameter. Use 2–3 key terms; use OR (uppercase) for alternatives. FTS treats spaces as AND, so avoid long phrases. Examples: \"dan cabo\" OR \"cabo\"; \"invoice OR receipt\"; \"funds request\". Omit fromAddress unless the user clearly means \"from that sender only\". Use limit 50–100+ for broad topics. If 0 results, try fewer or simpler terms.\n\n" +
+        "When to omit query: Only when the user asks for recent/latest messages with no specific topic (e.g. \"my 5 most recent emails\") — then use afterDate + limit and no query. For any topic (invoices, a person, a company), always include a query.\n\n" +
+        "Dates: Use afterDate/beforeDate only when the question mentions a time period. Use relative values (e.g. 30d, 7d, 1w) or the current year — never hardcoded old years like 2023. Interpret \"last month\" from the current date above.\n\n" +
+        "Pay attention to result hints (e.g. totalMatched, \"most results from X\") and to attachment metadata so context assembly includes the right messages.",
     },
     {
       role: "user",
@@ -466,6 +434,20 @@ export async function runAsk(
           candidateMessageIds.size > 0) {
         investigationComplete = true;
         verboseLog(`[phase 1] investigation complete. Found ${candidateMessageIds.size} candidate messages, ${candidateAttachmentIds.size} candidate attachments\n`);
+        // #region agent log
+        fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+          body: JSON.stringify({
+            sessionId: "7c1ba9",
+            location: "ask/agent.ts:phase1 complete",
+            message: "candidate count after investigation",
+            data: { candidateMessageIds: candidateMessageIds.size, candidateAttachmentIds: candidateAttachmentIds.size },
+            timestamp: Date.now(),
+            hypothesisId: "H3_H4",
+          }),
+        }).catch(() => {});
+        // #endregion
         break;
       }
       
@@ -501,6 +483,20 @@ export async function runAsk(
       if (investigationAttemptCount >= MAX_TRIES) {
         investigationComplete = true;
         verboseLog(`[phase 1] reached max attempts, moving to context assembly with ${candidateMessageIds.size} candidates\n`);
+        // #region agent log
+        fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+          body: JSON.stringify({
+            sessionId: "7c1ba9",
+            location: "ask/agent.ts:phase1 max attempts",
+            message: "candidate count after max attempts",
+            data: { candidateMessageIds: candidateMessageIds.size, candidateAttachmentIds: candidateAttachmentIds.size },
+            timestamp: Date.now(),
+            hypothesisId: "H3_H4",
+          }),
+        }).catch(() => {});
+        // #endregion
         break;
       }
     }
@@ -534,6 +530,20 @@ export async function runAsk(
   const messageIdsToFetch = Array.from(candidateMessageIds);
   const attachmentIdsToFetch = Array.from(candidateAttachmentIds);
   
+  // #region agent log
+  fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+    body: JSON.stringify({
+      sessionId: "7c1ba9",
+      location: "ask/agent.ts:context assembly",
+      message: "messages passed to Mini",
+      data: { messageIdsToFetch: messageIdsToFetch.length, attachmentIdsToFetch: attachmentIdsToFetch.length },
+      timestamp: Date.now(),
+      hypothesisId: "H4",
+    }),
+  }).catch(() => {});
+  // #endregion
   verboseLog(`[context assembly] using ${messageIdsToFetch.length} candidate messages, ${attachmentIdsToFetch.length} candidate attachments\n`);
   
   if (messageIdsToFetch.length === 0) {

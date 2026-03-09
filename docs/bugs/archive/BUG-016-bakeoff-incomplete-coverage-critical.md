@@ -1,8 +1,10 @@
 # BUG-016: Bakeoff Failure — Incomplete Coverage vs Google Adapter — Agent-Reported
 
-**Status:** Open. **Updated:** 2026-03-09 (eval test failure confirms issue persists). **Tags:** semantic, eval
+**Status:** Archived (2026-03-10). Superseded by [BUG-020](../BUG-020-apple-spending-domain-from-routing.md) for the remaining open item (domain→from routing; apple spending eval). Other issues in this doc have been addressed: agent and tool instructions now direct use of the fromAddress parameter for vendor/domain queries; search excludes noise by default; eval case has minScore 0.4 and knownIssue BUG-020. Hybrid/truncation/totalMatched items remain as design context but are no longer tracked here.
 
-**Design lens:** [Agent-first](../../VISION.md) — For transactional queries requiring complete coverage (financial, legal, compliance), zmail must return all matching results. Missing half the data makes it unsuitable for critical workflows, regardless of search speed advantage.
+**Original tags:** semantic, eval
+
+**Design lens:** [Agent-first](../../../VISION.md) — For transactional queries requiring complete coverage (financial, legal, compliance), zmail must return all matching results. Missing half the data makes it unsuitable for critical workflows, regardless of search speed advantage.
 
 **Reported context:**
 - **Initial bakeoff (2026-03-07):** "summarize my spending on apple.com in the last 30 days". zmail found 18 receipts ($808) vs Gmail 36 receipts ($1,762). zmail hit FTS5 crash on "apple.com" query; agent improvised workarounds.
@@ -242,7 +244,7 @@ This ensures a receipt at FTS position 48 and semantic position 62 both make it 
 
 ## References
 
-- Vision (agent-first): [VISION.md](../../VISION.md)
+- Vision (agent-first): [VISION.md](../../../VISION.md)
 - Initial bakeoff: `../ztest/feedback/submitted/bakeoff-results.md`
 - Post-fix retest with new issues: `../ztest/feedback/submitted/bug-search-silent-truncation-and-fts-dot-syntax.md` (lines 86–118)
 - Relevant code: `src/search/index.ts` — `escapeFts5Query`, `ftsSearch`, `vectorSearchFromEmbedding`, `searchWithMeta`

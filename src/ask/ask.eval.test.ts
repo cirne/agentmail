@@ -129,6 +129,8 @@ interface EvalCase {
   };
   maxLatencyMs?: number; // Maximum acceptable latency
   minScore?: number; // Minimum LLM judge score (default: 0.7)
+  /** When set, this case has a known gap; we accept minScore and log it. Enables committing while tracking the issue. */
+  knownIssue?: string;
 }
 
 /**
@@ -157,13 +159,14 @@ const EVAL_CASES: EvalCase[] = [
   },
   {
     question: "summarize my spending on apple.com in the last 30 days",
-    description: "Spending summary with date filter (known gap: BUG-016 — domain/transactional coverage)",
+    description: "Spending summary with date filter (known gap: BUG-020 — domain→from routing)",
     criteria: {
       mustInclude: ["apple"],
       expectedTopics: ["spending", "purchase", "receipt", "total"],
       minLength: 40,
     },
-    minScore: 0.4, // Lower until BUG-016 fixed (domain→from: routing, exhaustive enumeration)
+    minScore: 0.4, // Lower until BUG-020 fixed (backend domain→from routing or agent consistently uses fromAddress)
+    knownIssue: "BUG-020: domain not routed to fromAddress; acceptable to ship with reduced score until fixed.",
     maxLatencyMs: 20000,
   },
   {
@@ -248,6 +251,9 @@ describe("zmail ask evaluation suite", () => {
         console.log(`[Eval] Answer length: ${answer.length} chars`);
         console.log(`[Eval] Latency: ${latencyMs}ms`);
         console.log(`[Eval] LLM Score: ${evaluation.score.toFixed(2)}/1.0`);
+        if (testCase.knownIssue && evaluation.score >= minScore && evaluation.score < 0.7) {
+          console.log(`[Eval] Known issue (accepted): ${testCase.knownIssue}`);
+        }
         console.log(`[Eval] Reasoning: ${evaluation.reasoning}`);
         console.log(`[Eval] Answer: ${answer.substring(0, 200)}${answer.length > 200 ? "..." : ""}`);
 
