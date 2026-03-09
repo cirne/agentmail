@@ -3,7 +3,8 @@ set -euo pipefail
 
 # zmail installer
 # Installs @cirne/zmail from npm
-# Usage: curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
+# Usage: npm install -g @cirne/zmail
+# Or if you have the install script locally: bash install.sh
 
 ZMAIL_PACKAGE="@cirne/zmail"
 

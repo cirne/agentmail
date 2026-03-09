@@ -28,7 +28,7 @@ jobs:
       - name: Run tests
         run: npm test
         env:
-          OPENAI_API_KEY: test-key  # Dummy key for tests that don't actually call OpenAI
+          ZMAIL_OPENAI_API_KEY: test-key  # Dummy key for tests that don't actually call OpenAI
 
       - name: Build TypeScript
         run: npm run build

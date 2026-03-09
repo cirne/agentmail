@@ -185,21 +185,11 @@ describe("search", () => {
     expect(results[0].subject).toBe("Newer");
   });
 
-  it("defaults to hybrid search", async () => {
+  it("uses FTS search", async () => {
     insertTestMessage(db, { subject: "Invoice from Stripe" });
     const run = await searchWithMeta(db, { query: "Invoice" });
-    // Should use hybrid (semantic + FTS) by default
     expect(run.timings.ftsMs).toBeDefined();
     expect(run.results.length).toBeGreaterThanOrEqual(1);
-  });
-
-  it("--fts flag uses FTS-only search", async () => {
-    insertTestMessage(db, { subject: "Invoice from Stripe" });
-    const run = await searchWithMeta(db, { query: "Invoice", fts: true });
-    expect(run.timings.ftsMs).toBeDefined();
-    expect(run.timings.embedMs).toBeUndefined();
-    expect(run.timings.vectorMs).toBeUndefined();
-    expect(run.results.length).toBe(1);
   });
 
   describe("inline query operators", () => {

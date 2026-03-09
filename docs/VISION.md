@@ -18,6 +18,8 @@ Instead of browsing inboxes, agents **query communication graphs**.
 
 **User promise:** zmail lets you **never have to look at your inbox again**. Inbox infinity instead of inbox zero — you stop fighting to empty the inbox because the system is agent-first and **lightning-fast searchable**. Your email becomes an asset again: you actually *want* everything in your email because it’s **actionable** — Zoom meeting notes, travel confirmations, automated invoices, receipts, and more, all **agent-ready** because they live in your mail. Tools like Claude Code or OpenClaw **just work** once zmail is installed: the LLM turns your natural-language prompts into the right zmail queries, fetches the data, and assembles the answer.
 
+**End state:** zmail + agent harness (Claude Code, OpenClaw, etc.) = **never open your inbox or send an email again**. The agent is the interface. You read through it. You write through it.
+
 ---
 
 # “Just works” in the agent (reliably, fast)
@@ -34,6 +36,9 @@ When you’re in Claude Code (or another coding agent) with zmail wired up, thes
 
 - **“When is my flight to Cabo taking off? What’s my confirmation number?”**  
   Agent: search for Cabo/travel/booking emails, find the itinerary or confirmation, return departure time and confirmation number.
+
+- **"RSVP yes to the dinner invite from Sarah."** *(future)*  
+  Agent: find the invite, draft "Yes, I'll be there. Thanks!", confirm with user, send via zmail. No inbox. No compose. Just intent.
 
 In each case: **user asks in plain language → LLM issues zmail search / zmail read (or thread) (and attachment) calls → LLM assembles the answer.** No inbox opening, no manual digging. Reliable and fast.
 
@@ -311,6 +316,26 @@ Examples:
 
 "summarize customer complaints last quarter"
 ```
+
+---
+
+# The Full Loop: Inbox + Outbox
+
+Today zmail is read-only — search, fetch, summarize. The end state is **read + write**: the agent is the complete interface. You never open your inbox. You never open a compose window.
+
+**How it works:** zmail syncs mail (IMAP), indexes it, and exposes search + read to the agent. Add send (SMTP via the user's existing provider) and the loop closes: the agent can draft and send on your behalf. Notification → intent → draft → confirm → send. All through the agent.
+
+**Killer differentiators** (beyond "agent can send"):
+
+1. **Voice profile from history** — zmail has your full sent corpus. It can learn how you write: formal vs casual, length, sign-offs, greetings. And how that *varies by recipient* — first email to a new business contact vs a note to your spouse vs a question for your EA. Drafts sound like you, in the right register for the right person.
+
+2. **Tagline as advertisement** — Every sent email carries a subtle footer: "Sent via zmail." Free distribution. Configurable.
+
+3. **Intent-to-action** — OpenClaw + zmail already surfaces what matters. Add send: user says "rsvp yes" → agent finds the invite, drafts the reply, confirms, sends. No inbox. No compose. Just intent.
+
+**Architecture:** SMTP (send-as-user through Gmail/Outlook/Fastmail) — same credentials, same identity, messages appear in Sent, zero deliverability risk. The provider stays the source of truth; zmail is the intelligence layer in front of it.
+
+**Sequencing:** Send is blocked on customer validation for core search/index/onboarding. We want to nail that first.
 
 ---
 

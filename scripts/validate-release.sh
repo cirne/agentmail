@@ -6,12 +6,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+source "$SCRIPT_DIR/lib/common.sh"
 
 errors=0
 
@@ -19,18 +14,11 @@ check() {
     local description="$1"
     shift
     if "$@" >/dev/null 2>&1; then
-        echo -e "${GREEN}✓${NC} $description"
+        success "$description"
     else
-        echo -e "${RED}✗${NC} $description"
+        error "$description" || true  # Don't exit on check failure
         ((errors++))
     fi
-}
-
-section() {
-    echo ""
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 section "Release Validation Checklist"
@@ -39,7 +27,7 @@ section "Release Validation Checklist"
 section "Install Script"
 check "install.sh syntax valid" bash -n "$REPO_ROOT/install.sh"
 check "install.sh is executable" [ -x "$REPO_ROOT/install.sh" ]
-check "install.sh has correct URL" grep -q "curl.*raw.githubusercontent.com.*install.sh" "$REPO_ROOT/install.sh"
+check "install.sh references npm package" grep -q "@cirne/zmail" "$REPO_ROOT/install.sh"
 
 # Package.json checks
 section "Package Configuration"
@@ -84,9 +72,9 @@ if [ $errors -eq 0 ]; then
     echo ""
     echo "Ready to push. Next steps:"
     echo "1. git push origin main"
-    echo "2. Monitor GitHub Actions: https://github.com/cirne/zmail/actions"
-    echo "3. Check package: https://github.com/cirne/zmail/packages"
-    echo "4. Test install: curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash"
+    echo "2. Monitor GitHub Actions (if repo is public)"
+    echo "3. Check package: https://www.npmjs.com/package/@cirne/zmail"
+    echo "4. Test install: npm install -g @cirne/zmail"
     exit 0
 else
     echo -e "${RED}$errors check(s) failed${NC}"

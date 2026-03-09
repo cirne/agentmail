@@ -7,6 +7,7 @@ import mammoth from "mammoth";
 import ExcelJS from "exceljs";
 import TurndownService from "turndown";
 import { getDb } from "~/db";
+import { config } from "~/lib/config";
 
 export interface ExtractedDocument {
   text: string;
@@ -54,6 +55,40 @@ class DocxExtractor implements DocumentExtractor {
   }
 }
 
+/** Recursively reduce a cell value to a primitive or Date for CSV output. Handles formula objects, rich text, and nested shapes. */
+function cellValueToPrimitive(value: unknown, cell: { text?: string }): unknown {
+  if (value === null || value === undefined) return value;
+  if (value instanceof Date) return value;
+  if (typeof value !== "object") return value;
+
+  const o = value as Record<string, unknown>;
+  // Prefer formatted display: w, then result, then value, then v
+  const next =
+    o.w !== null && o.w !== undefined && o.w !== ""
+      ? o.w
+      : o.result !== null && o.result !== undefined
+        ? o.result
+        : o.value !== null && o.value !== undefined
+          ? o.value
+          : o.v !== null && o.v !== undefined
+            ? o.v
+            : undefined;
+  if (next !== undefined) {
+    const resolved = cellValueToPrimitive(next, cell);
+    if (resolved !== null && resolved !== undefined && typeof resolved !== "object") return resolved;
+    if (resolved instanceof Date) return resolved;
+  }
+  // Rich text: array of runs with .text
+  if (Array.isArray(o.richText) && o.richText.length > 0) {
+    const parts = (o.richText as Array<{ text?: string }>).map((r) => r.text ?? "").filter(Boolean);
+    if (parts.length > 0) return parts.join("");
+  }
+  if (typeof o.text === "string" && o.text !== "") return o.text;
+  if (typeof o.error === "string") return o.error;
+  // Ultimate fallback: ExcelJS display string for this cell
+  return cell.text ?? "";
+}
+
 // XLSX/XLS extractor (to CSV)
 class XlsxExtractor implements DocumentExtractor {
   canHandle(mimeType: string, filename: string): boolean {
@@ -73,19 +108,42 @@ class XlsxExtractor implements DocumentExtractor {
     for (const worksheet of workbook.worksheets) {
       const rows: string[] = [];
       worksheet.eachRow((row) => {
-        const values = row.values as (string | number | boolean | Date | null | undefined)[];
-        // row.values is 1-indexed, skip index 0
-        const cells = values.slice(1).map((v) => {
-          if (v === null || v === undefined) return "";
-          if (v instanceof Date) return v.toISOString().split("T")[0];
-          const str = String(v);
+        // Use eachCell to access cells directly, which properly handles formula cells
+        // Build an array of cell values, handling empty cells to maintain column alignment
+        const maxCol = row.cellCount;
+        const cellValues: string[] = [];
+        
+        // Process each cell in the row
+        row.eachCell({ includeEmpty: false }, (cell, colNumber) => {
+          // Get the cell value - for formulas, ExcelJS may return an object (e.g. {formula, result} or {v, w})
+          let value: unknown = cell.value;
+          value = cellValueToPrimitive(value, cell as { text?: string });
+          // Convert to string representation
+          let str: string;
+          if (value === null || value === undefined) {
+            str = "";
+          } else if (value instanceof Date) {
+            str = value.toISOString().split("T")[0];
+          } else {
+            str = String(value);
+          }
+          
           // Quote fields containing commas, quotes, or newlines
           if (str.includes(",") || str.includes('"') || str.includes("\n")) {
-            return `"${str.replace(/"/g, '""')}"`;
+            str = `"${str.replace(/"/g, '""')}"`;
           }
-          return str;
+          
+          // Store at correct column position (colNumber is 1-indexed)
+          cellValues[colNumber - 1] = str;
         });
-        rows.push(cells.join(","));
+        
+        // Build the row string, filling empty cells with empty strings
+        const rowCells: string[] = [];
+        for (let i = 0; i < maxCol; i++) {
+          rowCells.push(cellValues[i] || "");
+        }
+        
+        rows.push(rowCells.join(","));
       });
 
       if (workbook.worksheets.length > 1) {
@@ -191,23 +249,30 @@ function getOutputExtension(mimeType: string, filename: string): string {
 /**
  * Extracts text from an attachment.
  * Returns the extracted text. Does NOT cache to sibling files yet (pending accuracy validation).
+ * @param skipCache If true, clear cached extracted_text and re-extract from the raw file.
  */
 export async function extractAndCache(
   rawPath: string, // absolute path to raw file
   mimeType: string,
   filename: string,
-  attachmentId: number
+  attachmentId: number,
+  skipCache = false
 ): Promise<{ text: string; convertedPath: string }> {
   const outputExt = getOutputExtension(mimeType, filename);
   const convertedPath = rawPath + outputExt; // For reference only, not written yet
 
-  // Check DB cache first
   const db = getDb();
-  const existing = db.prepare("SELECT extracted_text FROM attachments WHERE id = ?").get(attachmentId) as
-    | { extracted_text: string | null }
-    | undefined;
-  if (existing && existing.extracted_text) {
-    return { text: existing.extracted_text, convertedPath };
+  const useCache = config.attachments.cacheExtractedText && !skipCache;
+  if (skipCache) {
+    db.prepare("UPDATE attachments SET extracted_text = NULL WHERE id = ?").run(attachmentId);
+  } else if (useCache) {
+    // Use cached extracted text only when config enables it
+    const existing = db.prepare("SELECT extracted_text FROM attachments WHERE id = ?").get(attachmentId) as
+      | { extracted_text: string | null }
+      | undefined;
+    if (existing && existing.extracted_text) {
+      return { text: existing.extracted_text, convertedPath };
+    }
   }
 
   // Find appropriate extractor

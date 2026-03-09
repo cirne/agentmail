@@ -1,6 +1,6 @@
 {
   "name": "@cirne/zmail",
-  "version": "0.1.0-alpha.20260306.160433",
+  "version": "0.1.0-alpha.20260307.194325",
   "description": "Agent-first email system — sync, index, and search email for AI agents",
   "scripts": {
     "dev": "tsx src/index.ts",
@@ -10,6 +10,7 @@
     "install-cli": "tsx scripts/install-cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "eval": "vitest run --config vitest.eval.config.ts",
     "lint": "tsc --noEmit",
     "publish:alpha": "bash scripts/publish.sh latest",
     "publish:beta": "bash scripts/publish.sh beta"
@@ -23,11 +24,14 @@
   },
   "dependencies": {
     "@cedrugs/pdf-parse": "^1.0.0",
-    "@lancedb/lancedb": "latest",
+    "@inquirer/prompts": "^8.3.0",
     "@modelcontextprotocol/sdk": "latest",
     "better-sqlite3": "^12.6.2",
+    "double-metaphone": "^0.1.4",
     "exceljs": "^4.4.0",
+    "fastest-levenshtein": "^1.0.16",
     "imapflow": "latest",
+    "libphonenumber-js": "^1.11.0",
     "mailparser": "^3.9.3",
     "mammoth": "^1.11.0",
     "openai": "latest",
@@ -44,6 +48,7 @@
     "tsc-alias": "^1.8.10",
     "tsx": "^4.19.2",
     "typescript": "latest",
-    "vitest": "^3.2.4"
+    "vitest": "^3.2.4",
+    "yaml": "^2.8.2"
   }
 }

@@ -16,24 +16,13 @@ function streamToText(stream: NodeJS.ReadableStream | null): Promise<string> {
 
 describe("setup", () => {
   const originalZmailHome = process.env.ZMAIL_HOME;
-  const originalStdinIsTTY = process.stdin.isTTY;
   const testHome = join(tmpdir(), "zmail-setup-test-" + Date.now());
   
   beforeEach(() => {
     process.env.ZMAIL_HOME = testHome;
     mkdirSync(testHome, { recursive: true });
-    // Make stdin appear interactive for tests
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: true,
-      writable: true,
-      configurable: true,
-    });
-    // Clear any CI/agent env vars
-    delete process.env.CI;
-    delete process.env.GITHUB_ACTIONS;
-    delete process.env.CURSOR_AGENT;
   });
-  
+
   afterEach(() => {
     if (existsSync(testHome)) {
       rmSync(testHome, { recursive: true, force: true });
@@ -43,56 +32,164 @@ describe("setup", () => {
     } else {
       delete process.env.ZMAIL_HOME;
     }
-    Object.defineProperty(process.stdin, "isTTY", {
-      value: originalStdinIsTTY,
-      writable: true,
-      configurable: true,
-    });
   });
 
-  describe("non-interactive detection", () => {
-    it("detects non-interactive when stdin.isTTY is false", async () => {
-      Object.defineProperty(process.stdin, "isTTY", {
-        value: false,
-        writable: true,
-        configurable: true,
-      });
-      
-      // runSetup will exit(1) in non-interactive mode, so we test via spawn
+  describe("setup without credentials", () => {
+    it("shows help and mentions wizard", async () => {
       const proc = spawn("npx", ["tsx", join(import.meta.dirname, "..", "index.ts"), "setup"], {
         cwd: join(import.meta.dirname, "..", ".."),
         env: { ...process.env, ZMAIL_HOME: testHome },
         stdio: ["pipe", "pipe", "pipe"],
       });
-      
+
       const [stdout, stderr, exitCode] = await Promise.all([
         streamToText(proc.stdout),
         streamToText(proc.stderr),
         new Promise<number | null>((resolve) => proc.on("close", resolve)),
       ]);
-      
+
       expect(exitCode).toBe(1);
       const output = stdout + stderr;
-      expect(output).toContain("zmail setup requires an interactive terminal");
-      expect(output).toContain("Example config.json");
+      expect(output).toContain("zmail setup — CLI/agent-first");
+      expect(output).toContain("--email");
+      expect(output).toContain("--password");
+      expect(output).toContain("--openai-key");
+      expect(output).toContain("zmail wizard");
+    });
+  });
+
+  describe("agent-friendly non-interactive setup", () => {
+    it("succeeds with all flags and --no-validate", async () => {
+      const proc = spawn(
+        "npx",
+        [
+          "tsx",
+          join(import.meta.dirname, "..", "index.ts"),
+          "setup",
+          "--email",
+          "agent@gmail.com",
+          "--password",
+          "test-app-password",
+          "--openai-key",
+          "sk-test-key",
+          "--no-validate",
+        ],
+        {
+          cwd: join(import.meta.dirname, "..", ".."),
+          env: { ...process.env, ZMAIL_HOME: testHome },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+
+      proc.stdin?.end();
+
+      const [stdout, stderr, exitCode] = await Promise.all([
+        streamToText(proc.stdout),
+        streamToText(proc.stderr),
+        new Promise<number | null>((resolve) => proc.on("close", resolve)),
+      ]);
+
+      expect(exitCode).toBe(0);
+      const output = stdout + stderr;
+      expect(output).toContain("Config saved to");
+
+      const config = JSON.parse(readFileSync(join(testHome, "config.json"), "utf8"));
+      expect(config.imap.user).toBe("agent@gmail.com");
+      expect(config.imap.host).toBe("imap.gmail.com");
+      expect(config.imap.port).toBe(993);
+
+      const envContent = readFileSync(join(testHome, ".env"), "utf8");
+      expect(envContent).toContain("ZMAIL_IMAP_PASSWORD=test-app-password");
+      expect(envContent).toContain("ZMAIL_OPENAI_API_KEY=sk-test-key");
     });
 
-    it("detects non-interactive when CI env var is set", async () => {
-      const proc = spawn("npx", ["tsx", join(import.meta.dirname, "..", "index.ts"), "setup"], {
-        cwd: join(import.meta.dirname, "..", ".."),
-        env: { ...process.env, ZMAIL_HOME: testHome, CI: "true" },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      
+    it("succeeds with environment variables and --no-validate", async () => {
+      const proc = spawn(
+        "npx",
+        ["tsx", join(import.meta.dirname, "..", "index.ts"), "setup", "--no-validate"],
+        {
+          cwd: join(import.meta.dirname, "..", ".."),
+          env: {
+            ...process.env,
+            ZMAIL_HOME: testHome,
+            ZMAIL_EMAIL: "envuser@gmail.com",
+            ZMAIL_IMAP_PASSWORD: "env-password",
+            ZMAIL_OPENAI_API_KEY: "sk-env-key",
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+
+      proc.stdin?.end();
+
+      const exitCode = await new Promise<number | null>((resolve) => proc.on("close", resolve));
+      expect(exitCode).toBe(0);
+
+      const config = JSON.parse(readFileSync(join(testHome, "config.json"), "utf8"));
+      expect(config.imap.user).toBe("envuser@gmail.com");
+
+      const envContent = readFileSync(join(testHome, ".env"), "utf8");
+      expect(envContent).toContain("ZMAIL_IMAP_PASSWORD=env-password");
+      expect(envContent).toContain("ZMAIL_OPENAI_API_KEY=sk-env-key");
+    });
+
+    it("succeeds with OPENAI_API_KEY fallback when ZMAIL_OPENAI_API_KEY not set", async () => {
+      const proc = spawn(
+        "npx",
+        ["tsx", join(import.meta.dirname, "..", "index.ts"), "setup", "--no-validate"],
+        {
+          cwd: join(import.meta.dirname, "..", ".."),
+          env: {
+            ...process.env,
+            ZMAIL_HOME: testHome,
+            ZMAIL_EMAIL: "openai-fallback@gmail.com",
+            ZMAIL_IMAP_PASSWORD: "test-password",
+            OPENAI_API_KEY: "sk-openai-fallback-key",
+          },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+
+      proc.stdin?.end();
+
+      const exitCode = await new Promise<number | null>((resolve) => proc.on("close", resolve));
+      expect(exitCode).toBe(0);
+
+      const envContent = readFileSync(join(testHome, ".env"), "utf8");
+      expect(envContent).toContain("ZMAIL_OPENAI_API_KEY=sk-openai-fallback-key");
+    });
+
+    it("exits with error when some credentials missing in non-interactive mode", async () => {
+      const proc = spawn(
+        "npx",
+        [
+          "tsx",
+          join(import.meta.dirname, "..", "index.ts"),
+          "setup",
+          "--email",
+          "partial@gmail.com",
+          "--no-validate",
+        ],
+        {
+          cwd: join(import.meta.dirname, "..", ".."),
+          env: { ...process.env, ZMAIL_HOME: testHome },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+
+      proc.stdin?.end();
+
       const [stdout, stderr, exitCode] = await Promise.all([
         streamToText(proc.stdout),
         streamToText(proc.stderr),
         new Promise<number | null>((resolve) => proc.on("close", resolve)),
       ]);
-      
+
       expect(exitCode).toBe(1);
       const output = stdout + stderr;
-      expect(output).toContain("zmail setup requires an interactive terminal");
+      expect(output).toContain("missing required values");
+      expect(output).toContain("--password or ZMAIL_IMAP_PASSWORD");
+      expect(output).toContain("--openai-key or ZMAIL_OPENAI_API_KEY");
     });
   });
 
@@ -316,41 +413,46 @@ ZMAIL_OPENAI_API_KEY=sk-testkey
   });
 
   describe("integration", () => {
-    it("setup with --no-validate flag is accepted", async () => {
-      // This test verifies that --no-validate flag is accepted
-      // Full interactive test would require mocking readline which is complex
+    it("setup with --no-validate only (no credentials) shows help", async () => {
       const proc = spawn("npx", ["tsx", join(import.meta.dirname, "..", "index.ts"), "setup", "--no-validate"], {
         cwd: join(import.meta.dirname, "..", ".."),
         env: { ...process.env, ZMAIL_HOME: testHome },
         stdio: ["pipe", "pipe", "pipe"],
       });
-      
-      // Send EOF to stdin immediately (non-interactive)
+
       proc.stdin?.end();
-      
       const exitCode = await new Promise<number | null>((resolve) => proc.on("close", resolve));
-      
-      // Should exit with non-interactive message or wait for input
-      // Exit code 1 = non-interactive detected, 0 = completed (unlikely without input)
-      expect([0, 1]).toContain(exitCode);
+      expect(exitCode).toBe(1);
     });
 
-    it("setup with --clean --yes flags are accepted", async () => {
-      // Create some existing files
+    it("setup with --clean --yes and full credentials succeeds", async () => {
       writeFileSync(join(testHome, "config.json"), JSON.stringify({ test: true }));
-      
-      const proc = spawn("npx", ["tsx", join(import.meta.dirname, "..", "index.ts"), "setup", "--clean", "--yes", "--no-validate"], {
-        cwd: join(import.meta.dirname, "..", ".."),
-        env: { ...process.env, ZMAIL_HOME: testHome },
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      
+      const proc = spawn(
+        "npx",
+        [
+          "tsx",
+          join(import.meta.dirname, "..", "index.ts"),
+          "setup",
+          "--clean",
+          "--yes",
+          "--no-validate",
+          "--email",
+          "clean@gmail.com",
+          "--password",
+          "pass",
+          "--openai-key",
+          "sk-key",
+        ],
+        {
+          cwd: join(import.meta.dirname, "..", ".."),
+          env: { ...process.env, ZMAIL_HOME: testHome },
+          stdio: ["pipe", "pipe", "pipe"],
+        },
+      );
+
       proc.stdin?.end();
-      
       const exitCode = await new Promise<number | null>((resolve) => proc.on("close", resolve));
-      
-      // Should exit (either non-interactive or completed)
-      expect([0, 1]).toContain(exitCode);
+      expect(exitCode).toBe(0);
     });
   });
 });

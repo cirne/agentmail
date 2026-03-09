@@ -3,11 +3,44 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { z } from "zod";
 import { join } from "path";
 import { getDb } from "~/db";
-import { search } from "~/search";
+import { searchWithMeta } from "~/search";
 import { who } from "~/search/who";
 import { logger } from "~/lib/logger";
 import { extractAndCache } from "~/attachments";
 import { config } from "~/lib/config";
+import { getStatus, formatTimeAgo } from "~/lib/status";
+import {
+  DEFAULT_BODY_CAP,
+  DEFAULT_MAX_BODY_CHARS,
+  shapeShapedToOutput,
+  type ShapedMessageLike,
+} from "~/messages/lean-shape";
+
+/**
+ * Param keys for search_mail tool. Used by CLI/MCP sync test; keep in sync with the tool schema and SearchOptions.
+ */
+export const MCP_SEARCH_MAIL_PARAM_KEYS: readonly string[] = [
+  "query",
+  "limit",
+  "offset",
+  "fromAddress",
+  "afterDate",
+  "beforeDate",
+  "includeThreads",
+  "includeNoise",
+];
+
+/**
+ * Param keys for who tool. Used by CLI/MCP sync test; keep in sync with the tool schema and WhoOptions.
+ */
+export const MCP_WHO_PARAM_KEYS: readonly string[] = [
+  "query",
+  "limit",
+  "minSent",
+  "minReceived",
+  "includeNoreply",
+  "enrich",
+];
 
 /**
  * Normalizes a message/thread ID to ensure it's wrapped in angle brackets.
@@ -23,7 +56,7 @@ export function normalizeMessageId(id: string): string {
  * Creates an MCP server exposing zmail's email search and retrieval capabilities.
  * 
  * The server runs in stdio-only mode (no HTTP, no ports) and provides tools for:
- * - Searching emails with hybrid FTS5 + semantic search
+ * - Searching emails with FTS5 full-text search
  * - Retrieving individual messages and threads
  * - Finding people by email/name
  * - Getting sync/indexing status and statistics
@@ -42,30 +75,35 @@ export function createMcpServer() {
 
   server.tool(
     "search_mail",
-    "Search emails using hybrid search (semantic + FTS5 full-text) by default. Returns matching messages with snippets. Supports inline query operators: from:, to:, subject:, after:, before:. Use fts=true for FTS-only (exact keyword matching). Example: 'invoice from:alice@example.com after:30d'",
+    "Search emails using FTS5 full-text search. Returns matching messages with bodyPreview, attachment metadata, and optional full threads. Use includeThreads: true to get full conversations per match and avoid get_thread round-trips.",
     {
       query: z.string().optional().describe("Full-text search query. Supports inline operators: from:, to:, subject:, after:, before:. Example: 'invoice from:alice@example.com after:30d'"),
-      limit: z.number().optional().describe("Maximum number of results to return (default: 20)"),
+      limit: z.number().optional().describe("Maximum number of results to return (default: 50)"),
       offset: z.number().optional().describe("Pagination offset for skipping results (default: 0)"),
       fromAddress: z.string().optional().describe("Filter by sender email address (alternative to 'from:' in query)"),
       afterDate: z.string().optional().describe("Filter messages after this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
       beforeDate: z.string().optional().describe("Filter messages before this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
-      fts: z.boolean().optional().describe("If true, use FTS-only search (exact keyword matching). Default is false (hybrid search: semantic + FTS)"),
+      includeThreads: z.boolean().optional().describe("When true, also return full threads (all messages per matching thread) to avoid get_thread calls (default: false)"),
+      includeNoise: z.boolean().optional().describe("When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false."),
     },
-    async ({ query, limit, offset, fromAddress, afterDate, beforeDate, fts }) => {
+    async ({ query, limit, offset, fromAddress, afterDate, beforeDate, includeThreads, includeNoise }) => {
       const db = getDb();
-      const results = await search(db, {
+      const result = await searchWithMeta(db, {
         query,
         limit,
         offset,
         fromAddress,
         afterDate,
         beforeDate,
-        fts,
+        includeThreads: includeThreads ?? false,
+        includeNoise: includeNoise ?? false,
       });
 
+      const payload = result.threads?.length
+        ? { results: result.results, threads: result.threads, totalMatched: result.totalMatched, timings: result.timings }
+        : result.results;
       return {
-        content: [{ type: "text", text: JSON.stringify(results, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
       };
     }
   );
@@ -78,12 +116,13 @@ export function createMcpServer() {
     },
     async ({ messageId }) => {
       const db = getDb();
+      const normalizedId = normalizeMessageId(messageId);
       const attachments = db
         .prepare(
           `SELECT id, filename, mime_type, size, stored_path, extracted_text
            FROM attachments WHERE message_id = ? ORDER BY filename`
         )
-        .all(messageId) as Array<{
+        .all(normalizedId) as Array<{
         id: number;
         filename: string;
         mime_type: string;
@@ -175,20 +214,22 @@ export function createMcpServer() {
 
   server.tool(
     "get_message",
-    "Retrieve a single message by message ID. Returns message content in LLM-friendly formatted text (headers, body, attachments list). Use raw=true to get the original EML format instead.",
+    "Retrieve a single message by message ID. Returns the same JSON shape as one element of get_messages (same params: detail, maxBodyChars). Use detail: 'summary' for minimal payload, detail: 'full' (default) for body up to maxBodyChars, or raw=true / detail: 'raw' for EML. For reading multiple messages, use get_messages instead to batch-read in a single call.",
     {
       messageId: z.string().describe("Message ID (from search_mail results) to retrieve"),
-      raw: z.boolean().optional().describe("If true, return raw EML format instead of parsed/formatted content (default: false)"),
+      raw: z.boolean().optional().describe("If true, return raw EML (same as detail: 'raw'). Prefer detail: 'raw' instead."),
+      detail: z.enum(["full", "summary", "raw"]).optional().describe("'summary' = minimal + 200-char snippet; 'full' = body up to maxBodyChars (default); 'raw' = EML. Same as get_messages."),
+      maxBodyChars: z.number().optional().describe("When detail is 'full': max body chars (default 2000). Same as get_messages. Ignored for 'summary' or 'raw'."),
     },
-    async ({ messageId, raw = false }) => {
+    async ({ messageId, raw = false, detail, maxBodyChars = DEFAULT_MAX_BODY_CHARS }) => {
       const db = getDb();
-      const { formatMessageForOutput } = await import("~/cli");
-      const { formatMessageLlmFriendly } = await import("~/cli/format-message");
-      
+      const { formatMessageForOutput } = await import("~/messages/presenter");
+
+      const normalizedId = normalizeMessageId(messageId);
       const message = db
         .prepare("SELECT * FROM messages WHERE message_id = ?")
-        .get(messageId) as any | undefined;
-      
+        .get(normalizedId) as any | undefined;
+
       if (!message) {
         return {
           content: [
@@ -199,17 +240,53 @@ export function createMcpServer() {
           ],
         };
       }
-      
-      const shaped = await formatMessageForOutput(message, raw);
-      const formatted = formatMessageLlmFriendly(message, shaped);
-      
+
+      const useRaw = raw || detail === "raw";
+      const shaped = await formatMessageForOutput(message, useRaw);
+      const out = shapeShapedToOutput([shaped], { useRaw, detail, maxBodyChars });
       return {
-        content: [
-          {
-            type: "text",
-            text: formatted,
-          },
-        ],
+        content: [{ type: "text", text: JSON.stringify(out[0], null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "get_messages",
+    "Batch-read multiple emails in one call (max 20). Token efficiency: use detail: 'summary' when scanning many messages (returns subject, from, to, date, 200-char snippet only — ~80% fewer tokens). Use detail: 'full' (default) when you need full bodies; set maxBodyChars (default 2000) to 300-500 for quick confirmation or 4000+ for full reads. Use detail: 'raw' for original EML.",
+    {
+      messageIds: z.array(z.string()).describe("Array of message IDs (from search_mail results) to retrieve"),
+      detail: z.enum(["full", "summary", "raw"]).optional().describe("'summary' = minimal payload for scanning (subject, from, to, date, 200-char snippet); 'full' = full body up to maxBodyChars (default); 'raw' = EML. Prefer 'summary' when you need to scan 5+ messages with minimal tokens."),
+      raw: z.boolean().optional().describe("If true, return raw EML (same as detail: 'raw'). Prefer detail: 'raw' instead."),
+      maxBodyChars: z.number().optional().describe("When detail is 'full': max body chars per message (default 2000). Use 300-500 for quick confirmation; 4000+ for full email. Ignored when detail is 'summary' or 'raw'."),
+    },
+    async ({ messageIds, detail, raw = false, maxBodyChars = DEFAULT_MAX_BODY_CHARS }) => {
+      const db = getDb();
+      const { formatMessageForOutput } = await import("~/messages/presenter");
+      const useRaw = raw || detail === "raw";
+
+      const cappedIds = messageIds.slice(0, 20);
+      const normalizedIds = cappedIds.map((id) => normalizeMessageId(id));
+
+      const placeholders = normalizedIds.map(() => "?").join(",");
+      const messages = db
+        .prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
+        .all(...normalizedIds) as any[];
+
+      if (messages.length === 0) {
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({ error: "No messages found", requested: messageIds.length, found: 0 }, null, 2),
+            },
+          ],
+        };
+      }
+
+      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, useRaw)));
+      const out = shapeShapedToOutput(shaped, { useRaw, detail, maxBodyChars });
+      return {
+        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
       };
     }
   );
@@ -223,7 +300,7 @@ export function createMcpServer() {
     },
     async ({ threadId, raw = false }) => {
       const db = getDb();
-      const { formatMessageForOutput } = await import("~/cli");
+      const { formatMessageForOutput } = await import("~/messages/presenter");
       
       const normalizedThreadId = normalizeMessageId(threadId);
       const messages = db
@@ -242,36 +319,41 @@ export function createMcpServer() {
       }
       
       const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, raw)));
-      
+
+      if (raw) {
+        return {
+          content: [{ type: "text", text: JSON.stringify(shaped, null, 2) }],
+        };
+      }
+      const out = shapeShapedToOutput(shaped as (ShapedMessageLike | Record<string, unknown>)[], { useRaw: false, detail: "full", maxBodyChars: DEFAULT_BODY_CAP });
       return {
-        content: [
-          {
-            type: "text",
-            text: JSON.stringify(shaped, null, 2),
-          },
-        ],
+        content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
       };
     }
   );
 
   server.tool(
     "who",
-    "Find people by email address or display name. Returns matching identities with sent/received/mentioned counts. Useful for 'who is X?' queries.",
+    "Find people by email address or display name. Returns merged identities with contact info, sent/received/mentioned counts. Useful for 'who is X?' queries.",
     {
       query: z.string().describe("Search query to match against email addresses or display names"),
       limit: z.number().optional().describe("Maximum number of results to return (default: 50)"),
       minSent: z.number().optional().describe("Minimum sent count filter (default: 0)"),
       minReceived: z.number().optional().describe("Minimum received count filter (default: 0)"),
+      includeNoreply: z.boolean().optional().describe("Include noreply/bot addresses (default: false)"),
+      enrich: z.boolean().optional().describe("Use LLM (GPT-4.1 nano) to guess names from email addresses for better accuracy. Requires ZMAIL_OPENAI_API_KEY to be set. Adds ~1-2s latency (default: false)"),
     },
-    async ({ query, limit, minSent, minReceived }) => {
+    async ({ query, limit, minSent, minReceived, includeNoreply, enrich }) => {
       const db = getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
-      const result = who(db, {
+      const result = await who(db, {
         query,
         limit,
         minSent,
         minReceived,
+        includeNoreply,
         ownerAddress,
+        enrich,
       });
 
       return {
@@ -287,97 +369,24 @@ export function createMcpServer() {
 
   server.tool(
     "get_status",
-    "Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS/semantic counts), and date range of synced messages.",
+    "Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS count), date range of synced messages, and freshness (time since latest mail and last sync, human + ISO 8601 duration).",
     {},
     async () => {
-      const db = getDb();
-      const syncStatus = db.prepare("SELECT * FROM sync_summary WHERE id = 1").get() as {
-        earliest_synced_date: string | null;
-        latest_synced_date: string | null;
-        total_messages: number;
-        last_sync_at: string | null;
-        is_running: number;
-      } | undefined;
-      
-      const indexStatus = db.prepare("SELECT * FROM indexing_status WHERE id = 1").get() as {
-        is_running: number;
-        total_to_index: number;
-        indexed_so_far: number;
-        started_at: string | null;
-        completed_at: string | null;
-      } | undefined;
-
-      // Get live counts from messages table
-      const totalIndexed = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'done'").get() as { count: number };
-      const totalFailed = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'failed'").get() as { count: number };
-      const pendingCount = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'pending'").get() as { count: number };
-      const messagesCount = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
-      
-      const dateRange = db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages").get() as {
-        earliest: string | null;
-        latest: string | null;
+      const status = getStatus();
+      const latestMailAgo = formatTimeAgo(status.dateRange?.latest ?? null);
+      const lastSyncAgo = status.sync.isRunning ? null : formatTimeAgo(status.sync.lastSyncAt);
+      const output = {
+        ...status,
+        freshness: {
+          latestMailAgo: latestMailAgo ?? null,
+          lastSyncAgo: lastSyncAgo ?? null,
+        },
       };
-
-      const sync = syncStatus
-        ? {
-            isRunning: syncStatus.is_running === 1,
-            lastSyncAt: syncStatus.last_sync_at,
-            totalMessages: syncStatus.total_messages,
-            earliestSyncedDate: syncStatus.earliest_synced_date,
-            latestSyncedDate: syncStatus.latest_synced_date,
-          }
-        : {
-            isRunning: false,
-            lastSyncAt: null,
-            totalMessages: 0,
-            earliestSyncedDate: null,
-            latestSyncedDate: null,
-          };
-
-      const indexing = indexStatus
-        ? {
-            isRunning: indexStatus.is_running === 1,
-            totalToIndex: indexStatus.total_to_index,
-            indexedSoFar: indexStatus.indexed_so_far,
-            startedAt: indexStatus.started_at,
-            completedAt: indexStatus.completed_at,
-            totalIndexed: totalIndexed.count,
-            totalFailed: totalFailed.count,
-            pending: pendingCount.count,
-          }
-        : {
-            isRunning: false,
-            totalToIndex: 0,
-            indexedSoFar: 0,
-            startedAt: null,
-            completedAt: null,
-            totalIndexed: 0,
-            totalFailed: 0,
-            pending: 0,
-          };
-
-      const search = {
-        ftsReady: messagesCount.count,
-        semanticReady: totalIndexed.count,
-      };
-
-      const result = {
-        sync,
-        indexing,
-        search,
-        dateRange: dateRange?.earliest && dateRange?.latest
-          ? {
-              earliest: dateRange.earliest,
-              latest: dateRange.latest,
-            }
-          : null,
-      };
-
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify(result, null, 2),
+            text: JSON.stringify(output, null, 2),
           },
         ],
       };

@@ -1,15 +1,10 @@
 # zmail — Agent Guide
 
-**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/OPP-007-packaging-npm-homebrew.md)).
+**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). Read-only today; send is in the vision ([VISION.md](docs/VISION.md)) but blocked on customer validation for core search/index/onboarding — we want to nail that first.
 
 **Quick install:**
 ```bash
 npm install -g @cirne/zmail
-```
-
-Or use the install script (checks Node.js version and PATH):
-```bash
-curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 ```
 
 ## Key documents
@@ -23,7 +18,7 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 
 ## Tech stack
 
-Node.js 20+, TypeScript, SQLite (`better-sqlite3`), FTS5, LanceDB, imapflow. Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
+Node.js 20+, TypeScript, SQLite (`better-sqlite3`), FTS5, imapflow. Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
 
 ## Project structure
 
@@ -32,7 +27,8 @@ src/
   cli/          entrypoint and subcommands
   sync/         IMAP sync engine
   db/           SQLite schema, queries
-  search/       FTS5 and semantic search
+  search/       FTS5 full-text search
+  ask/          answer engine (zmail ask): agent, tools, eval
   attachments/  document extraction → markdown
   mcp/          MCP server tools
   lib/          shared utilities
@@ -67,8 +63,25 @@ npm run refresh      # refresh: fetch new messages (or: npm run zmail -- refresh
 npm run build        # compile to dist/ (tsc + tsc-alias) for npm global install
 npm run install-cli  # install wrapper to ~/.local/bin so `zmail` runs source from any cwd
 npm run lint         # tsc --noEmit (no ESLint)
-npm test             # vitest run
+npm test             # run test suite (excludes eval tests)
+npm run eval         # run eval suite (LLM-based evaluation tests, requires ZMAIL_OPENAI_API_KEY)
 ```
+
+### CLI Commands
+
+zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--text]
+zmail who <query> [--limit n] [--enrich] [--text]
+zmail read <message_id> [--raw]
+zmail thread <thread_id> [--json] [--raw]
+zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
+zmail status [--json]
+zmail stats [--json]
+zmail attachment list <message_id> [--text]
+zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]
+zmail mcp  # Start MCP server (stdio)
+```
+
+See [`docs/ASK.md`](docs/ASK.md) for details on using `zmail ask` as a higher-level query interface.
 
 ### Sync logging and background execution
 
@@ -95,13 +108,26 @@ The CLI prints the log file path to stdout (e.g., `Sync log: ~/.zmail/logs/sync-
 
 ```bash
 zmail attachment list <message_id>       # list attachments for a message (JSON)
-zmail attachment read <attachment_id>     # extract attachment as markdown/CSV (stdout)
-zmail attachment read <attachment_id> --raw  # output raw binary (pipe to file)
+zmail attachment read <message_id> <index>|<filename>   # extract as markdown/CSV (stdout); index 1-based or exact filename
+zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]   # --raw: binary; --no-cache: re-extract
 ```
 
 Supported formats: PDF, DOCX, XLSX, HTML, CSV, TXT. Extraction happens on first read and is cached in the DB.
 
-**CLI help and onboarding (no env required):** `zmail --help`, `zmail -h`, `zmail help` show usage; `zmail setup` runs interactive setup. If any command fails due to missing config, the CLI prints "No config found. Run 'zmail setup' first."
+**CLI help and onboarding (no env required):** `zmail --help`, `zmail -h`, `zmail help` show usage. If any command fails due to missing config, the CLI prints "No config found. Run 'zmail setup' or 'zmail wizard' first."
+
+**Setup (CLI/agent-first):** Provide credentials via flags or env vars. For interactive prompts, use `zmail wizard`.
+
+**Required credentials:**
+1. Email address (e.g., `user@gmail.com`) — provided via `--email` flag or `ZMAIL_EMAIL` environment variable
+2. IMAP app password (Gmail app password) — provided via `--password` flag or `ZMAIL_IMAP_PASSWORD` environment variable
+3. OpenAI API key (optional, for future features) — provided via `--openai-key` flag or `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) environment variable
+
+```bash
+zmail setup --email user@gmail.com --password "app-password" --openai-key "sk-..." [--no-validate]
+# Or via environment variables:
+ZMAIL_EMAIL=user@gmail.com ZMAIL_IMAP_PASSWORD="app-password" ZMAIL_OPENAI_API_KEY="sk-..." zmail setup
+```
 
 ## Agent interfaces: CLI vs MCP
 
@@ -110,8 +136,9 @@ zmail provides two interfaces for agents, both accessing the same SQLite index:
 **CLI (command-line):**
 - Use for direct subprocess calls from agents
 - Fast for one-off queries (no persistent connection overhead)
-- Returns structured JSON with `--json` flag
-- Best for: one-time searches, status checks, simple workflows
+- Commands default to JSON (search, who, attachment list) or text (read, thread, status, stats). Use `--text` or `--json` flags to override.
+- **`zmail ask "<question>"`** — Higher-level answer engine for natural language queries. Handles orchestration internally (Nano → Context assembler → Mini pipeline). See [`docs/ASK.md`](docs/ASK.md) for when to use `ask` vs primitive tools.
+- Best for: one-time searches, status checks, simple workflows, natural language Q&A
 
 **MCP (Model Context Protocol):**
 - Use for persistent tool-based integration
@@ -119,11 +146,11 @@ zmail provides two interfaces for agents, both accessing the same SQLite index:
 - Better for iterative workflows with multiple tool calls
 - Best for: agents with MCP support, complex multi-step queries, tool-based integrations
 
-See [`docs/MCP.md`](docs/MCP.md) for MCP server documentation and tool reference.
+See [`docs/MCP.md`](docs/MCP.md) for MCP server documentation and tool reference. See [`docs/ASK.md`](docs/ASK.md) for using `zmail ask` as a higher-level query interface.
 
 ## Search
 
-Search uses hybrid (semantic + FTS) by default for comprehensive results. Use `--fts` for exact keyword matching only.
+Search uses FTS5 full-text search for keyword matching.
 
 Search results include attachment metadata (count and file types) in JSON output, and visual indicators (📎) in formatted table output. For document-related queries (contract, invoice, receipt, etc.), hints suggest checking attachments with `zmail attachment list <message_id>`.
 
@@ -131,21 +158,26 @@ Search results include attachment metadata (count and file types) in JSON output
 
 zmail stores configuration in `~/.zmail/` (or `$ZMAIL_HOME` if set):
 
-- `~/.zmail/config.json` — non-secret settings (IMAP host/port/user, sync settings)
+- `~/.zmail/config.json` — non-secret settings (IMAP host/port/user, sync settings, optional `attachments.cacheExtractedText`)
 - `~/.zmail/.env` — secrets (ZMAIL_IMAP_PASSWORD, ZMAIL_OPENAI_API_KEY)
 
-Run `zmail setup` to interactively create these files. The setup command:
+Attachment extracted-text cache is **off by default** (each read re-extracts). To use cached extraction on repeat reads, set `"attachments": { "cacheExtractedText": true }` in config.json.
 
+Run `zmail setup` (with flags/env) or `zmail wizard` (interactive) to create these files:
+
+- **`zmail setup`** — CLI/agent-first. Provide `--email`, `--password`, `--openai-key` or env vars. No prompts.
+- **`zmail wizard`** — Interactive. Prompts for email, IMAP password, OpenAI API key, and sync settings.
 - Creates `~/.zmail/` if it doesn't exist
-- Prompts for email, IMAP password, OpenAI API key, and sync settings
 - Validates credentials (IMAP connection test, OpenAI API test) unless `--no-validate` is used
-- On re-run, shows existing values as defaults
 
 Optional environment variables:
 
 - `ZMAIL_HOME` — override config directory (default: `~/.zmail`)
 
-Required environment variables:
+Required environment variables (for `zmail setup`):
 
-- `ZMAIL_IMAP_PASSWORD` — IMAP password
-- `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) — OpenAI API key
+- `ZMAIL_EMAIL` — Email address (e.g., `user@gmail.com`)
+- `ZMAIL_IMAP_PASSWORD` — IMAP app password (Gmail app password, not regular password)
+- `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) — OpenAI API key (optional, for future features)
+
+**Note:** The correct environment variable names are `ZMAIL_EMAIL` and `ZMAIL_IMAP_PASSWORD`. Do not use `IMAP_USER` or `IMAP_PASSWORD` — these are outdated and not supported.

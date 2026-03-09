@@ -11,7 +11,7 @@ The MCP server provides programmatic access to zmail's search, message retrieval
 - **Transport:** stdio (stdin/stdout) — no network, no ports, no auth required for local use
 - **Protocol:** MCP (Model Context Protocol) via `@modelcontextprotocol/sdk`
 - **Data source:** Same SQLite database (`~/.zmail/data/zmail.db`) as CLI commands
-- **Index:** FTS5 (full-text) + LanceDB (semantic) hybrid search
+- **Index:** FTS5 full-text search
 
 ## Starting the Server
 
@@ -30,18 +30,19 @@ The server runs on stdio and communicates via JSON-RPC over stdin/stdout. It wil
 
 ### `search_mail`
 
-Search emails using hybrid search (semantic + FTS5) by default. Returns matching messages with snippets. Use `fts=true` for FTS-only (exact keyword matching).
+Search emails using FTS5 full-text search. Returns matching messages with **bodyPreview** (first ~300 chars of body) and **attachment metadata** inline so agents can avoid follow-up `get_message` / `list_attachments` calls. Use `includeThreads: true` to return full conversations per match and avoid `get_thread` round-trips.
 
 **Parameters:**
 - `query` (string, optional): Full-text search query. Supports inline operators: `from:`, `to:`, `subject:`, `after:`, `before:`
-- `limit` (number, optional): Maximum number of results (default: 20)
+- `limit` (number, optional): Maximum number of results (default: 50)
 - `offset` (number, optional): Pagination offset (default: 0)
 - `fromAddress` (string, optional): Filter by sender email address
 - `afterDate` (string, optional): Filter messages after this date (ISO 8601 or relative like "7d", "30d")
 - `beforeDate` (string, optional): Filter messages before this date
-- `fts` (boolean, optional): If true, use FTS-only search (exact keyword matching). Default is false (hybrid search)
+- `includeThreads` (boolean, optional): When true, also return full threads (all messages per matching thread) as a `threads` array (default: false)
+- `includeNoise` (boolean, optional): When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false — noise messages are excluded by default.
 
-**Returns:** JSON array of message objects with `message_id`, `from`, `to`, `subject`, `date`, `snippet`, etc.
+**Returns:** JSON array of message objects with `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, index }` when present). When `includeThreads: true`, response is an object `{ results, threads, totalMatched?, timings? }` with `threads` being an array of `{ threadId, subject, messages }` (each message has `messageId`, `fromAddress`, `fromName`, `subject`, `date`, `bodyPreview`).
 
 **Note:** CLI search results include attachment metadata (`attachments` count and `attachmentTypes` array). MCP `search_mail` currently returns basic message fields; use `list_attachments` tool to check for attachments.
 
@@ -55,31 +56,81 @@ Search emails using hybrid search (semantic + FTS5) by default. Returns matching
 
 ### `get_message`
 
-Retrieve a single message by message ID. Returns message content in LLM-friendly format.
+Retrieve a single message by message ID. **Returns the same JSON shape as one element of `get_messages`** — same parameters (`detail`, `maxBodyChars`) and same body/truncation logic. Use for one-off reads; use `get_messages` to batch-read multiple. Message IDs can be passed with or without angle brackets; the server normalizes them.
 
 **Parameters:**
 - `messageId` (string, required): Message ID (from `search_mail` results)
-- `raw` (boolean, optional): Return raw EML format instead of parsed content (default: false)
+- `raw` (boolean, optional): If true, return raw EML (same as `detail: "raw"`). Prefer `detail`.
+- `detail` (string, optional): `"full"` = lean message with body up to maxBodyChars (default); `"summary"` = minimal + 200-char snippet; `"raw"` = EML. Same as `get_messages`.
+- `maxBodyChars` (number, optional): When `detail` is `"full"`, max body chars (default: 2000). Same as `get_messages`. Ignored for `summary` or `raw`.
 
-**Returns:** Formatted message text (or raw EML if `raw: true`)
+**Returns:** Single JSON object (same shape as `get_messages(..., detail)[0]`), or raw EML when `raw: true` / `detail: "raw"`. Empty arrays and null/empty fields are omitted to save tokens.
 
-**Example:**
+**Example (full, default):**
 ```json
 {
-  "messageId": "<abc123@example.com>",
-  "raw": false
+  "messageId": "<abc123@example.com>"
 }
 ```
 
-### `get_thread`
+**Example (summary or custom body cap):**
+```json
+{
+  "messageId": "<abc123@example.com>",
+  "detail": "summary"
+}
+```
+```json
+{
+  "messageId": "<abc123@example.com>",
+  "detail": "full",
+  "maxBodyChars": 4000
+}
+```
 
-Retrieve a full conversation thread by thread ID. Returns all messages in the thread ordered by date.
+### `get_messages`
+
+Retrieve multiple messages by message IDs. Use **detail** to control payload size: `full` (default) = lean message with body up to maxBodyChars; `summary` = minimal fields + 200-char snippet for scanning; `raw` = original EML. Caps at 20 messages per call. Empty arrays and null/empty fields are omitted to save tokens.
 
 **Parameters:**
-- `threadId` (string, required): Thread ID (from `search_mail` or `get_message` results)
-- `raw` (boolean, optional): Return raw EML format for each message instead of parsed/formatted content (default: false)
+- `messageIds` (array of strings, required): Array of message IDs (from `search_mail` results) to retrieve
+- `detail` (string, optional): `"full"` = full lean message with body (default); `"summary"` = minimal fields + 200-char snippet; `"raw"` = original EML format
+- `raw` (boolean, optional): If true, same as `detail: "raw"`. Prefer `detail`.
+- `maxBodyChars` (number, optional): Max characters of body per message when `detail` is `"full"` (default: 2000). Ignored for `summary` or `raw`.
 
-**Returns:** JSON array of message objects (same format as `get_message`)
+**Response by detail level:**
+
+- **`detail: "summary"`** — Tiny payload for scanning (e.g. 20 messages in one call). Each message: `message_id`, `subject`, `from` (combined string), `to` (array, omitted if empty), `date`, `snippet` (first 200 chars of body).
+- **`detail: "full"`** (default) — Lean message: `message_id`, `thread_id`, `from_address`, `from_name` (if present), `to_addresses`, `cc_addresses`, `subject`, `date`, `content: { markdown }`, `bodyTruncated` (only when true), `attachments`, `labels`. Empty arrays and null/empty fields omitted.
+- **`detail: "raw"`** — Full EML format per message.
+
+**Example (full):**
+```json
+{
+  "messageIds": ["<abc123@example.com>", "<def456@example.com>"],
+  "maxBodyChars": 500
+}
+```
+
+**Example (summary — for scanning):**
+```json
+{
+  "messageIds": ["<id1>", "<id2>", "<id3>", "<id4>", "<id5>"],
+  "detail": "summary"
+}
+```
+
+**Token efficiency (agents):** Prefer `detail: "summary"` when scanning 5+ messages; use `detail: "full"` with `maxBodyChars: 500` for quick confirmation or `maxBodyChars: 4000` for full reads.
+
+### `get_thread`
+
+Retrieve a full conversation thread by thread ID. Returns all messages in the thread ordered by date. When `raw` is false (default), returns the same **lean** shape as `get_messages` (detail: "full"): no noise fields, body head-truncated at 2000 chars, empty fields omitted. Thread IDs can be passed with or without angle brackets; the server normalizes them.
+
+**Parameters:**
+- `threadId` (string, required): Thread ID (from `search_mail` or `get_message` results) to retrieve
+- `raw` (boolean, optional): If true, return raw EML format for each message instead of parsed/formatted content (default: false)
+
+**Returns:** JSON array of message objects (lean shape when raw=false; same as get_messages detail: "full" with 2000-char body cap)
 
 **Example:**
 ```json
@@ -98,8 +149,10 @@ Find people by email address or display name. Returns matching identities with s
 - `limit` (number, optional): Maximum number of results (default: 50)
 - `minSent` (number, optional): Minimum sent count filter (default: 0)
 - `minReceived` (number, optional): Minimum received count filter (default: 0)
+- `includeNoreply` (boolean, optional): Include noreply/bot addresses (default: false)
+- `enrich` (boolean, optional): Use LLM (GPT-4.1 nano) to guess names from email addresses for better accuracy. Requires `ZMAIL_OPENAI_API_KEY` to be set. Adds ~1-2s latency (default: false)
 
-**Returns:** JSON object with `query` and `people` array. Each person has `address`, `displayName`, `sentCount`, `receivedCount`, `mentionedCount`.
+**Returns:** JSON object with `query` and `people` array. Each person has `firstname`, `lastname`, `name`, `primaryAddress`, `addresses`, `phone`, `title`, `company`, `urls`, `sentCount`, `receivedCount`, `mentionedCount`, `lastContact`. May include `hint` field with suggestions (e.g., to use `enrich` flag).
 
 **Note:** When mailbox owner is configured, counts are relative to the owner: `sentCount` = emails I sent to them, `receivedCount` = emails from them to me, `mentionedCount` = emails where they were in to/cc but not the sender.
 
@@ -107,21 +160,23 @@ Find people by email address or display name. Returns matching identities with s
 ```json
 {
   "query": "alice",
-  "limit": 10
+  "limit": 10,
+  "enrich": true
 }
 ```
 
 ### `get_status`
 
-Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS/semantic counts), and date range of synced messages.
+Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS count), date range of synced messages, and freshness (time since latest mail and last sync).
 
 **Parameters:** None
 
 **Returns:** JSON object with:
 - `sync`: `{ isRunning, lastSyncAt, totalMessages, earliestSyncedDate, latestSyncedDate }`
 - `indexing`: `{ isRunning, totalToIndex, indexedSoFar, startedAt, completedAt, totalIndexed, totalFailed, pending }`
-- `search`: `{ ftsReady, semanticReady }`
+- `search`: `{ ftsReady }`
 - `dateRange`: `{ earliest, latest }` or `null`
+- `freshness`: `{ latestMailAgo, lastSyncAgo }` — each value is `null` or `{ human: string, duration: string }` (e.g. `{ human: "2 hours ago", duration: "PT2H" }`); `null` when not applicable
 
 **Example:**
 ```json
@@ -147,12 +202,12 @@ Get database statistics. Returns total message count, date range, top senders (t
 
 ### `list_attachments`
 
-List all attachments for a message.
+List all attachments for a message. Message IDs can be passed with or without angle brackets; the server normalizes them.
 
 **Parameters:**
-- `messageId` (string, required): Message ID to list attachments for
+- `messageId` (string, required): Message ID (from `search_mail` or `get_message`) to list attachments for
 
-**Returns:** JSON array of attachment metadata objects with `id`, `filename`, `mimeType`, `size`, `extracted` (boolean)
+**Returns:** JSON array of attachment metadata objects with `id`, `filename`, `mimeType`, `size`, `extracted` (boolean). Use `id` with `read_attachment`.
 
 **Example:**
 ```json
@@ -251,13 +306,29 @@ No additional MCP-specific configuration is required. The server reads the datab
 
 Both interfaces share the same underlying index and data. A message synced via `zmail sync` is immediately available via MCP `search_mail`, and vice versa.
 
+### CLI arguments (quick reference)
+
+- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--fields csv] [--threads] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date] [--include-noise]`
+- **who:** `zmail who <query> [--limit n] [--min-sent n] [--min-received n] [--all] [--enrich] [--text]`
+- **status:** `zmail status [--json] [--imap]` — `--imap` compares local DB with IMAP server (CLI-only).
+- **stats:** `zmail stats [--json]`
+- **read:** `zmail read <message_id> [--raw]` (alias: `zmail message`)
+- **thread:** `zmail thread <thread_id> [--json] [--raw]`
+- **attachment list:** `zmail attachment list <message_id> [--text]`
+- **attachment read:** `zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]` — CLI uses message_id + 1-based index or filename; MCP uses numeric attachment `id` from `list_attachments`.
+
 ## Future Work
 
 - Resources: Expose message/thread data as MCP resources
 - Prompts: Pre-built prompt templates for common email queries
 
+## Higher-Level Query Interface: `zmail ask`
+
+For agents that want natural language answers instead of orchestrating primitive tools, zmail provides `zmail ask "<question>"` — a single-call answer engine that handles all orchestration internally. See [ASK.md](./ASK.md) for when to use `ask` vs primitive tools, integration patterns, and performance characteristics.
+
 ## See Also
 
+- [ASK.md](./ASK.md) — Using `zmail ask` as a higher-level query interface
 - [ARCHITECTURE.md](./ARCHITECTURE.md) — ADR-005: Dual Agent Interface
 - [AGENTS.md](../AGENTS.md) — Development guide and CLI reference
 - [STRATEGY.md](./STRATEGY.md) — Strategic priorities including MCP tool surface

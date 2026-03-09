@@ -58,6 +58,8 @@ describe("XLSX extraction", () => {
     expect(lines[0]).toContain("Product");
     // Data rows should have values
     expect(lines[1]).toContain("Government");
+    // Formula cells must render as values, not [object Object] (BUG-005)
+    expect(text).not.toContain("[object Object]");
   });
 });
 

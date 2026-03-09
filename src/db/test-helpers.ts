@@ -9,7 +9,6 @@ export function createTestDb(): SqliteDatabase {
   db.exec("PRAGMA foreign_keys = ON");
   db.exec(SCHEMA);
   db.exec("INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0)");
-  db.exec("INSERT OR IGNORE INTO indexing_status (id) VALUES (1)");
   return db;
 }
 
@@ -22,6 +21,7 @@ export function insertTestMessage(
     subject: string;
     bodyText: string;
     fromAddress: string;
+    fromName: string | null;
     toAddresses: string;
     ccAddresses: string;
     date: string;
@@ -35,6 +35,7 @@ export function insertTestMessage(
   const subject = overrides.subject ?? "Test subject";
   const bodyText = overrides.bodyText ?? "Test body content";
   const fromAddress = overrides.fromAddress ?? "sender@example.com";
+  const fromName = overrides.fromName ?? null;
   const toAddresses = overrides.toAddresses ?? "[]";
   const ccAddresses = overrides.ccAddresses ?? "[]";
   const date = overrides.date ?? new Date().toISOString();
@@ -43,9 +44,9 @@ export function insertTestMessage(
 
   db.prepare(
     `INSERT INTO messages
-       (message_id, thread_id, folder, uid, from_address, to_addresses, cc_addresses, subject, body_text, date, raw_path)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'maildir/test.eml')`
-  ).run(messageId, threadId, folder, uid, fromAddress, toAddresses, ccAddresses, subject, bodyText, date);
+       (message_id, thread_id, folder, uid, from_address, from_name, to_addresses, cc_addresses, subject, body_text, date, raw_path)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'maildir/test.eml')`
+  ).run(messageId, threadId, folder, uid, fromAddress, fromName, toAddresses, ccAddresses, subject, bodyText, date);
 
   return messageId;
 }

@@ -19,6 +19,7 @@ export interface ParsedMessage {
   bodyText: string;
   bodyHtml: string | null;
   attachments: ParsedAttachment[];
+  isNoise: boolean;
 }
 
 export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
@@ -91,6 +92,61 @@ export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
     bodyText = htmlToMarkdown(email.html);
   }
 
+  // Detect noise signals from headers (promotional, bulk, mailing lists)
+  // postal-mime exposes headers as array of { key: string (lowercase), value: string }
+  // 
+  // Noise classification strategy:
+  // - List-Unsubscribe alone: NOT noise (too common in transactional email from large senders)
+  // - List-Id: noise (genuine mailing list identifier, not used by transactional senders)
+  // - Precedence: bulk/list/junk/auto: noise
+  // - X-Auto-Response-Suppress: noise
+  // - List-Unsubscribe + List-Id together: noise (mailing list with unsubscribe link)
+  let isNoise = false;
+  let hasListUnsubscribe = false;
+  let hasListId = false;
+  
+  if (email.headers && Array.isArray(email.headers)) {
+    for (const header of email.headers) {
+      const key = header.key?.toLowerCase() ?? "";
+      const value = (header.value ?? "").trim();
+      
+      if (!value) continue;
+      
+      if (key === "list-unsubscribe") {
+        hasListUnsubscribe = true;
+        continue; // Don't mark as noise yet - check for List-Id combo
+      }
+      
+      if (key === "list-id") {
+        hasListId = true;
+        // List-Id alone is a strong signal for mailing lists
+        isNoise = true;
+        break;
+      }
+      
+      // Precedence header with bulk/list/junk/auto values
+      if (key === "precedence") {
+        const precedenceLower = value.toLowerCase();
+        if (precedenceLower === "bulk" || precedenceLower === "list" || 
+            precedenceLower === "junk" || precedenceLower === "auto") {
+          isNoise = true;
+          break;
+        }
+      }
+      
+      // X-Auto-Response-Suppress header (indicates automated/bulk mail)
+      if (key === "x-auto-response-suppress") {
+        isNoise = true;
+        break;
+      }
+    }
+    
+    // If we have both List-Unsubscribe and List-Id, it's a mailing list (not transactional)
+    if (!isNoise && hasListUnsubscribe && hasListId) {
+      isNoise = true;
+    }
+  }
+
   return {
     messageId,
     fromAddress: email.from?.address ?? "",
@@ -102,5 +158,6 @@ export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
     bodyText,
     bodyHtml: email.html ?? null,
     attachments,
+    isNoise,
   };
 }

@@ -4,32 +4,25 @@ set -euo pipefail
 # Publish script for @cirne/zmail
 # Generates timestamp-based version, builds, and publishes to npm
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/lib/common.sh"
 
-error() {
-    echo -e "${RED}Error:${NC} $1" >&2
-    exit 1
+# Store original version for rollback
+ORIGINAL_VERSION=$(node -p "require('./package.json').version" | sed 's/-alpha.*//')
+
+# Rollback function to restore package.json version on failure
+rollback_version() {
+    if [ -n "${ORIGINAL_VERSION:-}" ]; then
+        warn "Rolling back package.json version to $ORIGINAL_VERSION"
+        npm pkg set version="$ORIGINAL_VERSION" || true
+    fi
 }
 
-info() {
-    echo -e "${BLUE}ℹ${NC} $1"
-}
+# Set trap to rollback on error or exit
+trap rollback_version ERR EXIT
 
-success() {
-    echo -e "${GREEN}✓${NC} $1"
-}
-
-warn() {
-    echo -e "${YELLOW}⚠${NC} $1"
-}
-
-# Get base version from package.json
-BASE_VERSION=$(node -p "require('./package.json').version" | sed 's/-alpha.*//')
+# Get base version from package.json (use original if available, otherwise read current)
+BASE_VERSION="${ORIGINAL_VERSION:-$(node -p "require('./package.json').version" | sed 's/-alpha.*//')}"
 
 # Generate timestamp-based version
 TIMESTAMP=$(date -u +"%Y%m%d.%H%M%S")
@@ -77,6 +70,8 @@ fi
 # Publish
 info "Publishing @cirne/zmail@$VERSION to npm..."
 if npm publish --access public --tag="$DIST_TAG"; then
+    # Clear trap on success (don't rollback)
+    trap - ERR EXIT
     success "Published @cirne/zmail@$VERSION with tag '$DIST_TAG'"
     echo ""
     echo "Package available at: https://www.npmjs.com/package/@cirne/zmail"

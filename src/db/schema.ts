@@ -1,5 +1,8 @@
 // SQL schema — all tables and FTS5 virtual tables
 
+/** Schema version — bump this integer whenever the schema changes. */
+export const SCHEMA_VERSION = 4;
+
 export const SCHEMA = /* sql */ `
   CREATE TABLE IF NOT EXISTS messages (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -8,6 +11,7 @@ export const SCHEMA = /* sql */ `
     folder       TEXT NOT NULL,
     uid          INTEGER NOT NULL,
     labels       TEXT NOT NULL DEFAULT '[]',
+    is_noise INTEGER NOT NULL DEFAULT 0,
     from_address TEXT NOT NULL,
     from_name    TEXT,
     to_addresses TEXT NOT NULL DEFAULT '[]',
@@ -16,10 +20,8 @@ export const SCHEMA = /* sql */ `
     date         TEXT NOT NULL,
     body_text    TEXT NOT NULL DEFAULT '',
     raw_path     TEXT NOT NULL,
-    synced_at    TEXT NOT NULL DEFAULT (datetime('now')),
-    embedding_state TEXT NOT NULL DEFAULT 'pending'
+    synced_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
-  -- embedding_state: 'pending' | 'claimed' | 'done' | 'failed'
   -- labels: JSON array of label/tag names (Gmail: X-GM-LABELS; generic: optional).
   -- Enables "inbox only", "starred", "archive" filters without re-syncing.
 
@@ -41,11 +43,24 @@ export const SCHEMA = /* sql */ `
     extracted_text  TEXT
   );
 
-  CREATE TABLE IF NOT EXISTS contacts (
-    address      TEXT PRIMARY KEY,
-    display_name TEXT,
-    message_count INTEGER NOT NULL DEFAULT 1
+  CREATE TABLE IF NOT EXISTS people (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    canonical_name  TEXT,
+    aka             TEXT NOT NULL DEFAULT '[]',
+    primary_address TEXT NOT NULL,
+    addresses       TEXT NOT NULL DEFAULT '[]',
+    phone           TEXT,
+    title           TEXT,
+    company         TEXT,
+    urls            TEXT NOT NULL DEFAULT '[]',
+    sent_count      INTEGER NOT NULL DEFAULT 0,
+    received_count  INTEGER NOT NULL DEFAULT 0,
+    mentioned_count INTEGER NOT NULL DEFAULT 0,
+    last_contact    TEXT,
+    is_noreply      INTEGER NOT NULL DEFAULT 0,
+    updated_at      TEXT NOT NULL DEFAULT (datetime('now'))
   );
+  CREATE INDEX IF NOT EXISTS idx_people_name ON people(canonical_name);
 
   CREATE TABLE IF NOT EXISTS sync_state (
     folder       TEXT PRIMARY KEY,
@@ -69,20 +84,12 @@ export const SCHEMA = /* sql */ `
     id                   INTEGER PRIMARY KEY CHECK (id = 1),
     earliest_synced_date TEXT,
     latest_synced_date   TEXT,
+    target_start_date    TEXT,
+    sync_start_earliest_date TEXT,
     total_messages       INTEGER NOT NULL DEFAULT 0,
     last_sync_at         TEXT,
     is_running           INTEGER NOT NULL DEFAULT 0,
     owner_pid            INTEGER
-  );
-
-  CREATE TABLE IF NOT EXISTS indexing_status (
-    id                INTEGER PRIMARY KEY CHECK (id = 1),
-    is_running        INTEGER NOT NULL DEFAULT 0,
-    total_to_index    INTEGER NOT NULL DEFAULT 0,
-    indexed_so_far    INTEGER NOT NULL DEFAULT 0,
-    started_at        TEXT,
-    completed_at      TEXT,
-    owner_pid         INTEGER
   );
 
   -- FTS5 full-text search index over message subjects and bodies
@@ -122,6 +129,5 @@ export const SCHEMA = /* sql */ `
   CREATE INDEX IF NOT EXISTS idx_messages_date    ON messages(date DESC);
   CREATE INDEX IF NOT EXISTS idx_messages_folder  ON messages(folder, uid);
   CREATE INDEX IF NOT EXISTS idx_attachments_msg  ON attachments(message_id);
-  CREATE INDEX IF NOT EXISTS idx_messages_embed_state ON messages(embedding_state)
-    WHERE embedding_state = 'pending';
+  CREATE INDEX IF NOT EXISTS idx_messages_noise ON messages(is_noise) WHERE is_noise = 1;
 `;

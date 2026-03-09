@@ -1,8 +1,23 @@
 import type { SqliteDatabase } from "~/db";
-import type { SearchResult } from "~/lib/types";
-import { embedText } from "./embeddings";
-import { searchVectors } from "./vectors";
+import type { SearchResult, SearchResultAttachment } from "~/lib/types";
 import { parseSearchQuery } from "./query-parse";
+import { buildFilterClause, buildWhereClause } from "./filter-compiler";
+
+/** One message in a thread when includeThreads is true (avoids get_thread round-trip). */
+export interface ThreadMessageInSearch {
+  messageId: string;
+  fromAddress: string;
+  fromName: string | null;
+  subject: string;
+  date: string;
+  bodyPreview: string;
+}
+
+export interface ThreadSearchResult {
+  threadId: string;
+  subject: string;
+  messages: ThreadMessageInSearch[];
+}
 
 // ResolvedSearchMode type removed - no longer needed
 
@@ -15,74 +30,136 @@ export interface SearchOptions {
   subject?: string;
   afterDate?: string;
   beforeDate?: string;
-  /** When true, use FTS-only search (exact keyword matching). Default is hybrid (semantic + FTS). */
-  fts?: boolean;
   /** When true, use OR logic between filters instead of AND. */
   filterOr?: boolean;
+  /** When true, also return full threads (all messages per matching thread_id). Default false. */
+  includeThreads?: boolean;
+  /** When true, includes noise messages (promotional, social, forums, bulk, spam). Defaults to false (noise excluded). */
+  includeNoise?: boolean;
 }
 
 export interface SearchTimings {
   ftsMs?: number;
-  embedMs?: number;
-  vectorMs?: number;
-  mergeMs?: number;
   totalMs: number;
 }
 
 export interface SearchResultSet {
   results: SearchResult[];
   timings: SearchTimings;
+  totalMatched?: number; // Total number of matches before limit/offset
+  /** When includeThreads is true, full conversation per matching thread. */
+  threads?: ThreadSearchResult[];
   _meta?: {
     hasFtsMatches: boolean;
-    hasSemanticOnlyMatches: boolean;
     hasAnyMatches: boolean;
   };
 }
 
-/** LIKE pattern for partial match on address or display name (e.g. "donna" -> "%donna%"). */
-function fromFilterPattern(value: string): string {
-  return `%${value}%`;
+// fromFilterPattern is now in filter-compiler.ts
+
+const BODY_PREVIEW_LEN = 300;
+
+/** Batch-load attachment metadata for result message_ids and merge onto each result (1-based index). */
+function mergeAttachmentMetadata(
+  db: SqliteDatabase,
+  results: SearchResult[]
+): SearchResult[] {
+  if (results.length === 0) return results;
+  const ids = results.map((r) => r.messageId);
+  const placeholders = ids.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      /* sql */ `
+    SELECT message_id AS messageId, id, filename, mime_type AS mimeType
+    FROM attachments
+    WHERE message_id IN (${placeholders})
+    ORDER BY message_id, id
+    `
+    )
+    .all(...ids) as Array<{ messageId: string; id: number; filename: string; mimeType: string }>;
+  const byMessage = new Map<string, SearchResultAttachment[]>();
+  for (const row of rows) {
+    const list = byMessage.get(row.messageId) ?? [];
+    list.push({ id: row.id, filename: row.filename, mimeType: row.mimeType, index: list.length + 1 });
+    byMessage.set(row.messageId, list);
+  }
+  return results.map((r) => ({
+    ...r,
+    attachments: byMessage.get(r.messageId) ?? [],
+  }));
+}
+
+/** Load full thread messages (for includeThreads). */
+function loadThreads(
+  db: SqliteDatabase,
+  threadIds: string[]
+): ThreadSearchResult[] {
+  if (threadIds.length === 0) return [];
+  const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(body_text, 1, ${BODY_PREVIEW_LEN})), '') || (CASE WHEN LENGTH(TRIM(body_text)) > ${BODY_PREVIEW_LEN} THEN '…' ELSE '' END)`;
+  const placeholders = threadIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      /* sql */ `
+    SELECT thread_id AS threadId, message_id AS messageId, from_address AS fromAddress, from_name AS fromName,
+           subject, date, ${bodyPreviewSql} AS bodyPreview
+    FROM messages
+    WHERE thread_id IN (${placeholders})
+    ORDER BY thread_id, date ASC
+    `
+    )
+    .all(...threadIds) as Array<{
+      threadId: string;
+      messageId: string;
+      fromAddress: string;
+      fromName: string | null;
+      subject: string;
+      date: string;
+      bodyPreview: string;
+    }>;
+  const byThread = new Map<string, ThreadMessageInSearch[]>();
+  for (const row of rows) {
+    const list = byThread.get(row.threadId) ?? [];
+    list.push({
+      messageId: row.messageId,
+      fromAddress: row.fromAddress,
+      fromName: row.fromName,
+      subject: row.subject,
+      date: row.date,
+      bodyPreview: row.bodyPreview,
+    });
+    byThread.set(row.threadId, list);
+  }
+  const threads: ThreadSearchResult[] = [];
+  for (const tid of threadIds) {
+    const messages = byThread.get(tid);
+    if (messages?.length) threads.push({ threadId: tid, subject: messages[0].subject, messages });
+  }
+  return threads;
 }
 
 /**
  * Filter-only search (no query text, just WHERE clauses).
+ * Returns results and total count.
  */
-function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): SearchResult[] {
-  const { limit = 20, offset = 0, fromAddress, toAddress, subject, afterDate, beforeDate, filterOr } = opts;
-  const conditions: string[] = [];
-  const params: (string | number)[] = [];
+function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchResult[]; totalCount: number } {
+  const { limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
+  const filterClause = buildFilterClause(opts);
+  const where = filterClause.conditions.length > 0 ? `WHERE ${buildWhereClause(filterClause)}` : "";
 
-  if (fromAddress) {
-    const pattern = fromFilterPattern(fromAddress);
-    const cond = "(m.from_address LIKE ? OR m.from_name LIKE ?)";
-    conditions.push(filterOr ? `(${cond})` : cond);
-    params.push(pattern, pattern);
-  }
-  if (toAddress) {
-    const pattern = fromFilterPattern(toAddress);
-    const cond = "(EXISTS (SELECT 1 FROM json_each(m.to_addresses) j WHERE j.value LIKE ?) OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) j WHERE j.value LIKE ?))";
-    conditions.push(filterOr ? `(${cond})` : cond);
-    params.push(pattern, pattern);
-  }
-  if (subject) {
-    const pattern = fromFilterPattern(subject);
-    const cond = "m.subject LIKE ?";
-    conditions.push(filterOr ? `(${cond})` : cond);
-    params.push(pattern);
-  }
-  if (afterDate) {
-    const cond = "m.date >= ?";
-    conditions.push(filterOr ? `(${cond})` : cond);
-    params.push(afterDate);
-  }
-  if (beforeDate) {
-    const cond = "m.date <= ?";
-    conditions.push(filterOr ? `(${cond})` : cond);
-    params.push(beforeDate);
-  }
+  // Get total count first
+  const countResult = db
+    .prepare(
+      /* sql */ `
+      SELECT COUNT(*) as count
+      FROM messages m
+      ${where}
+    `
+    )
+    .get(...filterClause.params) as { count: number };
 
-  params.push(limit, offset);
-  const where = `WHERE ${conditions.join(filterOr ? " OR " : " AND ")}`;
+  // Then get results (bodyPreview = first 300 chars to reduce follow-up reads)
+  const params = [...filterClause.params, limit, offset];
+  const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
   const rows = db
     .prepare(
       /* sql */ `
@@ -94,6 +171,7 @@ function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): SearchResult
         m.subject,
         m.date,
         COALESCE(TRIM(SUBSTR(m.body_text, 1, 200)), '') || (CASE WHEN LENGTH(m.body_text) > 200 THEN '…' ELSE '' END) AS snippet,
+        ${bodyPreviewSql} AS bodyPreview,
         0 AS rank
       FROM messages m
       ${where}
@@ -102,263 +180,257 @@ function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): SearchResult
     `
     )
     .all(...params) as SearchResult[];
-  return rows;
+  return { results: rows, totalCount: countResult.count };
+}
+
+/**
+ * Convert space-separated words to OR-based query (Google-style search).
+ * FTS5 treats space-separated words as AND by default, but we want OR behavior
+ * where results matching more terms rank higher (via BM25).
+ * 
+ * Preserves:
+ * - Quoted phrases (kept as-is)
+ * - Explicit OR/AND operators
+ * - Special characters (quoted if needed)
+ */
+function convertToOrQuery(query: string): string {
+  // Check if query already has explicit OR/AND operators
+  const hasExplicitOperators = /\b(OR|AND)\b/i.test(query);
+  
+  // If explicit operators exist, preserve them (user intent)
+  if (hasExplicitOperators) {
+    return escapeFts5Query(query);
+  }
+  
+  // Check for quoted phrases - preserve them
+  const quotedPhrases: string[] = [];
+  const placeholder = '___QUOTED_PHRASE___';
+  let queryWithPlaceholders = query;
+  let placeholderIndex = 0;
+  
+  // Extract quoted phrases
+  queryWithPlaceholders = queryWithPlaceholders.replace(/"([^"]+)"/g, (_match, phrase) => {
+    const ph = `${placeholder}${placeholderIndex}`;
+    quotedPhrases.push(phrase);
+    placeholderIndex++;
+    return ph;
+  });
+  
+  // Split by spaces and convert to OR
+  const parts = queryWithPlaceholders.split(/\s+/).filter(p => p.trim());
+  
+  if (parts.length <= 1) {
+    // Single term or empty - return as-is (after restoring quotes)
+    let result = query;
+    quotedPhrases.forEach((phrase, idx) => {
+      result = result.replace(`${placeholder}${idx}`, `"${phrase.replace(/"/g, '""')}"`);
+    });
+    return escapeFts5Query(result);
+  }
+  
+  // Convert space-separated words to OR
+  const orParts: string[] = [];
+  for (const part of parts) {
+    if (part.startsWith(placeholder)) {
+      // Restore quoted phrase
+      const idx = parseInt(part.replace(placeholder, ''), 10);
+      const phrase = quotedPhrases[idx];
+      orParts.push(`"${phrase.replace(/"/g, '""')}"`);
+    } else {
+      // Regular word - add as-is (will be OR'd)
+      orParts.push(part);
+    }
+  }
+  
+  // Join with OR
+  const orQuery = orParts.join(' OR ');
+  
+  // Apply final escaping for special characters
+  return escapeFts5Query(orQuery);
+}
+
+/**
+ * Escape FTS5 special characters in query string.
+ * FTS5 treats dots (.) as token separators, which causes syntax errors.
+ * We quote queries containing dots or other problematic characters to treat them as phrase searches.
+ * 
+ * Special FTS5 characters: . - @ ( ) [ ] { } + * ? | \
+ * The dot (.) is the most problematic as it's common in domain names.
+ * Brackets [ ] cause syntax errors and should be quoted.
+ */
+function escapeFts5Query(query: string): string {
+  // Check for OR/AND operators (must be uppercase for FTS5)
+  const hasOperators = /\b(OR|AND)\b/i.test(query);
+  
+  // Characters that cause FTS5 syntax errors and should trigger quoting
+  const problematicChars = /[\[\]{}()]/;
+  const hasProblematicChars = problematicChars.test(query);
+  
+  // If query contains dots or problematic characters
+  // and no operators, quote the entire query as a phrase
+  if (!hasOperators && (query.includes('.') || hasProblematicChars)) {
+    // But if it's already an OR query, handle each part separately
+    if (query.includes(' OR ')) {
+      const parts = query.split(/\s+OR\s+/i);
+      const escapedParts: string[] = [];
+      for (const part of parts) {
+        if (part.includes('.') || problematicChars.test(part)) {
+          const escaped = part.replace(/"/g, '""');
+          escapedParts.push(`"${escaped}"`);
+        } else {
+          escapedParts.push(part);
+        }
+      }
+      return escapedParts.join(' OR ');
+    }
+    // Escape any existing quotes and wrap in quotes
+    const escaped = query.replace(/"/g, '""');
+    return `"${escaped}"`;
+  }
+  
+  // For queries with operators and dots/problematic chars, quote each part separately
+  if (hasOperators && (query.includes('.') || hasProblematicChars)) {
+    const parts = query.split(/\s+(OR|AND)\s+/i);
+    const escapedParts: string[] = [];
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      if (/^(OR|AND)$/i.test(part)) {
+        escapedParts.push(part.toUpperCase());
+      } else if (part.includes('.') || problematicChars.test(part)) {
+        // Quote parts with dots or problematic chars
+        const escaped = part.replace(/"/g, '""');
+        escapedParts.push(`"${escaped}"`);
+      } else {
+        escapedParts.push(part);
+      }
+    }
+    return escapedParts.join(' ');
+  }
+  
+  // No problematic chars, return as-is
+  return query;
 }
 
 /**
  * FTS5 search (keyword matching via BM25).
+ * Returns results and total count.
+ * Throws a user-friendly error if FTS5 syntax error occurs.
  */
-function ftsSearch(db: SqliteDatabase, opts: SearchOptions): SearchResult[] {
-  const { query, limit = 20, offset = 0, fromAddress, toAddress, subject, afterDate, beforeDate } = opts;
-  if (!query?.trim()) return [];
+function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchResult[]; totalCount: number } {
+  const { query, limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
+  if (!query?.trim()) return { results: [], totalCount: 0 };
 
-  const conditions: string[] = ["messages_fts MATCH ?"];
-  const params: (string | number)[] = [query];
+  // Convert space-separated words to OR query (Google-style search)
+  // This makes queries like "advisory meeting tomorrow" match emails with any of those terms,
+  // with BM25 ranking naturally putting results matching more terms higher
+  const escapedQuery = convertToOrQuery(query);
+  if (process.env.DEBUG_SEARCH) {
+    process.stderr.write(`[search] original query: "${query}" → converted: "${escapedQuery}"\n`);
+  }
+  // #region agent log
+  if (/apple/i.test(query)) {
+    fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+      body: JSON.stringify({
+        sessionId: "7c1ba9",
+        location: "search/index.ts:ftsSearch",
+        message: "FTS escaped query (apple-related)",
+        data: { originalQuery: query, escapedQuery },
+        timestamp: Date.now(),
+        hypothesisId: "H1",
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
 
-  if (fromAddress) {
-    const pattern = fromFilterPattern(fromAddress);
-    conditions.push("(m.from_address LIKE ? OR m.from_name LIKE ?)");
-    params.push(pattern, pattern);
-  }
-  if (toAddress) {
-    const pattern = fromFilterPattern(toAddress);
-    conditions.push("(EXISTS (SELECT 1 FROM json_each(m.to_addresses) j WHERE j.value LIKE ?) OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) j WHERE j.value LIKE ?))");
-    params.push(pattern, pattern);
-  }
-  if (subject) {
-    const pattern = fromFilterPattern(subject);
-    conditions.push("m.subject LIKE ?");
-    params.push(pattern);
-  }
-  if (afterDate) {
-    conditions.push("m.date >= ?");
-    params.push(afterDate);
-  }
-  if (beforeDate) {
-    conditions.push("m.date <= ?");
-    params.push(beforeDate);
-  }
+  // Build filter clause with FTS MATCH condition
+  const filterClause = buildFilterClause(opts, true, "messages_fts MATCH ?");
+  const whereClause = buildWhereClause(filterClause);
+  const where = `WHERE ${whereClause}`;
 
-  params.push(limit + offset + 50);
+  try {
+    // First, get total count (before limit/offset)
+    const countParams = [escapedQuery, ...filterClause.params];
+    const totalCount = db
+      .prepare(
+        /* sql */ `
+        SELECT COUNT(*) as count
+        FROM messages_fts
+        JOIN messages m ON m.id = messages_fts.rowid
+        ${where}
+      `
+      )
+      .get(...countParams) as { count: number };
 
-  const rows = db
-    .prepare(
-      /* sql */ `
-      SELECT
-        m.message_id  AS messageId,
-        m.thread_id   AS threadId,
-        m.from_address AS fromAddress,
-        m.from_name   AS fromName,
-        m.subject,
-        m.date,
-        snippet(messages_fts, 2, '<b>', '</b>', '…', 20) AS snippet,
-        rank
-      FROM messages_fts
-      JOIN messages m ON m.id = messages_fts.rowid
-      WHERE ${conditions.join(" AND ")}
-      ORDER BY rank
-      LIMIT ?
-    `
-    )
-    .all(...params) as SearchResult[];
+    // Then get results
+    const params = [escapedQuery, ...filterClause.params, limit + offset + 50];
 
-  // Apply filters and limit/offset (post-query filtering for toAddress/subject if needed)
-  let filtered = rows;
-  if (fromAddress || toAddress || subject || afterDate || beforeDate) {
-    filtered = rows.filter((r) => {
-      if (fromAddress) {
-        const pattern = fromAddress.toLowerCase();
-        const fromMatch =
-          r.fromAddress.toLowerCase().includes(pattern) ||
-          (r.fromName && r.fromName.toLowerCase().includes(pattern));
-        if (!fromMatch) return false;
+    const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
+    
+    // Combine BM25 rank with date recency boost
+    // FTS5 rank: lower (more negative) values = better matches
+    // Date boost: subtract larger values for recent emails to improve their rank
+    // Formula: combined_rank = rank - dateBoost (recent emails get larger dateBoost)
+    // This makes recent emails have lower (better) combined_rank values
+    const daysAgo = `julianday('now') - julianday(m.date)`;
+    const dateBoostSql = `
+      CASE 
+        WHEN ${daysAgo} <= 1 THEN 10.0
+        WHEN ${daysAgo} <= 7 THEN 8.0 - (${daysAgo} * 0.5)
+        WHEN ${daysAgo} <= 30 THEN 4.5 - ((${daysAgo} - 7) * 0.1)
+        WHEN ${daysAgo} <= 90 THEN 1.2 - ((${daysAgo} - 30) * 0.01)
+        ELSE 0.6 - ((${daysAgo} - 90) * 0.001)
+      END
+    `;
+    
+    const rows = db
+      .prepare(
+        /* sql */ `
+        SELECT
+          m.message_id  AS messageId,
+          m.thread_id   AS threadId,
+          m.from_address AS fromAddress,
+          m.from_name   AS fromName,
+          m.subject,
+          m.date,
+          snippet(messages_fts, 2, '<b>', '</b>', '…', 20) AS snippet,
+          ${bodyPreviewSql} AS bodyPreview,
+          rank,
+          (rank - ${dateBoostSql}) AS combined_rank
+        FROM messages_fts
+        JOIN messages m ON m.id = messages_fts.rowid
+        ${where}
+        ORDER BY combined_rank ASC, m.date DESC
+        LIMIT ?
+      `
+      )
+      .all(...params) as SearchResult[];
+
+    // Apply post-query filtering and limit/offset
+    const results = rows.slice(offset, offset + limit);
+    return { results, totalCount: totalCount.count };
+  } catch (err: any) {
+    // Catch FTS5 syntax errors and provide user-friendly message
+    if (err?.message?.includes('fts5') || err?.message?.includes('syntax error')) {
+      const problematicChars = query.match(/[\[\]{}()]/g);
+      if (problematicChars) {
+        const uniqueChars = [...new Set(problematicChars)].join(' ');
+        throw new Error(
+          `Query contains special characters that aren't supported: ${uniqueChars}. ` +
+          `Try quoting the query or removing these characters.`
+        );
       }
-      // Note: toAddress and subject are already filtered in SQL, but we keep this for consistency
-      if (afterDate && r.date < afterDate) return false;
-      if (beforeDate && r.date > beforeDate) return false;
-      return true;
-    });
-  }
-
-  return filtered.slice(offset, offset + limit);
-}
-
-/**
- * Semantic/vector search.
- */
-async function vectorSearchFromEmbedding(
-  db: SqliteDatabase,
-  opts: SearchOptions,
-  queryEmbedding: number[]
-): Promise<{ results: SearchResult[]; rawScores: Map<string, number> }> {
-  const { query, limit = 20, offset = 0, fromAddress, toAddress, subject, afterDate, beforeDate } = opts;
-  if (!query?.trim()) return { results: [], rawScores: new Map() };
-
-  // Search LanceDB for similar messages
-  const vectorResults = await searchVectors(queryEmbedding, limit + offset + 50); // Get extra for filtering
-
-  // Filter out low-confidence semantic matches
-  const filteredResults = vectorResults.filter((r) => r.score >= SEMANTIC_SCORE_THRESHOLD);
-
-  // Fetch full message details from SQLite and apply filters
-  const messageIds = filteredResults.map((r) => r.messageId);
-  if (messageIds.length === 0) return { results: [], rawScores: new Map() };
-
-  const placeholders = messageIds.map(() => "?").join(",");
-  const conditions: string[] = [`m.message_id IN (${placeholders})`];
-  const params: (string | number)[] = [...messageIds];
-
-  if (fromAddress) {
-    const pattern = fromFilterPattern(fromAddress);
-    conditions.push("(m.from_address LIKE ? OR m.from_name LIKE ?)");
-    params.push(pattern, pattern);
-  }
-  if (toAddress) {
-    const pattern = fromFilterPattern(toAddress);
-    conditions.push("(EXISTS (SELECT 1 FROM json_each(m.to_addresses) j WHERE j.value LIKE ?) OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) j WHERE j.value LIKE ?))");
-    params.push(pattern, pattern);
-  }
-  if (subject) {
-    const pattern = fromFilterPattern(subject);
-    conditions.push("m.subject LIKE ?");
-    params.push(pattern);
-  }
-  if (afterDate) {
-    conditions.push("m.date >= ?");
-    params.push(afterDate);
-  }
-  if (beforeDate) {
-    conditions.push("m.date <= ?");
-    params.push(beforeDate);
-  }
-
-  // Fetch messages and preserve vector search order
-  const messages = db
-    .prepare(
-      /* sql */ `
-      SELECT
-        m.message_id  AS messageId,
-        m.thread_id   AS threadId,
-        m.from_address AS fromAddress,
-        m.from_name   AS fromName,
-        m.subject,
-        m.date,
-        m.body_text   AS bodyText
-      FROM messages m
-      WHERE ${conditions.join(" AND ")}
-    `
-    )
-    .all(...params) as Array<SearchResult & { bodyText: string }>;
-
-  // Create a map of messageId -> vector score for ranking
-  const scoreMap = new Map(filteredResults.map((r) => [r.messageId, r.score]));
-  const rawScores = new Map(filteredResults.map((r) => [r.messageId, r.score]));
-
-  // Sort by vector score (highest first), then apply limit/offset
-  const sorted = messages
-    .map((m) => ({
-      ...m,
-      rank: scoreMap.get(m.messageId) ?? 0,
-      snippet: generateSnippet(m.bodyText, query), // Simple snippet generation
-    }))
-    .sort((a, b) => b.rank - a.rank)
-    .slice(offset, offset + limit);
-
-  return { results: sorted.map(({ bodyText, ...rest }) => rest), rawScores };
-}
-
-async function vectorSearch(db: SqliteDatabase, opts: SearchOptions): Promise<SearchResult[]> {
-  const { query } = opts;
-  if (!query?.trim()) return [];
-  const queryEmbedding = await embedText(query);
-  const { results } = await vectorSearchFromEmbedding(db, opts, queryEmbedding);
-  return results;
-}
-
-interface VectorSearchRun {
-  results: SearchResult[];
-  embedMs: number;
-  vectorMs: number;
-  rawScores: Map<string, number>; // messageId -> semantic score
-}
-
-// Minimum semantic similarity score threshold (0.45 = cosine distance ~1.22)
-// Good semantic matches cluster around 0.46-0.50, garbage around 0.40-0.44
-// This threshold filters gibberish while preserving legitimate semantic matches
-const SEMANTIC_SCORE_THRESHOLD = 0.45;
-
-async function vectorSearchWithTimings(
-  db: SqliteDatabase,
-  opts: SearchOptions
-): Promise<VectorSearchRun> {
-  const { query } = opts;
-  if (!query?.trim()) {
-    return { results: [], embedMs: 0, vectorMs: 0, rawScores: new Map() };
-  }
-
-  const embedStart = Date.now();
-  const queryEmbedding = await embedText(query);
-  const embedMs = Date.now() - embedStart;
-
-  const vectorStart = Date.now();
-  const { results, rawScores } = await vectorSearchFromEmbedding(db, opts, queryEmbedding);
-  const vectorMs = Date.now() - vectorStart;
-
-  return { results, embedMs, vectorMs, rawScores };
-}
-
-// resolveMode function removed - no longer needed since we always use hybrid unless fts flag is set
-
-/**
- * Generate a simple text snippet for semantic search results.
- * Finds the first occurrence of query terms (case-insensitive) and extracts surrounding context.
- */
-function generateSnippet(text: string, query: string, contextLength: number = 100): string {
-  const words = query.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
-  if (words.length === 0) {
-    return text.slice(0, contextLength) + (text.length > contextLength ? "…" : "");
-  }
-
-  const lowerText = text.toLowerCase();
-  let bestPos = -1;
-  let bestWord = "";
-
-  // Find the first occurrence of any query word
-  for (const word of words) {
-    const pos = lowerText.indexOf(word);
-    if (pos >= 0 && (bestPos < 0 || pos < bestPos)) {
-      bestPos = pos;
-      bestWord = word;
+      throw new Error(
+        `Invalid search query syntax. Try simplifying your query or quoting phrases.`
+      );
     }
+    throw err;
   }
-
-  if (bestPos < 0) {
-    return text.slice(0, contextLength) + (text.length > contextLength ? "…" : "");
-  }
-
-  // Extract context around the match
-  const start = Math.max(0, bestPos - contextLength / 2);
-  const end = Math.min(text.length, bestPos + bestWord.length + contextLength / 2);
-  let snippet = text.slice(start, end);
-
-  // Highlight the matched word (simple approach)
-  const matchStart = bestPos - start;
-  const matchEnd = matchStart + bestWord.length;
-  snippet =
-    snippet.slice(0, matchStart) +
-    "<b>" +
-    snippet.slice(matchStart, matchEnd) +
-    "</b>" +
-    snippet.slice(matchEnd);
-
-  if (start > 0) snippet = "…" + snippet;
-  if (end < text.length) snippet = snippet + "…";
-
-  return snippet;
 }
 
 /**
- * Unified search function with mode selection.
+ * Unified search function.
  * For filter-only queries (no query text), returns plain SQL results.
  */
 export async function search(db: SqliteDatabase, opts: SearchOptions): Promise<SearchResult[]> {
@@ -391,139 +463,83 @@ export async function searchWithMeta(
       effectiveOpts.filterOr = parsed.filterOr;
     }
   }
-
-  const { limit = 20, offset = 0 } = effectiveOpts;
-  const hasFilters = !!(effectiveOpts.fromAddress || effectiveOpts.toAddress || effectiveOpts.subject || effectiveOpts.afterDate || effectiveOpts.beforeDate);
   
   // Update query in opts for search functions
   effectiveOpts.query = parsedQuery;
+
+  // #region agent log
+  const path = !parsedQuery?.trim() ? "filterOnly" : "fts";
+  fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+    body: JSON.stringify({
+      sessionId: "7c1ba9",
+      location: "search/index.ts:searchWithMeta",
+      message: "effective opts and path",
+      data: { effectiveQuery: effectiveOpts.query, fromAddress: effectiveOpts.fromAddress, afterDate: effectiveOpts.afterDate, path },
+      timestamp: Date.now(),
+      hypothesisId: "H1_H2",
+    }),
+  }).catch(() => {});
+  // #endregion
   
   const timings: SearchTimings = {
     totalMs: 0,
   };
 
-  if (!parsedQuery?.trim() && hasFilters) {
-    const results = filterOnlySearch(db, effectiveOpts);
-    timings.totalMs = Date.now() - startedAt;
-    return {
-      results,
-      timings,
-      _meta: {
-        hasFtsMatches: results.length > 0,
-        hasSemanticOnlyMatches: false,
-        hasAnyMatches: results.length > 0,
-      },
-    };
-  }
-
   if (!parsedQuery?.trim()) {
+    const { results, totalCount } = filterOnlySearch(db, effectiveOpts);
     timings.totalMs = Date.now() - startedAt;
+    const resultsWithAttachments = mergeAttachmentMetadata(db, results);
+    const threads = effectiveOpts.includeThreads
+      ? loadThreads(db, [...new Set(resultsWithAttachments.map((r) => r.threadId))])
+      : undefined;
     return {
-      results: [],
+      results: resultsWithAttachments,
       timings,
-      _meta: {
-        hasFtsMatches: false,
-        hasSemanticOnlyMatches: false,
-        hasAnyMatches: false,
-      },
-    };
-  }
-
-  // Determine search mode: FTS-only if fts flag is set, otherwise hybrid
-  const useFtsOnly = effectiveOpts.fts === true;
-
-  if (useFtsOnly) {
-    const ftsStart = Date.now();
-    const results = ftsSearch(db, effectiveOpts);
-    timings.ftsMs = Date.now() - ftsStart;
-    timings.totalMs = Date.now() - startedAt;
-    return {
-      results,
-      timings,
+      totalMatched: totalCount,
+      ...(threads?.length ? { threads } : {}),
       _meta: {
         hasFtsMatches: results.length > 0,
-        hasSemanticOnlyMatches: false,
         hasAnyMatches: results.length > 0,
       },
     };
   }
 
-  // Default: hybrid search (semantic + FTS)
-  const semanticPromise = vectorSearchWithTimings(db, effectiveOpts);
+  // FTS search only
   const ftsStart = Date.now();
-  const ftsResults = ftsSearch(db, effectiveOpts);
+  const { results, totalCount } = ftsSearch(db, effectiveOpts);
+  // #region agent log
+  if (/apple/i.test(effectiveOpts.query ?? "")) {
+    fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Debug-Session-Id": "7c1ba9" },
+      body: JSON.stringify({
+        sessionId: "7c1ba9",
+        location: "search/index.ts:searchWithMeta after ftsSearch",
+        message: "FTS result count (apple-related query)",
+        data: { ftsTotalCount: totalCount, ftsResultsLength: results.length },
+        timestamp: Date.now(),
+        hypothesisId: "H1",
+      }),
+    }).catch(() => {});
+  }
+  // #endregion
   timings.ftsMs = Date.now() - ftsStart;
-  const semantic = await semanticPromise;
-  timings.embedMs = semantic.embedMs;
-  timings.vectorMs = semantic.vectorMs;
-  const semanticResults = semantic.results;
-
-  // Track which results came from FTS vs semantic-only
-  const ftsMessageIds = new Set(ftsResults.map((r) => r.messageId));
-  const semanticOnlyMessageIds = new Set(
-    semanticResults.map((r) => r.messageId).filter((id) => !ftsMessageIds.has(id))
-  );
-
-  // Create maps for RRF scoring
-  const ftsRankMap = new Map(ftsResults.map((r, idx) => [r.messageId, idx + 1]));
-  const semanticRankMap = new Map(semanticResults.map((r, idx) => [r.messageId, idx + 1]));
-
-  const mergeStart = Date.now();
-  // Combine and deduplicate by messageId
-  const combined = new Map<string, SearchResult & { rrfScore: number; hasFtsMatch: boolean }>();
-
-  // Add FTS results
-  for (const result of ftsResults) {
-    const rrfScore = 1 / (60 + (ftsRankMap.get(result.messageId) ?? 1000));
-    combined.set(result.messageId, { ...result, rrfScore, hasFtsMatch: true });
-  }
-
-  // Add semantic results, merging with existing
-  for (const result of semanticResults) {
-    const existing = combined.get(result.messageId);
-    if (existing) {
-      // Merge: keep FTS snippet (better for keyword matches), combine RRF scores
-      const semanticRrf = 1 / (60 + (semanticRankMap.get(result.messageId) ?? 1000));
-      existing.rrfScore += semanticRrf;
-      // Already has FTS match, keep hasFtsMatch: true
-    } else {
-      const semanticRrf = 1 / (60 + (semanticRankMap.get(result.messageId) ?? 1000));
-      combined.set(result.messageId, { ...result, rrfScore: semanticRrf, hasFtsMatch: false });
-    }
-  }
-
-  // Sort by RRF score and apply limit/offset
-  const sorted = Array.from(combined.values())
-    .sort((a, b) => b.rrfScore - a.rrfScore)
-    .slice(offset, offset + limit);
-
-  timings.mergeMs = Date.now() - mergeStart;
   timings.totalMs = Date.now() - startedAt;
-
-  // Track metadata for hint generation: do we have FTS matches, semantic-only matches, or neither?
-  const hasFtsMatches = ftsResults.length > 0;
-  const hasSemanticOnlyMatches = semanticOnlyMessageIds.size > 0;
-  const hasAnyMatches = sorted.length > 0;
-
-  // Remove rrfScore and hasFtsMatch from final results
+  const resultsWithAttachments = mergeAttachmentMetadata(db, results);
+  const threads = effectiveOpts.includeThreads
+    ? loadThreads(db, [...new Set(resultsWithAttachments.map((r) => r.threadId))])
+    : undefined;
   return {
-    results: sorted.map(({ rrfScore, hasFtsMatch, ...rest }) => rest),
+    results: resultsWithAttachments,
     timings,
+    totalMatched: totalCount,
+    ...(threads?.length ? { threads } : {}),
     _meta: {
-      hasFtsMatches,
-      hasSemanticOnlyMatches,
-      hasAnyMatches,
+      hasFtsMatches: results.length > 0,
+      hasAnyMatches: results.length > 0,
     },
   };
 }
 
-// Legacy exports for backwards compatibility (deprecated, will be removed)
-export async function semanticSearch(db: SqliteDatabase, opts: SearchOptions): Promise<SearchResult[]> {
-  return vectorSearch(db, opts);
-}
-
-export async function hybridSearch(db: SqliteDatabase, opts: SearchOptions): Promise<SearchResult[]> {
-  // Hybrid is now the default, so just call searchWithMeta without fts flag
-  const result = await searchWithMeta(db, { ...opts, fts: false });
-  return result.results;
-}

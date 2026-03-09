@@ -1,20 +1,62 @@
-import { runSync } from "~/sync";
 import { searchWithMeta } from "~/search";
 import { who } from "~/search/who";
-import { indexMessages } from "~/search/indexing";
+import { runSync } from "~/sync";
 import { getDb } from "~/db";
 import { startMcpServer } from "~/mcp";
 import { config } from "~/lib/config";
-import { logger } from "~/lib/logger";
+import { logger, SYNC_LOG_PATH } from "~/lib/logger";
 import { parseSinceToDate } from "~/sync/parse-since";
-import { htmlToMarkdown } from "~/lib/content-normalize";
-import { parseRawMessage } from "~/sync/parse-message";
-import type { SearchResult } from "~/lib/types";
+import type { SearchResult, WhoResult } from "~/lib/types";
 import type { SqliteDatabase } from "~/db";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { join } from "path";
-import { formatMessageLlmFriendly } from "~/cli/format-message";
+import { formatMessageForOutput, formatMessageLlmFriendly } from "~/messages/presenter";
 import { extractAndCache } from "~/attachments";
+import { getStatus, getImapServerStatus, formatTimeAgo } from "~/lib/status";
+import { spawn } from "child_process";
+import { isProcessAlive } from "~/lib/process-lock";
+
+/**
+ * Check sync log for errors from the most recent sync run.
+ * Returns error info if found, otherwise null.
+ */
+function checkSyncLogForErrors(): { hasError: boolean; errorMessage?: string } {
+  if (!existsSync(SYNC_LOG_PATH)) return { hasError: false };
+  
+  const logContent = readFileSync(SYNC_LOG_PATH, "utf-8");
+  // Check for error entries from the most recent run (after last separator)
+  const runs = logContent.split(/===== SYNC RUN/);
+  const lastRun = runs[runs.length - 1];
+  // Log format: [timestamp] ERROR message {...}
+  // Check for ERROR level log entries
+  const hasError = /ERROR\s+/.test(lastRun) && (
+    lastRun.includes('IMAP connection failed') || 
+    lastRun.includes('Sync failed')
+  );
+  if (hasError) {
+    // Extract error message from log - try multiple patterns
+    let errorMessage = "Sync failed (check log for details)";
+    // Pattern: ERROR IMAP connection failed {"...", "errorMessage": "..."}
+    const errorMatch = lastRun.match(/IMAP connection failed[^{]*"errorMessage":\s*"([^"]+)"/);
+    if (errorMatch) {
+      errorMessage = errorMatch[1];
+    } else {
+      // Pattern: ERROR Sync failed {"...", "error": "..."}
+      const syncFailedMatch = lastRun.match(/Sync failed[^{]*"error":\s*"([^"]+)"/);
+      if (syncFailedMatch) {
+        errorMessage = syncFailedMatch[1];
+      } else {
+        // Fallback: extract any error message from the JSON
+        const anyErrorMatch = lastRun.match(/"error(Message)?":\s*"([^"]+)"/);
+        if (anyErrorMatch) {
+          errorMessage = anyErrorMatch[2];
+        }
+      }
+    }
+    return { hasError: true, errorMessage };
+  }
+  return { hasError: false };
+}
 
 // When invoked as "tsx index.ts -- <cmd>", argv[2] is "--" and argv[3] is the command
 const rest = process.argv.slice(2);
@@ -31,7 +73,9 @@ type SearchField =
   | "subject"
   | "rank"
   | "snippet"
-  | "body";
+  | "bodyPreview"
+  | "body"
+  | "attachments";
 
 const VALID_DETAILS = new Set<SearchDetail>(["headers", "snippet", "body"]);
 const VALID_FIELDS = new Set<SearchField>([
@@ -43,7 +87,9 @@ const VALID_FIELDS = new Set<SearchField>([
   "subject",
   "rank",
   "snippet",
+  "bodyPreview",
   "body",
+  "attachments",
 ]);
 const DEFAULT_HEADER_FIELDS: SearchField[] = [
   "messageId",
@@ -53,6 +99,8 @@ const DEFAULT_HEADER_FIELDS: SearchField[] = [
   "fromName",
   "subject",
   "rank",
+  "bodyPreview",
+  "attachments",
 ];
 const JSON_LIMIT_CAP = 100;
 const JSON_BYTE_CAP = 64 * 1024;
@@ -71,12 +119,14 @@ interface ParsedSearchArgs {
   afterDate?: string;
   beforeDate?: string;
   limit?: number;
-  fts: boolean;
   detail: SearchDetail;
   fields?: SearchField[];
-  forceJson: boolean;
+  forceText: boolean;
   idsOnly: boolean;
   timings: boolean;
+  includeTopBody: boolean;
+  threads: boolean;
+  includeNoise?: boolean;
 }
 
 function searchUsage() {
@@ -87,17 +137,15 @@ function searchUsage() {
   console.error("  Example: zmail search \"after:7d subject:meeting\"");
   console.error("");
   console.error("Flags:");
-  console.error("  --limit <n>        max results (default: 20)");
-  console.error("  --fts              use FTS-only search (exact keyword matching)");
-  console.error("                     default: hybrid search (semantic + FTS)");
+  console.error("  --limit <n>        max results (default: 50)");
   console.error("  --detail <level>   headers | snippet | body (default: headers)");
   console.error("  --fields <csv>     projection fields, e.g. messageId,subject,date");
+  console.error("  --threads          return full threads for each match (conversation view)");
   console.error("  --ids-only         return only message IDs");
   console.error("  --timings          include machine-readable search timings");
-  console.error("  --json             force JSON output (default: table for TTY, JSON when piped)");
-  console.error("");
-  console.error("Search results include attachment counts. For document-related queries,");
-  console.error("check attachments with: zmail attachment list <message_id>");
+  console.error("  --text             human-readable table output (default: JSON)");
+  console.error("  --no-body          suppress body text for top result (default: included)");
+  console.error("  --include-noise      include noise messages (promotional/social/forums/bulk/spam) (default: excluded)");
 }
 
 interface ParsedWhoArgs {
@@ -105,21 +153,29 @@ interface ParsedWhoArgs {
   limit?: number;
   minSent?: number;
   minReceived?: number;
-  forceJson: boolean;
+  includeNoreply?: boolean;
+  dynamic?: boolean; // Kept for backward compatibility / testing, but dynamic is now default
+  forceText: boolean;
+  enrich?: boolean;
 }
 
 function whoUsage() {
   console.error("Usage: zmail who <query> [flags]");
-  console.error("  --json             output JSON (default: table for TTY, JSON when piped)");
+  console.error("  --text             human-readable table output (default: JSON)");
   console.error("  --limit <n>        max results (default: 50)");
   console.error("  --min-sent <n>     minimum sent count");
   console.error("  --min-received <n> minimum received count");
+  console.error("  --all              include noreply/bot addresses");
+  console.error("  --enrich          use LLM (GPT-4.1 nano) to guess names from email addresses");
+  console.error("                     requires ZMAIL_OPENAI_API_KEY to be set");
+  console.error("");
+  console.error("Note: Profiles are built dynamically from messages (always up-to-date)");
 }
 
 function parseWhoArgs(rawArgs: string[]): ParsedWhoArgs {
   const parsed: ParsedWhoArgs = {
     query: "",
-    forceJson: false,
+    forceText: false,
   };
 
   const queryParts: string[] = [];
@@ -139,8 +195,20 @@ function parseWhoArgs(rawArgs: string[]): ParsedWhoArgs {
       whoUsage();
       process.exit(0);
     }
-    if (arg === "--json") {
-      parsed.forceJson = true;
+    if (arg === "--text") {
+      parsed.forceText = true;
+      continue;
+    }
+    if (arg === "--all") {
+      parsed.includeNoreply = true;
+      continue;
+    }
+    if (arg === "--dynamic") {
+      parsed.dynamic = true;
+      continue;
+    }
+    if (arg === "--enrich") {
+      parsed.enrich = true;
       continue;
     }
     if (arg === "--limit") {
@@ -201,11 +269,12 @@ function parseDateFlag(raw: string, flagName: "--after" | "--before"): string {
 function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
   const parsed: ParsedSearchArgs = {
     query: "",
-    fts: false,
     detail: "headers",
-    forceJson: false,
+    forceText: false,
     idsOnly: false,
     timings: false,
+    includeTopBody: true,
+    threads: false,
   };
 
   const queryParts: string[] = [];
@@ -225,8 +294,8 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
       searchUsage();
       process.exit(0);
     }
-    if (arg === "--json") {
-      parsed.forceJson = true;
+    if (arg === "--text") {
+      parsed.forceText = true;
       continue;
     }
     if (arg === "--ids-only") {
@@ -235,6 +304,10 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
     }
     if (arg === "--timings") {
       parsed.timings = true;
+      continue;
+    }
+    if (arg === "--no-body") {
+      parsed.includeTopBody = false;
       continue;
     }
     if (arg === "--from") {
@@ -258,12 +331,16 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
       parsed.limit = limit;
       continue;
     }
-    if (arg === "--fts") {
-      parsed.fts = true;
+    if (arg === "--threads") {
+      parsed.threads = true;
+      continue;
+    }
+    if (arg === "--include-noise") {
+      parsed.includeNoise = true;
       continue;
     }
     if (arg === "--mode") {
-      throw new Error(`--mode flag has been removed. Use --fts for FTS-only search, or omit for hybrid (default).`);
+      throw new Error(`--mode flag has been removed.`);
     }
     if (arg === "--detail") {
       const detail = readValue(arg) as SearchDetail;
@@ -402,9 +479,7 @@ function getSearchHint(
   query: string,
   resultCount: number,
   totalMatched: number,
-  limit?: number,
-  meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean },
-  attachmentCount?: number
+  limit?: number
 ): string | undefined {
   const words = query.trim().split(/\s+/).filter(Boolean);
   const isSingleWord = words.length === 1;
@@ -420,22 +495,18 @@ function getSearchHint(
     return "No results found. Try broader terms or check spelling.";
   }
 
-  // Attachment-aware hint for document-related searches
-  if (attachmentCount !== undefined && attachmentCount > 0 && hasDocumentKeywords) {
-    const attachmentHint = attachmentCount === 1
-      ? `💡 Found 1 message with attachments. Use: zmail attachment list <message_id>`
-      : `💡 Found ${attachmentCount} messages with attachments. Use: zmail attachment list <message_id>`;
-    
-    // If we have truncated results hint, combine them
-    if (totalMatched > resultCount && totalMatched > (limit ?? 20)) {
-      return `${attachmentHint}\nShowing ${resultCount} of ${totalMatched} matches. Use --limit to see more.`;
-    }
-    return attachmentHint;
+  // Batch reading hint (when multiple results found)
+  if (resultCount > 1) {
+    return `Tip: Top result includes body preview. Use get_messages(messageIds) to batch-read; use detail: 'summary' for minimal tokens when scanning, or detail: 'full' with maxBodyChars as needed.`;
   }
 
   // Truncated results hint (only show if we have more results than displayed)
-  if (totalMatched > resultCount && totalMatched > (limit ?? 20)) {
-    return `Showing ${resultCount} of ${totalMatched} matches. Use --limit to see more.`;
+  if (totalMatched > resultCount && totalMatched > (limit ?? 50)) {
+    const hasOffset = false; // TODO: track offset if we add it to CLI args
+    if (hasOffset) {
+      return `Showing ${resultCount} of ${totalMatched} matches. Use --limit or --offset to see more.`;
+    }
+    return `Showing ${resultCount} of ${totalMatched} matches. Use --limit ${Math.min(totalMatched, (limit ?? 50) + 50)} to see more, or --offset ${resultCount} for next page.`;
   }
 
   // Vague single-word query hint (common words that return too many results)
@@ -451,18 +522,6 @@ function getSearchHint(
     return hint;
   }
 
-  // Query has exact keyword feel (short, no spaces, or contains quotes)
-  const hasQuotes = /["']/.test(query);
-  const isShortExact = words.length <= 2 && words.every(w => w.length <= 10);
-  if (hasQuotes || isShortExact) {
-    return "Tip: Add --fts for exact keyword matching";
-  }
-
-  // Use meta to detect semantic-only matches (no FTS matches) for gibberish queries
-  if (meta && meta.hasSemanticOnlyMatches && !meta.hasFtsMatches && resultCount > 0) {
-    // This suggests low-quality semantic matches (gibberish query)
-    return "No exact matches found. Showing semantic approximations.";
-  }
 
   return undefined;
 }
@@ -472,27 +531,31 @@ function serializeJsonPayload(
   timings?: object,
   query?: string,
   resultCount?: number,
+  totalMatched?: number,
   limit?: number,
-  meta?: { hasFtsMatches: boolean; hasSemanticOnlyMatches: boolean; hasAnyMatches: boolean },
-  attachmentCount?: number
+  searchHint?: string,
+  threads?: unknown[]
 ): string {
   const total = rows.length;
-  const hint = query ? getSearchHint(query, resultCount ?? total, total, limit, meta, attachmentCount) : undefined;
-  
+  const trueTotal = totalMatched ?? total; // Use provided totalMatched, fallback to rows.length
+  const truncated = trueTotal > total;
+  // Use searchHint from searchWithMeta if provided, otherwise fall back to getSearchHint
+  const hint = searchHint ?? (query ? getSearchHint(query, resultCount ?? total, trueTotal, limit) : undefined);
+  const hasMeta = truncated || timings || hint || (threads && threads.length > 0);
+
   for (let includeCount = total; includeCount >= 0; includeCount--) {
     const visible = rows.slice(0, includeCount);
-    const truncated = includeCount < total;
-    const payload =
-      truncated || timings || hint
-        ? {
-            results: visible,
-            truncated,
-            totalMatched: total,
-            returned: visible.length,
-            ...(hint ? { hint } : {}),
-            ...(timings ? { timings } : {}),
-          }
-        : visible;
+    const payload = hasMeta
+      ? {
+          results: visible,
+          ...(threads && threads.length > 0 ? { threads } : {}),
+          truncated,
+          totalMatched: trueTotal,
+          returned: visible.length,
+          ...(hint ? { hint } : {}),
+          ...(timings ? { timings } : {}),
+        }
+      : visible;
     const json = JSON.stringify(payload, null, 2);
     if (Buffer.byteLength(json, "utf8") <= JSON_BYTE_CAP) {
       return json;
@@ -502,8 +565,9 @@ function serializeJsonPayload(
   return JSON.stringify(
     {
       results: [],
+      ...(threads && threads.length > 0 ? { threads } : {}),
       truncated: true,
-      totalMatched: total,
+      totalMatched: trueTotal,
       returned: 0,
       ...(hint ? { hint } : {}),
       ...(timings ? { timings } : {}),
@@ -529,7 +593,6 @@ interface MessageRow {
   body_text: string;
   raw_path: string;
   synced_at: string;
-  embedding_state: string;
 }
 
 function parseRawFlag(rawArgs: string[], usage: string): { id: string; raw: boolean } {
@@ -561,110 +624,7 @@ function parseRawFlag(rawArgs: string[], usage: string): { id: string; raw: bool
   return { id, raw };
 }
 
-function readRawEmail(rawPath: string): Buffer | null {
-  if (!rawPath) return null;
-  const absPath = join(config.maildirPath, rawPath);
-  try {
-    return readFileSync(absPath);
-  } catch {
-    return null;
-  }
-}
-
-export async function formatMessageForOutput(message: MessageRow, raw: boolean): Promise<Record<string, unknown>> {
-  const db = getDb();
-  const attachments = db
-    .prepare(
-      `SELECT id, filename, mime_type, size, stored_path, extracted_text
-       FROM attachments WHERE message_id = ? ORDER BY filename`
-    )
-    .all(message.message_id) as Array<{
-    id: number;
-    filename: string;
-    mime_type: string;
-    size: number;
-    stored_path: string;
-    extracted_text: string | null;
-  }>;
-
-  if (raw) {
-    const rawEmail = readRawEmail(message.raw_path);
-    return {
-      ...message,
-      content: {
-        format: "raw",
-        source: "eml",
-        eml: rawEmail ? rawEmail.toString("utf8") : null,
-      },
-      attachments: attachments.map((a) => ({
-        id: a.id,
-        filename: a.filename,
-        mimeType: a.mime_type,
-        size: a.size,
-        extracted: a.extracted_text !== null,
-      })),
-    };
-  }
-
-  const { body_text, ...rest } = message;
-  let body = (body_text ?? "").trim();
-  let source: "body_text" | "html" | "text" | "empty" = body ? "body_text" : "empty";
-
-  if (!body && message.raw_path) {
-    const rawEmail = readRawEmail(message.raw_path);
-    if (rawEmail) {
-      try {
-        const parsed = await parseRawMessage(rawEmail);
-        if (parsed.bodyHtml) {
-          const markdown = htmlToMarkdown(parsed.bodyHtml);
-          if (markdown) {
-            body = markdown;
-            source = "html";
-          }
-        }
-        if (!body && parsed.bodyText) {
-          body = (parsed.bodyText ?? "").trim();
-          if (body) source = "text";
-        }
-      } catch (err) {
-        // Log parsing errors for debugging
-        const { logger } = await import("~/lib/logger");
-        logger.warn("Failed to parse raw email for message", {
-          messageId: message.message_id,
-          rawPath: message.raw_path,
-          error: err instanceof Error ? err.message : String(err),
-        });
-        // fall through to empty content
-      }
-    } else {
-      // Log when raw email file can't be read
-      const { logger } = await import("~/lib/logger");
-      logger.warn("Could not read raw email file", {
-        messageId: message.message_id,
-        rawPath: message.raw_path,
-      });
-    }
-  }
-
-  // Ensure body is never null/undefined - use empty string if parsing failed
-  const finalBody = body || "";
-  
-  return {
-    ...rest,
-    content: {
-      format: source === "html" ? "markdown" : "text",
-      source,
-      markdown: finalBody,
-    },
-    attachments: attachments.map((a) => ({
-      id: a.id,
-      filename: a.filename,
-      mimeType: a.mime_type,
-      size: a.size,
-      extracted: a.extracted_text !== null,
-    })),
-  };
-}
+// formatMessageForOutput is now imported from ~/messages/presenter
 
 /** Token-efficient hint for unknown command so the agent can self-correct. */
 function getUnknownCommandHint(unknownCommand: string): string {
@@ -682,50 +642,126 @@ function getUnknownCommandHint(unknownCommand: string): string {
   return "Run 'zmail' for usage.";
 }
 
+const STATUS_LABEL_WIDTH = 13;
+
+/**
+ * Print sync and indexing status (reusable for status command and early exits)
+ */
+function printStatus(db: SqliteDatabase = getDb()): void {
+  const status = getStatus(db);
+  const pad = (s: string) => s.padEnd(STATUS_LABEL_WIDTH);
+
+  // Calculate progress or status message if we have target, start, and current earliest dates
+  // Only count NEW emails synced in this run, not pre-existing ones
+  let progressText = "";
+  if (status.sync.targetStartDate && status.sync.syncStartEarliestDate && status.sync.earliestSyncedDate) {
+    try {
+      // Parse dates (handle both YYYY-MM-DD and ISO format)
+      const targetDateStr = status.sync.targetStartDate.slice(0, 10); // YYYY-MM-DD
+      const startEarliestStr = status.sync.syncStartEarliestDate.slice(0, 10); // Where we started this sync
+      const currentEarliestStr = status.sync.earliestSyncedDate.slice(0, 10); // Where we are now
+      
+      const targetDate = new Date(targetDateStr + "T00:00:00Z");
+      const startEarliestDate = new Date(startEarliestStr + "T00:00:00Z");
+      const currentEarliestDate = new Date(currentEarliestStr + "T00:00:00Z");
+      
+      // If we've already reached or passed the target, show 100%
+      if (currentEarliestDate <= targetDate) {
+        progressText = " (100% complete)";
+      } else if (currentEarliestDate >= startEarliestDate) {
+        // Still iterating through already-synced date range (internal crawl state; no user-facing progress)
+        progressText = "";
+      } else {
+        // We're syncing new emails - calculate progress percentage
+        // Total range to sync: from where we started (or target, whichever is older) down to target
+        // Use the more recent (larger) date as the starting point
+        const syncStartPoint = startEarliestDate > targetDate ? startEarliestDate : targetDate;
+        const totalRangeDays = Math.ceil((syncStartPoint.getTime() - targetDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        // Progress made: how far we've gone from start point toward target
+        const progressRangeDays = Math.ceil((syncStartPoint.getTime() - currentEarliestDate.getTime()) / (1000 * 60 * 60 * 24));
+        
+        if (totalRangeDays > 0) {
+          const progress = Math.min(100, Math.max(0, Math.round((progressRangeDays / totalRangeDays) * 100)));
+          progressText = ` (${progress}% complete)`;
+        } else if (startEarliestDate <= targetDate) {
+          // Already at or past target when sync started
+          progressText = " (100% complete)";
+        }
+      }
+    } catch (err) {
+      // Invalid date format, skip progress
+    }
+  }
+
+  // Sync status
+  if (status.sync.isRunning) {
+    console.log(`${pad("Sync:")} running${progressText}`);
+  } else if (status.sync.lastSyncAt) {
+    console.log(`${pad("Sync:")} idle (last: ${status.sync.lastSyncAt.slice(0, 10)}, ${status.sync.totalMessages} messages)${progressText}`);
+  } else {
+    console.log(`${pad("Sync:")} never run`);
+  }
+
+  // Search readiness
+  console.log(`${pad("Search:")} FTS ready (${status.search.ftsReady})`);
+
+  // Date range
+  if (status.dateRange) {
+    const earliest = status.dateRange.earliest.slice(0, 10);
+    const latest = status.dateRange.latest.slice(0, 10);
+    console.log(`${pad("Range:")} ${earliest} .. ${latest}`);
+  }
+
+  // Freshness: time since most recent mail and last sync (human + ISO 8601 duration)
+  const latestMailAgo = formatTimeAgo(status.dateRange?.latest ?? null);
+  const lastSyncAgo = status.sync.isRunning ? null : formatTimeAgo(status.sync.lastSyncAt);
+  if (latestMailAgo) {
+    console.log(`${pad("Newest mail:")} ${latestMailAgo.human} (${latestMailAgo.duration})`);
+  }
+  if (lastSyncAgo) {
+    console.log(`${pad("Last sync:")} ${lastSyncAgo.human} (${lastSyncAgo.duration})`);
+  }
+}
+
 async function main() {
+  // Schema check is now handled in src/index.ts before importing CLI
+  // This ensures all commands (including sync via npm run sync) check schema version
+
   switch (command) {
     case "sync": {
       // Sync: Initial setup, goes backward to fill gaps
-      // Usage: zmail sync [--since <spec>]
+      // Usage: zmail sync [<duration>] [--since <spec>] [--foreground]
       const sinceIdx = args.indexOf("--since");
-      const since = sinceIdx >= 0 ? args[sinceIdx + 1] : undefined;
+      let since = sinceIdx >= 0 ? args[sinceIdx + 1] : undefined;
       if (sinceIdx >= 0 && (since === undefined || since.startsWith("-"))) {
-        console.error("Usage: zmail sync [--since <spec>]");
-        console.error("  --since  relative range: 7d, 5w, 3m, 2y (days, weeks, months, years)");
+        console.error("Usage: zmail sync [<duration>] [--since <spec>] [--foreground]");
+        console.error("  duration  positional: 7d, 5w, 3m, 2y (days, weeks, months, years)");
+        console.error("  --since   same as positional duration");
+        console.error("  --foreground  run synchronously (default: background subprocess)");
         console.error("");
         console.error("Syncs email going backward from most recent, filling gaps in the specified date range.");
         console.error("Typically used for initial setup. For frequent updates, use 'zmail refresh'.");
         process.exit(1);
       }
+      // Accept positional duration arg (e.g. `zmail sync 180d` == `zmail sync --since 180d`)
+      if (!since) {
+        const positional = args.find((a) => !a.startsWith("-") && /^\d+[dwmy]?$/i.test(a));
+        if (positional) since = positional;
+      }
 
-      // Run sync (bandwidth-bound) and indexing (API-rate-bound) concurrently (ADR-020).
-      // syncDone resolves when sync finishes inserting messages, signaling the indexer
-      // to drain the queue and exit — regardless of whether sync found 0 or 1000 messages.
-      let resolveSyncDone!: () => void;
-      const syncDone = new Promise<void>((resolve) => { resolveSyncDone = resolve; });
+      const foreground = args.includes("--foreground") || args.includes("--fg");
 
-      // Sync always goes backward (fills gaps from most recent backward)
-      const syncOptions: { since?: string; direction: 'backward'; onLogPath?: (logPath: string) => void } = {
-        direction: 'backward',
-      };
-      if (since) syncOptions.since = since;
-      
-      // Print log path immediately when sync starts (useful for background execution)
-      syncOptions.onLogPath = (logPath: string) => {
-        console.log(`Sync log: ${logPath}`);
-      };
+      // Foreground mode: run synchronously (original behavior)
+      if (foreground) {
+        // Sync always goes backward (fills gaps from most recent backward)
+        const syncOptions: { since?: string; direction: 'backward' } = {
+          direction: 'backward',
+        };
+        if (since) syncOptions.since = since;
 
-      const syncPromise = runSync(syncOptions).then((result) => {
-        resolveSyncDone();
-        return result;
-      });
-      const indexPromise = indexMessages({ syncDone });
+        const syncResult = await runSync(syncOptions);
 
-      // Wait for both to complete
-      const [syncResult, indexResult] = await Promise.all([syncPromise, indexPromise]);
-
-      // Log path already printed at start via onLogPath callback
-      if (syncResult) {
         const sec = (syncResult.durationMs / 1000).toFixed(2);
         const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
         const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
@@ -736,19 +772,138 @@ async function main() {
         console.log(`  bandwidth: ${kbps} KB/s`);
         console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
         console.log(`  duration:  ${sec}s`);
+        break;
       }
 
-      if (indexResult.indexed > 0 || indexResult.failed > 0) {
-        const sec = (indexResult.durationMs / 1000).toFixed(2);
-        console.log("");
-        console.log("Indexing metrics:");
-        console.log(`  indexed:    ${indexResult.indexed}`);
-        if (indexResult.skipped > 0) console.log(`  skipped:    ${indexResult.skipped}`);
-        if (indexResult.failed > 0) console.log(`  failed:     ${indexResult.failed}`);
-        console.log(`  throughput: ${indexResult.messagesPerMinute} msg/min`);
-        console.log(`  duration:   ${sec}s`);
+      // Background mode (default): spawn subprocess, wait until data flows, then exit
+      const db = getDb();
+
+      // Check lock before spawning
+      const syncRow = db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1").get() as
+        | { is_running: number; owner_pid: number | null }
+        | undefined;
+      if (syncRow?.is_running) {
+        console.log(`Sync already running (PID: ${syncRow.owner_pid})\n`);
+        printStatus(db);
+        process.exit(0);
       }
-      break;
+
+      // Detect first-time indexing
+      const messageCount = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+      const isFirstTime = messageCount.count === 0;
+
+      // Spawn subprocess
+      const entrypointScript = join(import.meta.dirname, "..", "index.ts");
+      const subprocessArgs = ["tsx", entrypointScript, "--", "sync", "--foreground"];
+      if (since) {
+        subprocessArgs.push("--since", since);
+      }
+
+      const proc = spawn("npx", subprocessArgs, {
+        cwd: process.cwd(),
+        env: { ...process.env },
+        stdio: "ignore",
+        detached: true,
+      });
+      proc.unref();
+
+      const pid = proc.pid!;
+      const logPath = SYNC_LOG_PATH;
+
+      // Poll until exit condition
+      const POLL_INTERVAL_MS = 2000;
+      const MAX_WAIT_MS = 60_000; // 1 minute (aim for 30s wow, but large mailboxes take longer to connect)
+      const TARGET_COUNT = 20;
+      const startTime = Date.now();
+      let exitReason: 'data' | 'done' | 'timeout' = 'timeout';
+      const imapHost = config.imap.host;
+      let nonTtyPrintedConnecting = false;
+      let nonTtyPrintedProgress = false;
+
+      while (Date.now() - startTime < MAX_WAIT_MS) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+        const { count } = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+        const elapsed = Math.round((Date.now() - startTime) / 1000);
+
+        if (process.stdout.isTTY) {
+          if (count === 0) {
+            process.stdout.write(`\rConnecting to IMAP server at ${imapHost}...`);
+          } else {
+            process.stdout.write(`\rSync running... ${count.toLocaleString()} in index (${elapsed}s)`);
+          }
+        } else {
+          if (count === 0) {
+            if (!nonTtyPrintedConnecting) {
+              process.stdout.write(`Connecting to IMAP server at ${imapHost}...`);
+              nonTtyPrintedConnecting = true;
+            }
+          } else {
+            if (!nonTtyPrintedProgress) {
+              process.stdout.write(`Sync running... ${count.toLocaleString()} in index (${elapsed}s)`);
+              nonTtyPrintedProgress = true;
+            }
+          }
+        }
+
+        if (count >= TARGET_COUNT) {
+          exitReason = 'data';
+          break;
+        }
+        if (!isProcessAlive(pid)) {
+          exitReason = 'done';
+          break;
+        }
+      }
+      process.stdout.write("\n");
+
+      // Print exit output
+      // Always print PID, log, and status
+      console.log("\nSync running in background.");
+      console.log(`  PID:    ${pid}`);
+      console.log(`  Log:    ${logPath}`);
+      console.log(`  Status: zmail status`);
+
+      // Add encouraging first-time messages
+      if (exitReason === 'data' && isFirstTime) {
+        const { count } = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+        console.log(`\nData is flowing! ${count} messages synced so far — search is ready.\n`);
+        console.log("Try a few queries to see what's in your inbox:");
+        console.log('  zmail search "invoice"');
+        console.log('  zmail search "from:boss@example.com"');
+        console.log('  zmail who "alice"');
+      } else if (exitReason === 'done' && isFirstTime) {
+        const { count } = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+        
+        // BUG-007 fix: Check sync log for errors before printing success
+        const logCheck = checkSyncLogForErrors();
+        if (logCheck.hasError) {
+          console.error(`\nSync failed: ${logCheck.errorMessage}`);
+          console.error(`Check log: ${logPath}`);
+          process.exit(1);
+        }
+        
+        if (count === 0) {
+          console.warn("\nWarning: 0 messages synced. This may indicate:");
+          console.warn("  - Invalid IMAP credentials (check with 'zmail setup')");
+          console.warn("  - No messages in the specified date range");
+          console.warn(`  - Check sync log: ${logPath}`);
+        } else {
+          console.log(`\nSync complete! ${count} messages synced and indexed.`);
+          console.log("Try: zmail search \"your query\"  |  zmail who \"name\"");
+        }
+      } else if (exitReason === 'timeout') {
+        const { count } = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+        if (count === 0) {
+          console.warn("\nWarning: No messages synced yet. This may indicate:");
+          console.warn("  - Invalid IMAP credentials (check with 'zmail setup')");
+          console.warn("  - Large mailbox taking longer to connect");
+          console.warn(`  - Check sync log: ${logPath}`);
+        } else {
+          console.log("\n(Large mailboxes may take longer to connect — sync continues in background)");
+        }
+      }
+
+      process.exit(0);
     }
 
     case "search": {
@@ -762,9 +917,8 @@ async function main() {
         process.exit(1);
       }
 
-      const isTty = process.stdout.isTTY;
       const forceJsonForAdvancedFlags = parsed.idsOnly || parsed.timings || !!parsed.fields?.length;
-      const shouldOutputJson = parsed.forceJson || !isTty || forceJsonForAdvancedFlags;
+      const shouldOutputJson = !parsed.forceText || forceJsonForAdvancedFlags;
       let effectiveLimit = parsed.limit;
       if (shouldOutputJson && effectiveLimit && effectiveLimit > JSON_LIMIT_CAP) {
         console.error(
@@ -775,14 +929,21 @@ async function main() {
 
       const db = getDb();
       const effectiveDetail = resolveDetail(parsed.detail, parsed.fields);
-      const run = await searchWithMeta(db, {
-        query: parsed.query,
-        fromAddress: parsed.fromAddress,
-        afterDate: parsed.afterDate,
-        beforeDate: parsed.beforeDate,
-        limit: effectiveLimit,
-        fts: parsed.fts,
-      });
+      let run;
+      try {
+        run = await searchWithMeta(db, {
+          query: parsed.query,
+          fromAddress: parsed.fromAddress,
+          afterDate: parsed.afterDate,
+          beforeDate: parsed.beforeDate,
+          limit: effectiveLimit,
+          includeThreads: parsed.threads,
+          includeNoise: parsed.includeNoise,
+        });
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exit(1);
+      }
 
       let results: Array<SearchResult & { body?: string; attachments?: AttachmentMetadata }> = run.results;
       if (effectiveDetail === "body") {
@@ -806,9 +967,10 @@ async function main() {
           parsed.timings ? run.timings : undefined,
           parsed.query,
           results.length,
+          run.totalMatched ?? results.length,
           effectiveLimit,
-          run._meta,
-          messagesWithAttachments
+          parsed.query ? getSearchHint(parsed.query, results.length, run.totalMatched ?? results.length, effectiveLimit) : undefined,
+          parsed.threads && run.threads?.length ? run.threads : undefined
         );
         console.log(json);
         break;
@@ -816,14 +978,15 @@ async function main() {
 
       if (results.length === 0) {
         console.log("No results found.");
-        const hint = getSearchHint(parsed.query, 0, 0, effectiveLimit, run._meta, 0);
+        const hint = getSearchHint(parsed.query, 0, 0, effectiveLimit);
         if (hint) {
           console.log(`\n${hint}`);
         }
         break;
       }
 
-      console.log(`Found ${results.length} result${results.length === 1 ? "" : "s"}:\n`);
+      const totalMatched = run.totalMatched ?? results.length;
+      console.log(`Found ${results.length} result${results.length === 1 ? "" : "s"}${totalMatched > results.length ? ` (of ${totalMatched} total)` : ""}:\n`);
       if (effectiveDetail === "headers") {
         console.log("  DATE        FROM                 SUBJECT                          MESSAGE ID");
         console.log("  " + "-".repeat(96));
@@ -854,9 +1017,26 @@ async function main() {
           console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}${attachmentIndicator}`);
         }
       }
-      
-      // Show actionable hints after results (only in TTY, not JSON)
-      const hint = getSearchHint(parsed.query, results.length, results.length, effectiveLimit, run._meta, messagesWithAttachments);
+
+      if (parsed.threads && run.threads?.length) {
+        console.log("\nThreads (full conversations):");
+        for (const thread of run.threads) {
+          console.log(`\n  Thread: ${thread.subject} (${thread.threadId})`);
+          for (const msg of thread.messages) {
+            const from = (msg.fromName ? `${msg.fromName} ` : "") + `<${msg.fromAddress}>`;
+            console.log(`    ${msg.date.slice(0, 10)}  ${from}`);
+            console.log(`    ${msg.subject}`);
+            if (msg.bodyPreview?.trim()) {
+              const preview = msg.bodyPreview.replace(/\n/g, " ").slice(0, 120);
+              console.log(`    ${preview}${msg.bodyPreview.length > 120 ? "…" : ""}`);
+            }
+            console.log("");
+          }
+        }
+      }
+
+      // Show actionable hints after results (only in text mode, not JSON)
+      const hint = getSearchHint(parsed.query, results.length, totalMatched, effectiveLimit);
       if (hint) {
         console.log(`\n${hint}`);
       }
@@ -873,18 +1053,30 @@ async function main() {
         process.exit(1);
       }
 
-      const isTty = process.stdout.isTTY;
-      const shouldOutputJson = whoParsed.forceJson || !isTty;
+      const shouldOutputJson = !whoParsed.forceText;
 
       const db = getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
-      const result = who(db, {
+
+      const startTime = Date.now();
+      const result = await who(db, {
         query: whoParsed.query,
         limit: whoParsed.limit,
         minSent: whoParsed.minSent,
         minReceived: whoParsed.minReceived,
+        includeNoreply: whoParsed.includeNoreply,
         ownerAddress,
+        enrich: whoParsed.enrich,
       });
+      const duration = Date.now() - startTime;
+
+      // Add timing info for performance monitoring
+      if (shouldOutputJson) {
+        (result as WhoResult & { _timing?: { ms: number } })._timing = { ms: duration };
+      } else if (whoParsed.dynamic) {
+        // Show timing in text mode if --dynamic flag was explicitly used (for testing)
+        console.log(`\n[Query took ${duration}ms]\n`);
+      }
 
       if (shouldOutputJson) {
         console.log(JSON.stringify(result, null, 2));
@@ -893,36 +1085,116 @@ async function main() {
 
       if (result.people.length === 0) {
         console.log("No matching people found.");
+        if (result.hint) {
+          console.log(`\n${result.hint}`);
+        }
         break;
       }
 
       console.log(`People matching "${result.query}":\n`);
-      console.log("  ADDRESS".padEnd(44) + "  DISPLAY NAME".padEnd(24) + "  SENT   RECV   MENTIONED");
-      console.log("  " + "-".repeat(90));
       for (const p of result.people) {
-        const addr = p.address.length > 42 ? p.address.slice(0, 39) + "..." : p.address.padEnd(42);
-        const name = (p.displayName ?? "").length > 22 ? (p.displayName ?? "").slice(0, 19) + "..." : (p.displayName ?? "").padEnd(22);
-        console.log(`  ${addr}  ${name}  ${String(p.sentCount).padStart(5)}  ${String(p.receivedCount).padStart(5)}  ${String(p.mentionedCount).padStart(5)}`);
+        // Display name: use firstname/lastname if available, otherwise name field
+        const name = (p.firstname && p.lastname) 
+          ? `${p.firstname} ${p.lastname}`
+          : p.name || (p.firstname || p.lastname) || "Unknown";
+        const akaStr = p.aka && p.aka.length > 0 ? ` (aka: ${p.aka.join(", ")})` : "";
+        console.log(`  ${name}${akaStr}`);
+        console.log(`    Primary: ${p.primaryAddress}`);
+        if (p.addresses.length > 1) {
+          const otherAddrs = p.addresses.filter((a) => a !== p.primaryAddress);
+          console.log(`    Other addresses: ${otherAddrs.join(", ")}`);
+        }
+        if (p.phone) {
+          console.log(`    Phone: ${p.phone}`);
+        }
+        if (p.title || p.company) {
+          const titleCompany = [p.title, p.company].filter(Boolean).join(" at ");
+          console.log(`    ${titleCompany}`);
+        }
+        if (p.urls && p.urls.length > 0) {
+          console.log(`    URLs: ${p.urls.join(", ")}`);
+        }
+        console.log(
+          `    Counts: ${p.sentCount} sent, ${p.receivedCount} received, ${p.mentionedCount} mentioned`
+        );
+        if (p.lastContact) {
+          console.log(`    Last contact: ${p.lastContact}`);
+        }
+        console.log("");
+      }
+      
+      if (result.hint) {
+        console.log(result.hint);
       }
       break;
     }
 
     case "thread": {
-      let parsed;
-      try {
-        parsed = parseRawFlag(args, "zmail thread <thread_id> [--raw]");
-      } catch (err) {
-        console.error(err instanceof Error ? err.message : String(err));
-        process.exit(1);
+      let threadId: string | undefined;
+      let raw = false;
+      let json = false;
+
+      for (const arg of args) {
+        if (arg === "--raw") {
+          raw = true;
+          continue;
+        }
+        if (arg === "--json") {
+          json = true;
+          continue;
+        }
+        if (arg === "--help") {
+          console.error("Usage: zmail thread <thread_id> [--json] [--raw]");
+          console.error("  --json    output JSON (default: text)");
+          console.error("  --raw     include raw .eml content");
+          process.exit(0);
+        }
+        if (arg.startsWith("-")) {
+          throw new Error(`Unknown flag: ${arg}`);
+        }
+        if (threadId) {
+          throw new Error("Too many positional arguments.");
+        }
+        threadId = arg;
+      }
+
+      if (!threadId) {
+        throw new Error("Usage: zmail thread <thread_id> [--json] [--raw]");
       }
 
       const db = getDb();
-      const threadId = normalizeMessageId(parsed.id);
+      const normalizedThreadId = normalizeMessageId(threadId);
       const messages = db
         .prepare("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
-        .all(threadId) as MessageRow[];
-      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, parsed.raw)));
-      console.log(JSON.stringify(shaped, null, 2));
+        .all(normalizedThreadId) as MessageRow[];
+
+      if (messages.length === 0) {
+        if (json) {
+          console.log("[]");
+          break;
+        }
+        console.error(`Thread not found: ${threadId}`);
+        process.exit(1);
+      }
+
+      if (json) {
+        const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, raw)));
+        console.log(JSON.stringify(shaped, null, 2));
+      } else {
+        // Text format: format each message with formatMessageLlmFriendly
+        const total = messages.length;
+        for (let i = 0; i < messages.length; i++) {
+          const message = messages[i];
+          const shaped = await formatMessageForOutput(message, raw);
+          if (total > 1) {
+            console.log(`=== Message ${i + 1} of ${total} ===`);
+          }
+          console.log(formatMessageLlmFriendly(message, shaped));
+          if (i < messages.length - 1) {
+            console.log("");
+          }
+        }
+      }
       break;
     }
 
@@ -943,8 +1215,8 @@ async function main() {
         .prepare("SELECT * FROM messages WHERE message_id = ?")
         .get(messageId) as MessageRow | undefined;
       if (!message) {
-        console.log("null");
-        break;
+        console.error(`Message not found: ${messageId}`);
+        process.exit(1);
       }
       const shaped = await formatMessageForOutput(message, parsed.raw);
       console.log(formatMessageLlmFriendly(message, shaped));
@@ -953,127 +1225,173 @@ async function main() {
 
     case "refresh": {
       // Refresh: Frequent updates, brings local copy up to date
-      // Usage: zmail refresh
-      // No --since needed - uses last_uid checkpoint to fetch only new messages
+      // Usage: zmail refresh [--force] [--include-noise] [--text]
+      // No --since needed - uses last_uid checkpoint to fetch only new messages.
+      // Output: JSON by default; --text for human-readable.
+      // --force: skip STATUS early exit and always run SEARCH + fetch (use when you know new mail arrived).
+      // --include-noise: include promotional/social/junk in newMail (default: excluded).
 
-      // Run sync (bandwidth-bound) and indexing (API-rate-bound) concurrently (ADR-020).
-      let resolveSyncDone!: () => void;
-      const syncDone = new Promise<void>((resolve) => { resolveSyncDone = resolve; });
-
-      // Refresh always goes forward (fetches new messages since last sync)
-      const syncOptions: { direction: 'forward'; onLogPath?: (logPath: string) => void } = {
+      const force = args.includes("--force");
+      const includeNoise = args.includes("--include-noise");
+      const forceText = args.includes("--text");
+      const syncOptions: { direction: 'forward'; force?: boolean } = {
         direction: 'forward',
       };
-      
-      // Print log path immediately when sync starts (useful for background execution)
-      syncOptions.onLogPath = (logPath: string) => {
-        console.log(`Sync log: ${logPath}`);
+      if (force) syncOptions.force = true;
+
+      const syncResult = await runSync(syncOptions);
+
+      // New-mail preview: up to 10 summaries (headers + snippet), noise excluded unless --include-noise
+      let newMail: Array<{ messageId: string; date: string; fromAddress: string; fromName: string | null; subject: string; snippet: string }> = [];
+      if (syncResult.synced > 0 && syncResult.newMessageIds?.length) {
+        const db = getDb();
+        const placeholders = syncResult.newMessageIds.map(() => "?").join(",");
+        const rows = db
+          .prepare(
+            /* sql */ `
+            SELECT message_id AS messageId, from_address AS fromAddress, from_name AS fromName, subject, date,
+              COALESCE(TRIM(SUBSTR(body_text, 1, 200)), '') || (CASE WHEN LENGTH(TRIM(body_text)) > 200 THEN '…' ELSE '' END) AS snippet,
+              is_noise AS isNoise
+            FROM messages
+            WHERE message_id IN (${placeholders})
+            ORDER BY date DESC
+          `
+          )
+          .all(...syncResult.newMessageIds) as Array<{
+          messageId: string;
+          fromAddress: string;
+          fromName: string | null;
+          subject: string;
+          date: string;
+          snippet: string;
+          isNoise: number;
+        }>;
+        const filtered = includeNoise ? rows : rows.filter((r) => r.isNoise === 0);
+        newMail = filtered.slice(0, 10).map((r) => ({
+          messageId: r.messageId,
+          date: r.date,
+          fromAddress: r.fromAddress,
+          fromName: r.fromName,
+          subject: r.subject,
+          snippet: r.snippet.replace(/<[^>]+>/g, "").trim(),
+        }));
+      }
+
+      const output: Record<string, unknown> = {
+        synced: syncResult.synced,
+        messagesFetched: syncResult.messagesFetched,
+        bytesDownloaded: syncResult.bytesDownloaded,
+        durationMs: syncResult.durationMs,
+        bandwidthBytesPerSec: syncResult.bandwidthBytesPerSec,
+        messagesPerMinute: syncResult.messagesPerMinute,
+        newMail,
       };
+      if (syncResult.earlyExit) output.earlyExit = true;
 
-      const syncPromise = runSync(syncOptions).then((result) => {
-        resolveSyncDone();
-        return result;
-      });
-      const indexPromise = indexMessages({ syncDone });
-
-      // Wait for both to complete
-      const [syncResult, indexResult] = await Promise.all([syncPromise, indexPromise]);
-
-      // Log path already printed at start via onLogPath callback
-      if (syncResult) {
+      if (forceText) {
         const sec = (syncResult.durationMs / 1000).toFixed(2);
         const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
         const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
         console.log("");
+        if (syncResult.earlyExit) console.log("No new messages (skipped fetch).");
         console.log("Refresh metrics:");
         console.log(`  messages:  ${syncResult.synced} new, ${syncResult.messagesFetched} fetched`);
         console.log(`  downloaded: ${mb} MB (${syncResult.bytesDownloaded} bytes)`);
         console.log(`  bandwidth: ${kbps} KB/s`);
         console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
         console.log(`  duration:  ${sec}s`);
-      }
-
-      if (indexResult.indexed > 0 || indexResult.failed > 0) {
-        const sec = (indexResult.durationMs / 1000).toFixed(2);
-        console.log("");
-        console.log("Indexing metrics:");
-        console.log(`  indexed:    ${indexResult.indexed}`);
-        if (indexResult.failed > 0) {
-          console.log(`  failed:     ${indexResult.failed}`);
+        if (newMail.length > 0) {
+          console.log("");
+          console.log("New mail:");
+          console.log("  DATE        FROM                 SUBJECT                          SNIPPET");
+          console.log("  " + "-".repeat(80));
+          for (const r of newMail) {
+            const date = r.date.slice(0, 10);
+            const from = (r.fromName ? `${r.fromName} ` : "") + `<${r.fromAddress}>`;
+            const fromShort = from.length > 20 ? from.slice(0, 17) + "..." : from.padEnd(20);
+            const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
+            const snippetShort = r.snippet.length > 30 ? r.snippet.slice(0, 27) + "..." : r.snippet;
+            console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}`);
+          }
         }
-        console.log(`  throughput: ${Math.round(indexResult.messagesPerMinute)} msg/min`);
-        console.log(`  duration:  ${sec}s`);
+      } else {
+        console.log(JSON.stringify(output, null, 2));
       }
       break;
     }
 
     case "status": {
-      const db = getDb();
-      const syncStatus = db.prepare("SELECT * FROM sync_summary WHERE id = 1").get() as {
-        earliest_synced_date: string | null;
-        latest_synced_date: string | null;
-        total_messages: number;
-        last_sync_at: string | null;
-        is_running: number;
-      };
-      const indexStatus = db.prepare("SELECT * FROM indexing_status WHERE id = 1").get() as {
-        is_running: number;
-        total_to_index: number;
-        indexed_so_far: number;
-        started_at: string | null;
-        completed_at: string | null;
-      };
-
-      // Sync status
-      if (syncStatus.is_running) {
-        console.log(`Sync:      running`);
-      } else if (syncStatus.last_sync_at) {
-        console.log(`Sync:      idle (last: ${syncStatus.last_sync_at.slice(0, 10)}, ${syncStatus.total_messages} messages)`);
-      } else {
-        console.log(`Sync:      never run`);
-      }
-
-      // Indexing status - always use messages table as source of truth
-      const totalIndexed = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'done'").get() as { count: number };
-      const totalFailed = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'failed'").get() as { count: number };
-      const pendingCount = db.prepare("SELECT COUNT(*) as count FROM messages WHERE embedding_state = 'pending'").get() as { count: number };
+      const showImapStatus = args.includes("--imap") || args.includes("--server");
+      const outputJson = args.includes("--json");
       
-      if (indexStatus.is_running) {
-        // SQLite datetime('now') is UTC but has no 'Z'; parse as UTC to avoid negative elapsed (local-time parse)
-        const startedMs = indexStatus.started_at
-          ? (indexStatus.started_at.includes("Z") || indexStatus.started_at.includes("+")
-              ? new Date(indexStatus.started_at).getTime()
-              : new Date(indexStatus.started_at.replace(" ", "T") + "Z").getTime())
-          : 0;
-        const elapsed = startedMs ? Math.round((Date.now() - startedMs) / 1000) : 0;
-        // total_to_index can be 0 when sync+index start together (pending was 0 at start); use live total for display
-        const displayTotal = Math.max(indexStatus.total_to_index, indexStatus.indexed_so_far + pendingCount.count);
-        console.log(`Indexing:  running (${indexStatus.indexed_so_far}/${displayTotal} indexed${totalFailed.count > 0 ? `, ${totalFailed.count} failed` : ''}, ${elapsed}s elapsed)`);
-      } else if (indexStatus.completed_at) {
-        console.log(`Indexing:  idle (last: ${indexStatus.completed_at.slice(0, 10)}, ${totalIndexed.count} indexed${totalFailed.count > 0 ? `, ${totalFailed.count} failed` : ''})`);
+      const db = getDb();
+      
+      if (outputJson) {
+        const status = getStatus(db);
+        const output: Record<string, unknown> = { ...status };
+        const latestMailAgo = formatTimeAgo(status.dateRange?.latest ?? null);
+        const lastSyncAgo = status.sync.isRunning ? null : formatTimeAgo(status.sync.lastSyncAt);
+        output.freshness = {
+          latestMailAgo: latestMailAgo ?? null,
+          lastSyncAgo: lastSyncAgo ?? null,
+        };
+        
+        if (showImapStatus) {
+          const imapComparison = await getImapServerStatus(db);
+          if (imapComparison) {
+            output.imap = imapComparison;
+          }
+        }
+        
+        console.log(JSON.stringify(output, null, 2));
       } else {
-        console.log(`Indexing:  never run`);
-      }
+        printStatus(db);
 
-      // Search readiness: use live counts (sync_summary.total_messages only updates when sync completes)
-      const messagesCount = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
-      const ftsCount = messagesCount.count;
-      const semanticCount = totalIndexed.count;
-      console.log(`Search:    FTS ready (${ftsCount}) | Semantic ready (${semanticCount})`);
-
-      const dateRange = db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages").get() as {
-        earliest: string | null;
-        latest: string | null;
-      };
-      if (dateRange.earliest && dateRange.latest) {
-        const earliest = dateRange.earliest.slice(0, 10);
-        const latest = dateRange.latest.slice(0, 10);
-        console.log(`Range:     ${earliest} .. ${latest}`);
+        // Compare with server using STATUS (only if flag is provided)
+        if (showImapStatus) {
+          const imapComparison = await getImapServerStatus(db);
+          if (imapComparison) {
+            console.log("");
+            console.log("Server comparison:");
+            console.log(`  Server:   ${imapComparison.server.messages} messages, UIDNEXT=${imapComparison.server.uidNext ?? 'unknown'}, UIDVALIDITY=${imapComparison.server.uidValidity ?? 'unknown'}`);
+            console.log(`  Local:    ${imapComparison.local.messages} messages, last_uid=${imapComparison.local.lastUid ?? 'none'}, UIDVALIDITY=${imapComparison.local.uidValidity ?? 'none'}`);
+            
+            if (imapComparison.missing !== null && imapComparison.missing > 0 && imapComparison.missingUidRange) {
+              console.log(`  Missing:  ${imapComparison.missing} new message(s) (UIDs ${imapComparison.missingUidRange.start}..${imapComparison.missingUidRange.end})`);
+            } else if (imapComparison.missing === 0) {
+              console.log(`  Status:   Up to date (no new messages)`);
+            }
+            
+            if (imapComparison.uidValidityMismatch) {
+              console.log(`  Warning:  UIDVALIDITY mismatch - mailbox may have been reset`);
+            }
+            
+            if (imapComparison.coverage) {
+              console.log(`  Coverage: Goes back ${imapComparison.coverage.daysAgo} days (${imapComparison.coverage.yearsAgo} years) to ${imapComparison.coverage.earliestDate}`);
+            }
+          }
+        } else {
+          console.log("");
+          const syncStatus = getStatus(db);
+          const TEN_MIN_MS = 10 * 60 * 1000; // 10 minutes
+          const lastSyncAt = syncStatus.sync.lastSyncAt;
+          const lastSyncMs = lastSyncAt
+            ? Date.now() - (lastSyncAt.includes("Z") || lastSyncAt.includes("+")
+                ? new Date(lastSyncAt).getTime()
+                : new Date(lastSyncAt.replace(" ", "T") + "Z").getTime())
+            : 0;
+          if (!syncStatus.sync.isRunning && lastSyncMs > TEN_MIN_MS) {
+            console.log("Hint: Run 'zmail refresh' to fetch the latest emails");
+          }
+          console.log("Hint: Add --imap flag to show IMAP server status (may take 10+ seconds longer)");
+        }
       }
+      
       break;
     }
 
     case "stats": {
+      const outputJson = args.includes("--json");
       const db = getDb();
       const total = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
       const dateRange = db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages").get() as
@@ -1088,18 +1406,44 @@ async function main() {
         .prepare("SELECT folder, COUNT(*) as count FROM messages GROUP BY folder ORDER BY count DESC")
         .all() as Array<{ folder: string; count: number }>;
 
-      console.log("Database Statistics\n");
-      console.log(`Total messages: ${total.count}`);
-      if (dateRange?.earliest && dateRange?.latest) {
-        console.log(`Date range: ${dateRange.earliest.slice(0, 10)} to ${dateRange.latest.slice(0, 10)}`);
-      }
-      console.log("\nTop senders:");
-      for (const sender of topSenders) {
-        console.log(`  ${sender.from_address.padEnd(40)} ${sender.count}`);
-      }
-      console.log("\nMessages by folder:");
-      for (const folder of folderBreakdown) {
-        console.log(`  ${folder.folder.padEnd(40)} ${folder.count}`);
+      if (outputJson) {
+        console.log(
+          JSON.stringify(
+            {
+              totalMessages: total.count,
+              dateRange: dateRange?.earliest && dateRange?.latest
+                ? {
+                    earliest: dateRange.earliest.slice(0, 10),
+                    latest: dateRange.latest.slice(0, 10),
+                  }
+                : null,
+              topSenders: topSenders.map((s) => ({
+                address: s.from_address,
+                count: s.count,
+              })),
+              folders: folderBreakdown.map((f) => ({
+                folder: f.folder,
+                count: f.count,
+              })),
+            },
+            null,
+            2
+          )
+        );
+      } else {
+        console.log("Database Statistics\n");
+        console.log(`Total messages: ${total.count}`);
+        if (dateRange?.earliest && dateRange?.latest) {
+          console.log(`Date range: ${dateRange.earliest.slice(0, 10)} to ${dateRange.latest.slice(0, 10)}`);
+        }
+        console.log("\nTop senders:");
+        for (const sender of topSenders) {
+          console.log(`  ${sender.from_address.padEnd(40)} ${sender.count}`);
+        }
+        console.log("\nMessages by folder:");
+        for (const folder of folderBreakdown) {
+          console.log(`  ${folder.folder.padEnd(40)} ${folder.count}`);
+        }
       }
       break;
     }
@@ -1108,7 +1452,7 @@ async function main() {
     case "attachments": {
       if (args.length === 0) {
         console.error("Usage: zmail attachment list <message_id>");
-        console.error("       zmail attachment read <message_id> <index_or_filename> [--raw]");
+        console.error("       zmail attachment read <message_id> <index_or_filename> [--raw] [--no-cache]");
         process.exit(1);
       }
 
@@ -1122,6 +1466,22 @@ async function main() {
 
         const db = getDb();
         const messageId = normalizeMessageId(messageIdArg);
+        
+        // Check if message exists first
+        const messageExists = db
+          .prepare("SELECT 1 FROM messages WHERE message_id = ?")
+          .get(messageId);
+        const shouldOutputJson = !args.includes("--text");
+        if (!messageExists) {
+          if (shouldOutputJson) {
+            console.log("[]");
+            break;
+          }
+          // In text mode, output "No attachments found." to stdout for consistency
+          console.log("No attachments found.");
+          break;
+        }
+
         const attachments = db
           .prepare(
             `SELECT id, filename, mime_type, size, stored_path, extracted_text
@@ -1135,9 +1495,6 @@ async function main() {
           stored_path: string;
           extracted_text: string | null;
         }>;
-
-        const isTty = process.stdout.isTTY;
-        const shouldOutputJson = !isTty || args.includes("--json");
 
         const quotedMsgId = messageId.includes(" ") ? `"${messageId}"` : messageId;
         if (shouldOutputJson) {
@@ -1184,11 +1541,12 @@ async function main() {
         }
       } else if (subcommand === "read") {
         const raw = args.includes("--raw");
-        const readArgs = args.filter((a) => a !== "--raw");
+        const noCache = args.includes("--no-cache");
+        const readArgs = args.filter((a) => a !== "--raw" && a !== "--no-cache");
         const messageIdArg = readArgs[1];
         const indexOrFilename = readArgs[2];
         if (!messageIdArg || indexOrFilename === undefined) {
-          console.error("Usage: zmail attachment read <message_id> <index_or_filename> [--raw]");
+          console.error("Usage: zmail attachment read <message_id> <index_or_filename> [--raw] [--no-cache]");
           process.exit(1);
         }
 
@@ -1233,9 +1591,15 @@ async function main() {
             process.exit(1);
           }
         } else {
-          // Extract and output text
+          // Extract and output text (use --no-cache to force re-extraction and ignore cached result)
           try {
-            const { text } = await extractAndCache(absPath, attachment.mime_type, attachment.filename, attachment.id);
+            const { text } = await extractAndCache(
+              absPath,
+              attachment.mime_type,
+              attachment.filename,
+              attachment.id,
+              noCache
+            );
             console.log(text);
           } catch (err) {
             console.error(`Failed to extract attachment: ${err instanceof Error ? err.message : String(err)}`);
@@ -1245,9 +1609,48 @@ async function main() {
       } else {
         console.error(`Unknown subcommand: ${subcommand}`);
         console.error("Usage: zmail attachment list <message_id>");
-        console.error("       zmail attachment read <message_id> <index_or_filename> [--raw]");
+        console.error("       zmail attachment read <message_id> <index_or_filename> [--raw] [--no-cache]");
         process.exit(1);
       }
+      break;
+    }
+
+    case "ask": {
+      const verbose = args.includes("--verbose") || args.includes("-v");
+      const askArgs = args.filter((a) => a !== "--verbose" && a !== "-v");
+      // Parse question: handle -- separator
+      let question: string;
+      if (askArgs[0] === "--") {
+        question = askArgs.slice(1).join(" ");
+      } else {
+        question = askArgs.join(" ");
+      }
+
+      if (!question.trim()) {
+        console.error("Usage: zmail ask <question> [--verbose]");
+        console.error("  Answer a question about your email using an internal agent (requires ZMAIL_OPENAI_API_KEY).");
+        console.error("");
+        console.error("Example: zmail ask \"summarize my tech news this week\"");
+        console.error("  Use --verbose (or -v) to log pipeline progress (phase 1, context assembly, etc.).");
+        process.exit(1);
+      }
+
+      // Require OpenAI key
+      try {
+        getDb(); // Ensure DB is accessible
+        config.openai.apiKey; // This will throw if missing
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("ZMAIL_OPENAI_API_KEY")) {
+          console.error("zmail ask requires an LLM API key.");
+          console.error("Set ZMAIL_OPENAI_API_KEY or run 'zmail setup' with --openai-key.");
+          process.exit(1);
+        }
+        throw error;
+      }
+
+      const db = getDb();
+      const { runAsk } = await import("~/ask/agent");
+      await runAsk(question, db, { stream: true, verbose });
       break;
     }
 
@@ -1266,20 +1669,21 @@ async function main() {
 
 Usage:
   zmail sync [--since <spec>]     Initial sync: fill gaps going backward (e.g. --since 7d, 5w, 3m, 2y)
-  zmail refresh                    Refresh: fetch new messages since last sync (frequent updates)
-  zmail search <query> [flags]     Search email (hybrid by default; use --fts for exact keyword matching)
+  zmail refresh [--force] [--include-noise] [--text]   Refresh: fetch new messages; JSON with newMail previews (default); --text for human output
+  zmail search <query> [flags]     Search email (FTS5 full-text search)
   zmail who <query> [flags]        Find people by address or name (see --help for flags)
-  zmail status                     Show sync and indexing status
-  zmail stats                      Show database statistics
+  zmail status [--json] [--imap]   Sync/indexing status; --imap: compare with server
+  zmail stats [--json]             Database statistics
   zmail read <id> [--raw]          Read a message (or: zmail message <id>)
-  zmail thread <id> [--raw]        Fetch thread (Markdown by default; raw .eml with --raw)
+  zmail thread <id> [--json] [--raw]   Fetch thread (text by default)
   zmail attachment list <message_id>   List attachments (use message_id from search)
-  zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
+  zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]   Read by index (1-based) or filename
+  zmail ask "<question>"            Answer a question about your email (requires LLM API key)
   zmail mcp                        Start MCP server (stdio)
 
 Agent interfaces:
-  CLI (this): Use for direct subprocess calls. Fast for one-off queries, returns JSON with --json flag.
-  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. See docs/MCP.md.
+  CLI (this): Use for direct subprocess calls. Fast for one-off queries. Commands default to JSON (search, who, attachment list) or text (read, thread, status, stats). Use --text or --json flags to override.
+  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. Search returns bodyPreview and attachment metadata per result; use includeThreads: true for full threads, get_messages([ids]) to batch-read. See docs/MCP.md.
 
 Run 'zmail setup' for setup instructions.
 `);

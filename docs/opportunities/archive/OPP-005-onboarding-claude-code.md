@@ -1,6 +1,6 @@
 # OPP-005: Onboarding Workflow — Amazing First Run in Claude Code and OpenClaw
 
-**Status: Implemented (archived).** Help/setup without env, canonical onboarding text, auto-onboarding on missing config, `zmail setup`, and install path (install script `curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash`, `npm run install-cli` wrapper) are in place. llms.txt and stable release URL delivered via [OPP-007](../OPP-007-packaging-npm-homebrew.md).
+**Status: Implemented (archived).** Help/setup without env, canonical onboarding text, auto-onboarding on missing config, `zmail setup`, and install path (install script `curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash`, `npm run install-cli` wrapper) are in place. llms.txt and stable release URL delivered via [OPP-007](archive/OPP-007-packaging-npm-homebrew.md).
 
 **Problem:** New users in AI-assisted coding environments (Claude Code, OpenClaw, Cursor, etc.) need to get the zmail CLI and configure their account with minimal friction. Gaps that remain: no stable binary URL for "download zmail," and no llms.txt/skill optimized for LLM consumption. The result can be brittle onboarding and repeated back-and-forth ("create an app password," "where do I put it?").
 
@@ -54,4 +54,4 @@
 
 - [AGENTS.md](../../AGENTS.md) — env vars, commands, onboarding behavior, single source of truth.
 - [src/lib/onboarding.ts](../../src/lib/onboarding.ts) — canonical CLI usage and setup text (no deps).
-- [OPP-007](OPP-007-packaging-npm-homebrew.md) — packaging and distribution (npm, Node).
+- [OPP-007](archive/OPP-007-packaging-npm-homebrew.md) — packaging and distribution (npm, Node).

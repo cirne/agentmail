@@ -16,7 +16,7 @@
 
 - **Command:** `zmail who <query> [--json] [--limit N] [--min-sent N] [--min-received N]`. Query is required; matching is case-insensitive substring on address or display name.
 - **Data source:** Existing `messages` table only (`from_address`, `from_name`, `to_addresses`, `cc_addresses`). No new schema or index-time worker. Sync already populates To/CC for every new message (parse from raw MIME at sync time).
-- **Counts (when `IMAP_USER` is set as mailbox owner):**
+- **Counts (when mailbox owner email is configured in config.json):**
   - **sentCount** — emails **I** sent **to** this person (from = me, person in To/CC).
   - **receivedCount** — emails **I** received **from** this person (from = them).
   - **mentionedCount** — emails where this person was in To/CC but **not** the sender (e.g. Donna sends to Tim and me → Tim is "mentioned").

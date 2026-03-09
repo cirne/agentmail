@@ -97,11 +97,11 @@ Once synced, the full corpus is available without internet. Agents can work with
 
 Clarity about what we don't do is as important as what we do.
 
-- **Not a replacement for Gmail/Outlook.** Users keep their existing provider. zmail is a read-side intelligence layer, not a mail client.
+- **Not a replacement for Gmail/Outlook.** Users keep their existing provider. zmail is an intelligence layer in front of the provider, not a standalone mail client.
 - **Not an API proxy.** We don't forward queries to providers. We build a local dataset and query it directly.
-- **Not a write interface.** We don't send email, manage labels, or modify mailbox state. That's the provider's job (or a proxy's). Our job is making email *understandable*, not *manageable*.
+- **Not yet a write interface.** Today we are read-only — search, fetch, summarize. Send is in the vision (see [VISION.md](./VISION.md) — "The Full Loop"). Send is blocked on customer validation for core search/index/onboarding — we want to nail that first.
 
-This focus is intentional. Write operations (send, label, archive) are well-served by existing tools and provider APIs. The underserved problem is deep, fast, intelligent *read* access to email as a dataset.
+This sequencing is intentional. The underserved problem is deep, fast, intelligent *read* access. Once that works reliably for new users, send completes the loop.
 
 ---
 
@@ -129,12 +129,16 @@ Provider (Gmail, Outlook, Fastmail, ...)
 
 Based on this positioning, the highest-leverage work is:
 
-1. **Attachment extraction and indexing** — The single most tangible differentiator. "Search inside every PDF in your email" is immediately compelling and impossible via API proxy.
+1. **Onboarding and user flow** — Agent-friendly setup ([OPP-009](opportunities/archive/OPP-009-agent-friendly-setup.md)) is implemented. Customer validation for core search/index/onboarding — smooth first sync, clear feedback. Send is blocked until we nail that.
 
-2. **MCP tool surface** — Complete the read-side agent interface (`get_thread`, `get_message`, `search_attachments`, `read_attachment`). The "agent-first" claim needs tool breadth.
+2. **Attachment extraction and indexing** — The single most tangible differentiator. "Search inside every PDF in your email" is immediately compelling and impossible via API proxy.
 
-3. **Speed benchmarks** — Quantify the latency advantage. "50x faster than API-based email access" is a concrete, memorable, verifiable claim.
+3. **MCP tool surface** — Complete the read-side agent interface (`get_thread`, `get_message`, `search_attachments`, `read_attachment`). The "agent-first" claim needs tool breadth.
 
-4. **Multi-provider demo** — Show unified search across Gmail + one other provider. Proves the IMAP-universal story.
+4. **Speed benchmarks** — Quantify the latency advantage. "50x faster than API-based email access" is a concrete, memorable, verifiable claim.
 
-5. **Communication graph (long-term)** — Email + Slack + Docs as a unified searchable corpus. This is the ultimate differentiation — no single-provider API proxy can unify across communication systems.
+5. **Multi-provider demo** — Show unified search across Gmail + one other provider. Proves the IMAP-universal story.
+
+6. **Send (after onboarding)** — Draft + send via SMTP, voice profile from history, intent-to-action. See [VISION.md](./VISION.md) — "The Full Loop."
+
+7. **Communication graph (long-term)** — Email + Slack + Docs as a unified searchable corpus. This is the ultimate differentiation — no single-provider API proxy can unify across communication systems.

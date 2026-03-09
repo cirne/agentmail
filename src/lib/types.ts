@@ -67,6 +67,14 @@ export interface SyncSummary {
   isRunning: boolean;
 }
 
+/** Attachment metadata included inline in search results to avoid list_attachments calls. */
+export interface SearchResultAttachment {
+  id: number;
+  filename: string;
+  mimeType: string;
+  index: number; // 1-based for CLI/MCP read_attachment
+}
+
 export interface SearchResult {
   messageId: string;
   threadId: string;
@@ -76,19 +84,37 @@ export interface SearchResult {
   date: string;
   snippet: string;
   rank: number;
+  /** First ~300 chars of body (always present) to reduce follow-up get_message calls. */
+  bodyPreview?: string;
+  /** Inline attachment metadata when requested to avoid list_attachments round-trips. */
+  attachments?: SearchResultAttachment[];
 }
 
-/** One identity from `zmail who`: address + best-known display name and counts. */
+/** One identity from `zmail who`: merged person with all addresses, contact info, and counts. */
 export interface WhoPerson {
-  address: string;
-  displayName: string | null;
+  /** First name (if parseable as person name) */
+  firstname?: string | null;
+  /** Last name (if parseable as person name) */
+  lastname?: string | null;
+  /** Full name (used when name can't be parsed into firstname/lastname, e.g., "Apple, Inc.") */
+  name?: string | null;
+  aka: string[];
+  primaryAddress: string;
+  addresses: string[];
+  phone: string | null;
+  title: string | null;
+  company: string | null;
+  urls: string[];
   sentCount: number;
   receivedCount: number;
   mentionedCount: number;
+  lastContact: string | null;
 }
 
 /** Result of who(db, { query, ... }). */
 export interface WhoResult {
   query: string;
   people: WhoPerson[];
+  /** Optional hint to suggest improvements (e.g., using --enrich flag) */
+  hint?: string;
 }

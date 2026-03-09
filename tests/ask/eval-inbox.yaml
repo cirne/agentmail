@@ -1,0 +1,119 @@
+# Eval inbox — all messages used by the ask eval suite.
+# Loaded once into a shared in-memory DB before eval tests run.
+#
+# Date syntax:
+#   - "-7d" = 7 days ago
+#   - "-0d" = now (current time)
+#   - "today+8h" = 8am today
+#   - "today+14h" = 2pm today
+#   - ISO string (e.g., "2024-01-15T10:30:00Z") = absolute date
+#
+# Optional fields:
+#   - messageId: Unique message ID (auto-generated if not provided)
+#   - fromName: Display name for sender
+#   - threadId: Thread ID (defaults to messageId if not specified)
+#   - toAddresses: JSON array string (default: "[]")
+#   - ccAddresses: JSON array string (default: "[]")
+#   - isNoise: Mark as noise/promotional (default: false)
+#   - labels: JSON array string of Gmail labels (default: "[]")
+#   - attachments: Array of attachment objects
+#     - filename: Attachment filename
+#     - mimeType: MIME type (e.g., "application/pdf", "text/csv")
+#     - fixturePath: Path to fixture file relative to project root (e.g., "tests/attachments/fixtures/sales-data.xlsx")
+#     - content: Direct text content (mutually exclusive with fixturePath, for small text attachments)
+#
+# Example (messageId auto-generated):
+#   - subject: "Invoice #123"
+#     fromAddress: "billing@example.com"
+#     bodyText: "Please find attached invoice."
+#     date: "-5d"
+#     attachments:
+#       - filename: "invoice.pdf"
+#         mimeType: "application/pdf"
+#         fixturePath: "tests/attachments/fixtures/invoice.pdf"
+#
+# Example (explicit messageId for thread relationships):
+#   - messageId: "<thread-1@example.com>"
+#     subject: "Re: Project discussion"
+#     fromAddress: "alice@example.com"
+#     bodyText: "Following up on our discussion..."
+#     date: "-2d"
+#     threadId: "<thread-1@example.com>"  # Same as messageId for single-message thread
+
+messages:
+  # --- Person lookup (Marcio Nunes) ---
+  - subject: Introduction
+    fromAddress: marcio@vergemktg.com
+    fromName: Marcio Nunes
+    bodyText: "Hi, I'm Marcio Nunes, CEO & Founder of Harmonee AI. We met at the conference last month."
+    date: "-7d"
+
+  - subject: Follow up
+    fromAddress: marcio@vergemktg.com
+    fromName: Marcio Nunes
+    bodyText: "Thanks for the great conversation! Looking forward to collaborating."
+    date: "-3d"
+
+  # --- Today's emails (recent query) ---
+  - subject: Morning update
+    fromAddress: alice@example.com
+    bodyText: "Here's your daily update"
+    date: "today+8h"
+
+  - subject: Afternoon meeting
+    fromAddress: bob@example.com
+    bodyText: "Reminder about our 3pm meeting"
+    date: "today+14h"
+
+  # --- Apple receipts (spending query) ---
+  - subject: Your Apple Store receipt
+    fromAddress: noreply@apple.com
+    bodyText: "Thank you for your purchase. Total: $99.00"
+    date: "-25d"
+
+  - subject: Your Apple Store receipt
+    fromAddress: noreply@apple.com
+    bodyText: "Thank you for your purchase. Total: $149.00"
+    date: "-20d"
+
+  # --- Recent messages (5 most recent query) ---
+  - subject: Weekly Newsletter
+    fromAddress: sender0@example.com
+    bodyText: "Body of email: Weekly Newsletter"
+    date: "-0d"
+
+  - subject: Project Update
+    fromAddress: sender1@example.com
+    bodyText: "Body of email: Project Update"
+    date: "-1d"
+
+  - subject: Meeting Tomorrow
+    fromAddress: sender2@example.com
+    bodyText: "Body of email: Meeting Tomorrow"
+    date: "-2d"
+
+  - subject: "Invoice #99001"
+    fromAddress: sender3@example.com
+    bodyText: "Body of email: Invoice #99001"
+    date: "-3d"
+
+  - subject: Lunch Plans
+    fromAddress: sender4@example.com
+    bodyText: "Body of email: Lunch Plans"
+    date: "-4d"
+
+  - subject: Older Message
+    fromAddress: sender5@example.com
+    bodyText: "Body of email: Older Message"
+    date: "-5d"
+
+  # --- Invoices (broad search query) ---
+  - subject: "Invoice #12345"
+    fromAddress: billing@example.com
+    bodyText: "Please find attached invoice for services rendered."
+    date: "-200d"
+
+  - subject: "Invoice #67890"
+    fromAddress: billing@example.com
+    bodyText: "Please find attached invoice for services rendered."
+    date: "-5d"

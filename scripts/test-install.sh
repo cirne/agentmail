@@ -7,36 +7,19 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 INSTALL_SCRIPT="$REPO_ROOT/install.sh"
-
-# Colors
-GREEN='\033[0;32m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m'
+source "$SCRIPT_DIR/lib/common.sh"
 
 test_passed=0
 test_failed=0
 
 pass() {
-    echo -e "${GREEN}✓${NC} $1"
+    success "$1"
     ((test_passed++))
 }
 
 fail() {
-    echo -e "${RED}✗${NC} $1"
+    error "$1" || true  # Don't exit on test failure
     ((test_failed++))
-}
-
-info() {
-    echo -e "${BLUE}ℹ${NC} $1"
-}
-
-section() {
-    echo ""
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-    echo -e "${BLUE}  $1${NC}"
-    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 }
 
 # Test 1: Script syntax validation
@@ -124,14 +107,12 @@ test_variables() {
 
 # Test 5: URL validation
 test_url() {
-    section "Validating install script URL"
+    section "Validating install script"
     
-    EXPECTED_URL="https://raw.githubusercontent.com/cirne/zmail/main/install.sh"
-    
-    if grep -q "$EXPECTED_URL" "$INSTALL_SCRIPT"; then
-        pass "Install script URL is correct in comments"
+    if grep -q "@cirne/zmail" "$INSTALL_SCRIPT"; then
+        pass "Install script references npm package"
     else
-        fail "Install script URL not found in comments"
+        fail "Install script does not reference @cirne/zmail"
     fi
     
     # Check if URL matches repo
@@ -141,6 +122,7 @@ test_url() {
             pass "Git remote matches expected repository"
         else
             warn "Git remote may not match (current: $REMOTE_URL)"
+            ((test_failed++))
         fi
     fi
 }

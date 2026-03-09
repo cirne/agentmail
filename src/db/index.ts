@@ -1,97 +1,36 @@
 import Database from "better-sqlite3";
-import { mkdirSync } from "fs";
+import { mkdirSync, rmSync } from "fs";
 import { dirname } from "path";
+import { existsSync } from "fs";
 import { config } from "~/lib/config";
-import { logger } from "~/lib/logger";
-import { SCHEMA } from "./schema";
+import { logger, setLogger, createFileLogger } from "~/lib/logger";
+import { SCHEMA, SCHEMA_VERSION } from "./schema";
+import { reindexFromMaildir } from "./rebuild";
 
 export type SqliteDatabase = InstanceType<typeof Database>;
 
 let _db: SqliteDatabase | null = null;
 
-interface SchemaColumnRequirement {
-  table: string;
-  column: string;
-}
-
-const REQUIRED_SCHEMA_COLUMNS: SchemaColumnRequirement[] = [
-  {
-    table: "messages",
-    column: "labels",
-  },
-  {
-    table: "messages",
-    column: "to_addresses",
-  },
-  {
-    table: "messages",
-    column: "cc_addresses",
-  },
-  {
-    table: "messages",
-    column: "embedding_state",
-  },
-  {
-    table: "sync_summary",
-    column: "owner_pid",
-  },
-  {
-    table: "indexing_status",
-    column: "owner_pid",
-  },
-];
-
-export interface MissingSchemaColumn {
-  table: string;
-  column: string;
-}
-
-function tableExists(db: SqliteDatabase, tableName: string): boolean {
-  const row = db
-    .prepare(
-      "SELECT 1 FROM sqlite_master WHERE type='table' AND name = ? LIMIT 1"
-    )
-    .get(tableName);
-  return !!row;
-}
-
 /**
- * Detect required columns that are missing from existing tables.
- * We only check tables that already exist, so brand-new DBs can bootstrap normally.
+ * Check if the database schema version matches the current code version.
+ * Returns true if schema needs to be rebuilt (version mismatch or DB doesn't exist).
+ * Returns false if schema is up to date or this is a fresh install.
  */
-export function detectMissingSchemaColumns(db: SqliteDatabase): MissingSchemaColumn[] {
-  const missing: MissingSchemaColumn[] = [];
-
-  for (const req of REQUIRED_SCHEMA_COLUMNS) {
-    if (!tableExists(db, req.table)) continue;
-
-    const cols = db
-      .prepare(`PRAGMA table_info(${req.table})`)
-      .all() as Array<{ name: string }>;
-    const hasColumn = cols.some((c) => c.name === req.column);
-    if (!hasColumn) {
-      missing.push({
-        table: req.table,
-        column: req.column,
-      });
-    }
+export function checkSchemaVersion(): boolean {
+  // Fresh install — no DB file exists, nothing to rebuild
+  if (!existsSync(config.dbPath)) {
+    return false;
   }
 
-  return missing;
-}
-
-export function formatSchemaDriftError(
-  dbPath: string,
-  dataDir: string,
-  missingColumns: MissingSchemaColumn[]
-): string {
-  const columns = missingColumns.map((c) => `${c.table}.${c.column}`).join(", ");
-  return [
-    `Detected schema drift in existing DB at ${dbPath}.`,
-    `Missing required column(s): ${columns}.`,
-    "This project does not run automatic migrations for existing DBs.",
-    `Recommended fix: rebuild local data from scratch with "rm -rf ${dataDir}" and sync again.`,
-  ].join("\n");
+  // Open DB without applying schema to read user_version
+  const db = new Database(config.dbPath);
+  try {
+    const result = db.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
+    const userVersion = result?.user_version ?? 0;
+    return userVersion !== SCHEMA_VERSION;
+  } finally {
+    db.close();
+  }
 }
 
 export function getDb(): SqliteDatabase {
@@ -106,21 +45,14 @@ export function getDb(): SqliteDatabase {
   // Allow wait up to 15s for lock (workers and sync share the DB; avoids "database is locked")
   _db.exec("PRAGMA busy_timeout = 15000");
 
-  const missingColumns = detectMissingSchemaColumns(_db);
-  if (missingColumns.length > 0) {
-    const driftMessage = formatSchemaDriftError(config.dbPath, config.dataDir, missingColumns);
-    logger.error(driftMessage);
-    throw new Error(driftMessage);
-  }
-
   _db.exec(SCHEMA);
+
+  // Set schema version so future checks can detect mismatches
+  _db.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
 
   // Ensure singleton status rows exist
   _db.exec(
     "INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0)"
-  );
-  _db.exec(
-    "INSERT OR IGNORE INTO indexing_status (id) VALUES (1)"
   );
 
   logger.debug("Database opened", { path: config.dbPath });
@@ -130,4 +62,45 @@ export function getDb(): SqliteDatabase {
 export function closeDb() {
   _db?.close();
   _db = null;
+}
+
+/**
+ * Ensure database schema is up to date. If schema version has changed, rebuilds the index
+ * from existing EML files in maildir. This should be called early in any command that uses the DB.
+ * 
+ * This is a no-op if:
+ * - No DB file exists yet (fresh install)
+ * - Schema version matches current code version
+ * 
+ * If schema needs updating, this will:
+ * - Delete the old DB
+ * - Create a fresh DB with new schema
+ * - Re-index all messages from maildir
+ */
+export async function ensureSchemaUpToDate(): Promise<void> {
+  const stale = checkSchemaVersion();
+  if (!stale) {
+    return; // Schema is up to date or fresh install
+  }
+
+  process.stderr.write("Schema updated — rebuilding index from local cache (up to 20s)...\n");
+  rmSync(config.dbPath, { force: true });
+  getDb(); // creates fresh DB, sets user_version
+  
+  // Use sync log file for rebuild logging (same as sync command)
+  const fileLogger = createFileLogger("sync");
+  fileLogger.writeSeparator(process.pid);
+  
+  // Replace global logger with file logger for rebuild operations
+  const restoreLogger = setLogger(fileLogger);
+  
+  try {
+    fileLogger.info("Schema rebuild starting");
+    const result = await reindexFromMaildir();
+    fileLogger.info("Schema rebuild complete", { parsed: result.parsed });
+    process.stderr.write(`Rebuild complete (${result.parsed} messages re-indexed).\n`);
+  } finally {
+    fileLogger.close();
+    restoreLogger(); // Restore original logger
+  }
 }

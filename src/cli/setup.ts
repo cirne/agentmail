@@ -1,7 +1,5 @@
-import { spawn } from "child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
-import { createInterface } from "readline";
 import { ImapFlow } from "imapflow";
 import OpenAI from "openai";
 import { ZMAIL_HOME } from "~/lib/config";
@@ -22,7 +20,7 @@ interface SetupConfig {
 }
 
 /** Derive IMAP host/port from email domain. Returns null if unknown. */
-function deriveImapSettings(email: string): { host: string; port: number } | null {
+export function deriveImapSettings(email: string): { host: string; port: number } | null {
   const domain = email.split("@")[1]?.toLowerCase();
   if (!domain) return null;
   
@@ -33,18 +31,8 @@ function deriveImapSettings(email: string): { host: string; port: number } | nul
   return null;
 }
 
-/** Prompt user for input with optional default. */
-function prompt(rl: ReturnType<typeof createInterface>, question: string, defaultValue?: string): Promise<string> {
-  return new Promise((resolve) => {
-    const displayValue = defaultValue ? ` [${defaultValue}]` : "";
-    rl.question(`${question}${displayValue}: `, (answer) => {
-      resolve(answer.trim() || defaultValue || "");
-    });
-  });
-}
-
 /** Validate IMAP credentials by attempting connection. */
-async function validateImap(config: { host: string; port: number; user: string; password: string }): Promise<boolean> {
+export async function validateImap(config: { host: string; port: number; user: string; password: string }): Promise<boolean> {
   const client = new ImapFlow({
     host: config.host,
     port: config.port,
@@ -64,7 +52,7 @@ async function validateImap(config: { host: string; port: number; user: string; 
 }
 
 /** Validate OpenAI API key by making a test call. */
-async function validateOpenAI(apiKey: string): Promise<boolean> {
+export async function validateOpenAI(apiKey: string): Promise<boolean> {
   try {
     const client = new OpenAI({ apiKey });
     await client.models.list();
@@ -75,7 +63,7 @@ async function validateOpenAI(apiKey: string): Promise<boolean> {
 }
 
 /** Load existing config.json if it exists. */
-function loadExistingConfig(): Partial<SetupConfig> | null {
+export function loadExistingConfig(): Partial<SetupConfig> | null {
   const configPath = join(ZMAIL_HOME, "config.json");
   if (!existsSync(configPath)) return null;
   
@@ -92,7 +80,7 @@ function loadExistingConfig(): Partial<SetupConfig> | null {
 }
 
 /** Load existing .env if it exists. */
-function loadExistingEnv(): { password?: string; apiKey?: string } {
+export function loadExistingEnv(): { password?: string; apiKey?: string } {
   const envPath = join(ZMAIL_HOME, ".env");
   if (!existsSync(envPath)) return {};
   
@@ -117,269 +105,133 @@ function loadExistingEnv(): { password?: string; apiKey?: string } {
 }
 
 /** Mask secret value for display. */
-function maskSecret(value: string): string {
+export function maskSecret(value: string): string {
   if (value.length <= 4) return "****";
   return value.slice(0, 4) + "...";
 }
 
-/** Check if running in non-interactive environment (agent, CI, piped stdin). */
-function isNonInteractive(): boolean {
-  // stdin.isTTY is false when stdin is piped, redirected, or not a TTY (agent environments)
-  if (!process.stdin.isTTY) return true;
-  
-  // Also check for common CI/agent environment variables
-  const agentEnvVars = [
-    "CI",
-    "GITHUB_ACTIONS",
-    "GITLAB_CI",
-    "CIRCLECI",
-    "JENKINS_URL",
-    "CURSOR_AGENT",
-    "CLAUDE_AGENT",
-    "ANTHROPIC_API_KEY", // Often set in agent contexts
-  ];
-  
-  return agentEnvVars.some((key) => process.env[key] !== undefined);
-}
-
-interface SetupOptions {
+export interface SetupOptions {
+  /** Email address (Gmail). Provided via --email or ZMAIL_EMAIL. */
+  email?: string;
+  /** IMAP app password. Provided via --password or ZMAIL_IMAP_PASSWORD. */
+  password?: string;
+  /** OpenAI API key. Provided via --openai-key or ZMAIL_OPENAI_API_KEY. */
+  openaiKey?: string;
+  /** Sync default duration (e.g. 7d, 1y). Default: 1y. */
+  defaultSince?: string;
+  /** Skip credential validation. */
   noValidate?: boolean;
+  /** Delete existing config and data before setup. */
   clean?: boolean;
+  /** Skip confirmation prompts (required for --clean in non-interactive mode). */
   yes?: boolean;
 }
 
-export async function runSetup(options: SetupOptions | boolean = {}): Promise<void> {
-  // Handle legacy boolean parameter for backwards compatibility
-  const opts: SetupOptions = typeof options === "boolean" ? { noValidate: options } : options;
-  const { noValidate = false, clean = false, yes = false } = opts;
-  
-  // Detect non-interactive environment
-  if (isNonInteractive()) {
-    console.error("zmail setup requires an interactive terminal.");
-    console.error("");
-    console.error("To set up zmail:");
-    console.error("  1. Run 'zmail setup' in an interactive terminal");
-    console.error("  2. Or manually create ~/.zmail/config.json and ~/.zmail/.env");
-    console.error("");
-    console.error("Example config.json:");
-    console.error('  {');
-    console.error('    "imap": {');
-    console.error('      "host": "imap.gmail.com",');
-    console.error('      "port": 993,');
-    console.error('      "user": "you@gmail.com"');
-    console.error('    },');
-    console.error('    "sync": {');
-    console.error('      "defaultSince": "1y",');
-    console.error('      "mailbox": "",');
-    console.error('      "excludeLabels": ["Trash", "Spam"]');
-    console.error('    }');
-    console.error('  }');
-    console.error("");
-    console.error("Example ~/.zmail/.env:");
-    console.error("  ZMAIL_IMAP_PASSWORD=your-app-password");
-    console.error("  ZMAIL_OPENAI_API_KEY=sk-...");
-    console.error("");
-    process.exit(1);
-  }
-  
-  // Handle --clean flag
+/** Run non-interactive setup when all required values are provided. Never prompts. */
+async function executeNonInteractiveSetup(opts: Required<Pick<SetupOptions, "email" | "password" | "openaiKey">> & SetupOptions): Promise<void> {
+  const { email, password, openaiKey, noValidate = false, clean = false, yes = false, defaultSince = "1y" } = opts;
+
   if (clean) {
+    if (!yes) {
+      console.error("zmail setup: --clean requires --yes in non-interactive mode.");
+      process.exit(1);
+    }
     const configPath = join(ZMAIL_HOME, "config.json");
     const envPath = join(ZMAIL_HOME, ".env");
     const dataPath = join(ZMAIL_HOME, "data");
     const hasExisting = existsSync(configPath) || existsSync(envPath) || existsSync(dataPath);
-    
     if (hasExisting) {
-      if (!yes) {
-        const rl = createInterface({
-          input: process.stdin,
-          output: process.stdout,
-        });
-        
-        const answer = await new Promise<string>((resolve) => {
-          rl.question("This will delete all existing config and data. Continue? (yes/no): ", resolve);
-        });
-        rl.close();
-        
-        if (answer.toLowerCase() !== "yes" && answer.toLowerCase() !== "y") {
-          console.log("Cancelled.");
-          process.exit(0);
-        }
-      }
-      
-      console.log("Cleaning existing config and data...");
       if (existsSync(configPath)) rmSync(configPath);
       if (existsSync(envPath)) rmSync(envPath);
       if (existsSync(dataPath)) rmSync(dataPath, { recursive: true, force: true });
-      console.log("Done.\n");
     }
   }
-  
-  // Ensure ZMAIL_HOME exists
+
   mkdirSync(ZMAIL_HOME, { recursive: true });
-  
-  const existingConfig = loadExistingConfig();
-  const existingEnv = loadExistingEnv();
-  const isFirstRun = !existingConfig && !existingEnv.password;
-  
-  const rl = createInterface({
-    input: process.stdin,
-    output: process.stdout,
-  });
-  
-  try {
-    if (isFirstRun) {
-      console.log("\nzmail setup — let's get you connected.\n");
-    } else {
-      console.log("\nzmail setup — updating existing config.\n");
-    }
-    
-    // Email address
-    const emailDefault = existingConfig?.imap?.user || "";
-    let email = await prompt(rl, "Email address", emailDefault);
-    if (!email) {
-      console.error("Email address is required.");
+
+  const derived = deriveImapSettings(email);
+  const host = derived?.host ?? "imap.gmail.com";
+  const port = derived?.port ?? 993;
+
+  if (!noValidate) {
+    process.stdout.write("Validating IMAP... ");
+    const imapValid = await validateImap({ host, port, user: email, password });
+    if (!imapValid) {
+      console.error("Failed");
+      console.error("Could not connect to IMAP. Check your credentials.");
       process.exit(1);
     }
-    
-    // Derive IMAP settings from email
-    const derived = deriveImapSettings(email);
-    const hostDefault = existingConfig?.imap?.host || derived?.host || "imap.gmail.com";
-    const portDefault = existingConfig?.imap?.port || derived?.port || 993;
-    
-    if (derived) {
-      console.log(`  → ${derived.host === "imap.gmail.com" ? "Gmail" : "Provider"} detected (${derived.host}:${derived.port})`);
-    }
-    
-    // IMAP host (skip if derived)
-    let host = hostDefault;
-    if (!derived) {
-      host = await prompt(rl, "IMAP host", hostDefault);
-    }
-    
-    // IMAP port (skip if derived)
-    let port = portDefault;
-    if (!derived) {
-      const portStr = await prompt(rl, "IMAP port", String(portDefault));
-      port = parseInt(portStr, 10) || portDefault;
-    }
-    
-    // IMAP password
-    const passwordDefault = existingEnv.password ? maskSecret(existingEnv.password) : "";
-    console.log("\nIMAP app password (create one at https://myaccount.google.com/apppasswords):");
-    let password = await prompt(rl, "IMAP app password", passwordDefault);
-    
-    // If user entered the masked default (or just pressed Enter), use the actual value
-    if ((password === passwordDefault || password === "") && existingEnv.password) {
-      password = existingEnv.password;
-    }
-    
-    if (!password) {
-      console.error("IMAP password is required.");
-      process.exit(1);
-    }
-    
-    // Validate IMAP
-    if (!noValidate) {
-      process.stdout.write("  ✓ Connecting... ");
-      const imapValid = await validateImap({ host, port, user: email, password });
-      if (imapValid) {
-        console.log(`Connected to ${host} as ${email}`);
-      } else {
-        console.log("Failed");
-        console.error("  ✗ Could not connect. Check your credentials and try again.");
-        process.exit(1);
-      }
-    }
-    
-    // OpenAI API key
-    const apiKeyDefault = existingEnv.apiKey ? maskSecret(existingEnv.apiKey) : "";
-    console.log("\nOpenAI API key (for semantic search — https://platform.openai.com/api-keys):");
-    let apiKey = await prompt(rl, "OpenAI API key", apiKeyDefault);
-    
-    // If user entered the masked default (or just pressed Enter), use the actual value
-    if ((apiKey === apiKeyDefault || apiKey === "") && existingEnv.apiKey) {
-      apiKey = existingEnv.apiKey;
-    }
-    
-    if (!apiKey) {
-      console.error("OpenAI API key is required.");
-      process.exit(1);
-    }
-    
-    // Validate OpenAI
-    if (!noValidate) {
-      process.stdout.write("  ✓ Validating... ");
-      const openaiValid = await validateOpenAI(apiKey);
-      if (openaiValid) {
-        console.log("API key valid");
-      } else {
-        console.log("Failed");
-        console.error("  ✗ Invalid API key. Check your key and try again.");
-        process.exit(1);
-      }
-    }
-    
-    // Sync default duration
-    const defaultSince = existingConfig?.sync?.defaultSince || "1y";
-    const since = await prompt(rl, "\nSync default duration (e.g. 7d, 5w, 3m, 2y)", defaultSince);
-    
-    // Write config.json
-    const configJson = {
-      imap: {
-        host,
-        port,
-        user: email,
-      },
-      sync: {
-        defaultSince: since || defaultSince,
-        mailbox: "",
-        excludeLabels: ["Trash", "Spam"],
-      },
-    };
-    
-    const configPath = join(ZMAIL_HOME, "config.json");
-    writeFileSync(configPath, JSON.stringify(configJson, null, 2) + "\n");
-    
-    // Write .env
-    const envContent = `ZMAIL_IMAP_PASSWORD=${password}
-ZMAIL_OPENAI_API_KEY=${apiKey}
-`;
-    const envPath = join(ZMAIL_HOME, ".env");
-    writeFileSync(envPath, envContent);
-    
-    console.log(`\nConfig saved to ${ZMAIL_HOME}/`);
-    
-    // Ask if user wants to start sync in background
-    const startSyncAnswer = await prompt(rl, "\nStart syncing email now? (yes/no)", "yes");
-    const shouldStartSync = startSyncAnswer.toLowerCase() === "yes" || startSyncAnswer.toLowerCase() === "y" || startSyncAnswer === "";
-    
-    if (shouldStartSync) {
-      // Spawn sync in background process
-      const syncSince = since || defaultSince;
-      console.log(`\nStarting sync in background (--since ${syncSince})...`);
-      
-      // Find the entrypoint script path relative to project root
-      // import.meta.dirname is src/cli/, so go up to src/ then use index.ts
-      const entrypointScript = join(import.meta.dirname, "..", "index.ts");
-      
-      // Spawn detached process - redirect output so it doesn't interfere with setup
-      const proc = spawn("npx", ["tsx", entrypointScript, "sync", "--since", syncSince], {
-        cwd: process.cwd(),
-        env: { ...process.env, ZMAIL_HOME: process.env.ZMAIL_HOME || ZMAIL_HOME },
-        stdio: "pipe",
-        detached: true,
-      });
-      
-      // Don't wait for it - let it run in background
-      proc.unref();
-      
-      console.log("Sync started in background. Use 'zmail status' to check progress.");
-    } else {
-      console.log("Run `zmail sync --since 7d` to start initial sync, then `zmail refresh` for frequent updates.");
-    }
-    console.log("");
-  } finally {
-    rl.close();
+    console.log("OK");
   }
+
+  if (!noValidate) {
+    process.stdout.write("Validating OpenAI API key... ");
+    const openaiValid = await validateOpenAI(openaiKey);
+    if (!openaiValid) {
+      console.error("Failed");
+      console.error("Invalid OpenAI API key.");
+      process.exit(1);
+    }
+    console.log("OK");
+  }
+
+  const configJson = {
+    imap: { host, port, user: email },
+    sync: {
+      defaultSince,
+      mailbox: "",
+      excludeLabels: ["Trash", "Spam"],
+    },
+  };
+  writeFileSync(join(ZMAIL_HOME, "config.json"), JSON.stringify(configJson, null, 2) + "\n");
+  const envContent = `ZMAIL_IMAP_PASSWORD=${password}
+ZMAIL_OPENAI_API_KEY=${openaiKey}
+`;
+  writeFileSync(join(ZMAIL_HOME, ".env"), envContent);
+  console.log(`Config saved to ${ZMAIL_HOME}/`);
+}
+
+function printSetupHelp(): void {
+  console.error("zmail setup — CLI/agent-first. Provide credentials via flags or env.");
+  console.error("");
+  console.error("  zmail setup --email <email> --password <app-password> --openai-key <key> [--no-validate]");
+  console.error("  ZMAIL_EMAIL=... ZMAIL_IMAP_PASSWORD=... ZMAIL_OPENAI_API_KEY=... zmail setup");
+  console.error("");
+  console.error("For interactive prompts, use: zmail wizard");
+  console.error("");
+  process.exit(1);
+}
+
+export async function runSetup(options: SetupOptions | boolean = {}): Promise<void> {
+  const opts: SetupOptions = typeof options === "boolean" ? { noValidate: options } : options;
+
+  const email = opts.email?.trim() || process.env.ZMAIL_EMAIL?.trim();
+  const password = opts.password || process.env.ZMAIL_IMAP_PASSWORD;
+  const openaiKey = opts.openaiKey || process.env.ZMAIL_OPENAI_API_KEY || process.env.OPENAI_API_KEY;
+
+  const hasAllRequired = Boolean(email && password && openaiKey);
+  const hasSome = Boolean(email || password || openaiKey);
+
+  if (hasAllRequired) {
+    await executeNonInteractiveSetup({
+      ...opts,
+      email: email!,
+      password: password!,
+      openaiKey: openaiKey!,
+      defaultSince: opts.defaultSince || "1y",
+    });
+    return;
+  }
+
+  if (hasSome) {
+    const missing: string[] = [];
+    if (!email) missing.push("--email or ZMAIL_EMAIL");
+    if (!password) missing.push("--password or ZMAIL_IMAP_PASSWORD");
+    if (!openaiKey) missing.push("--openai-key or ZMAIL_OPENAI_API_KEY (in .env)");
+    console.error(`zmail setup: missing required values: ${missing.join(", ")}`);
+    console.error("Provide all credentials via flags or environment variables.");
+    process.exit(1);
+  }
+
+  printSetupHelp();
 }
