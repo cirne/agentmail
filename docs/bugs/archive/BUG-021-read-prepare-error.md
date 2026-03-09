@@ -1,6 +1,6 @@
 # BUG-021: `zmail read` and MCP `get_messages` Fail with Database Prepare Error — Agent-Reported
 
-**Status:** Open.
+**Status:** Fixed (2026-03-09). All call sites now pass `db` explicitly to `formatMessageForOutput` instead of relying on the internal `getDb()` fallback.
 
 **Design lens:** [Agent-first](../../VISION.md) — `read` is a core primitive in the search→read→synthesize workflow. When it fails, agents cannot access email bodies at all, falling back to `zmail ask` (which uses a different code path).
 

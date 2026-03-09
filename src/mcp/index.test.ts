@@ -110,7 +110,7 @@ describe("MCP Server Tools", () => {
         .prepare("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
         .all(normalizedThreadId) as any[];
       
-      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, false)));
+      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, false, testDb)));
       
       expect(shaped).toHaveLength(3);
       expect(shaped[0].subject).toBe("First");
@@ -153,7 +153,7 @@ describe("MCP Server Tools", () => {
         .prepare("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
         .all(normalizeMessageId(threadId)) as any[];
 
-      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, false)));
+      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, false, testDb)));
       const out = shapeShapedToOutput(shaped as (ShapedMessageLike | Record<string, unknown>)[], { useRaw: false, detail: "full", maxBodyChars: DEFAULT_BODY_CAP });
 
       expect(out).toHaveLength(1);
@@ -177,7 +177,7 @@ describe("MCP Server Tools", () => {
       const message = testDb.prepare("SELECT * FROM messages WHERE message_id = ?").get(normalizeMessageId(messageId)) as any;
       expect(message).toBeDefined();
 
-      const shaped = await formatMessageForOutput(message, false);
+      const shaped = await formatMessageForOutput(message, false, testDb);
       const out = shapeShapedToOutput([shaped], { useRaw: false, maxBodyChars: 2000 });
 
       expect(out).toHaveLength(1);
@@ -207,7 +207,7 @@ describe("MCP Server Tools", () => {
         .prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
         .all(normalizeMessageId(id1), normalizeMessageId(id2)) as any[];
 
-      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, false)));
+      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, false, testDb)));
       const out = shapeShapedToOutput(shaped, { useRaw: false, maxBodyChars: 2000 });
 
       expect(out).toHaveLength(2);

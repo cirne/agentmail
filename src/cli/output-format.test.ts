@@ -117,6 +117,26 @@ describe("CLI output formats (ADR-022)", () => {
       expect(isJson(stdout.trim())).toBeFalsy();
       expect(stdout.includes("No matching people") || stdout.includes("People matching")).toBeTruthy();
     });
+
+    it("accepts --timings flag without error", async () => {
+      const { stderr } = await runZmail(["who", "test", "--timings"], baseEnv());
+      expect(stderr).not.toContain("Unknown flag: --timings");
+    });
+
+    it("includes _timing in JSON output when --timings is passed", async () => {
+      const { stdout } = await runZmail(["who", "test", "--timings"], baseEnv());
+      expect(isJson(stdout.trim())).toBeTruthy();
+      const parsed = JSON.parse(stdout.trim());
+      expect(parsed).toHaveProperty("_timing");
+      expect(parsed._timing).toHaveProperty("ms");
+    });
+
+    it("omits _timing in JSON output when --timings is not passed", async () => {
+      const { stdout } = await runZmail(["who", "test"], baseEnv());
+      expect(isJson(stdout.trim())).toBeTruthy();
+      const parsed = JSON.parse(stdout.trim());
+      expect(parsed).not.toHaveProperty("_timing");
+    });
   });
 
   describe("attachment list command", () => {

@@ -1,6 +1,6 @@
 # BUG-018: `zmail who --timings` Unknown Flag — Agent-Reported
 
-**Status:** Open.
+**Status:** Fixed (archived 2026-03-09). `--timings` flag added to `who` command, consistent with `search --timings`.
 
 **Design lens:** [Agent-first](../../VISION.md) — CLI flags should be consistent across commands. When an agent tries a flag that works on `search` but not `who`, it wastes a tool call round (15–25s LLM overhead) discovering the inconsistency.
 

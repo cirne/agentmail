@@ -242,7 +242,7 @@ export function createMcpServer() {
       }
 
       const useRaw = raw || detail === "raw";
-      const shaped = await formatMessageForOutput(message, useRaw);
+      const shaped = await formatMessageForOutput(message, useRaw, db);
       const out = shapeShapedToOutput([shaped], { useRaw, detail, maxBodyChars });
       return {
         content: [{ type: "text", text: JSON.stringify(out[0], null, 2) }],
@@ -283,7 +283,7 @@ export function createMcpServer() {
         };
       }
 
-      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, useRaw)));
+      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, useRaw, db)));
       const out = shapeShapedToOutput(shaped, { useRaw, detail, maxBodyChars });
       return {
         content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
@@ -318,7 +318,7 @@ export function createMcpServer() {
         };
       }
       
-      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, raw)));
+      const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, raw, db)));
 
       if (raw) {
         return {

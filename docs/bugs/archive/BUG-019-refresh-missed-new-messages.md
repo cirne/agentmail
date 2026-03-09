@@ -1,6 +1,6 @@
 # BUG-019: Refresh Reports No New Messages Despite New Mail in Inbox
 
-**Status:** Open.
+**Status:** Fixed (archived 2026-03-09).
 
 **Reported context:** User ran `zmail refresh`; two new emails (auth passcodes) were present in their inbox, but refresh reported nothing (0 new, 0 fetched).
 

@@ -157,6 +157,7 @@ interface ParsedWhoArgs {
   dynamic?: boolean; // Kept for backward compatibility / testing, but dynamic is now default
   forceText: boolean;
   enrich?: boolean;
+  timings: boolean;
 }
 
 function whoUsage() {
@@ -168,6 +169,7 @@ function whoUsage() {
   console.error("  --all              include noreply/bot addresses");
   console.error("  --enrich          use LLM (GPT-4.1 nano) to guess names from email addresses");
   console.error("                     requires ZMAIL_OPENAI_API_KEY to be set");
+  console.error("  --timings          include machine-readable timings in JSON output");
   console.error("");
   console.error("Note: Profiles are built dynamically from messages (always up-to-date)");
 }
@@ -176,6 +178,7 @@ function parseWhoArgs(rawArgs: string[]): ParsedWhoArgs {
   const parsed: ParsedWhoArgs = {
     query: "",
     forceText: false,
+    timings: false,
   };
 
   const queryParts: string[] = [];
@@ -209,6 +212,10 @@ function parseWhoArgs(rawArgs: string[]): ParsedWhoArgs {
     }
     if (arg === "--enrich") {
       parsed.enrich = true;
+      continue;
+    }
+    if (arg === "--timings") {
+      parsed.timings = true;
       continue;
     }
     if (arg === "--limit") {
@@ -1070,12 +1077,8 @@ async function main() {
       });
       const duration = Date.now() - startTime;
 
-      // Add timing info for performance monitoring
-      if (shouldOutputJson) {
+      if (whoParsed.timings) {
         (result as WhoResult & { _timing?: { ms: number } })._timing = { ms: duration };
-      } else if (whoParsed.dynamic) {
-        // Show timing in text mode if --dynamic flag was explicitly used (for testing)
-        console.log(`\n[Query took ${duration}ms]\n`);
       }
 
       if (shouldOutputJson) {
@@ -1178,14 +1181,14 @@ async function main() {
       }
 
       if (json) {
-        const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, raw)));
+        const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, raw, db)));
         console.log(JSON.stringify(shaped, null, 2));
       } else {
         // Text format: format each message with formatMessageLlmFriendly
         const total = messages.length;
         for (let i = 0; i < messages.length; i++) {
           const message = messages[i];
-          const shaped = await formatMessageForOutput(message, raw);
+          const shaped = await formatMessageForOutput(message, raw, db);
           if (total > 1) {
             console.log(`=== Message ${i + 1} of ${total} ===`);
           }
@@ -1218,7 +1221,7 @@ async function main() {
         console.error(`Message not found: ${messageId}`);
         process.exit(1);
       }
-      const shaped = await formatMessageForOutput(message, parsed.raw);
+      const shaped = await formatMessageForOutput(message, parsed.raw, db);
       console.log(formatMessageLlmFriendly(message, shaped));
       break;
     }
