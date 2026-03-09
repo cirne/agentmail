@@ -34,11 +34,42 @@ This is not a zmail bug — the attachments genuinely aren't in the forwarded me
 
 ---
 
-## Recommendations (concise)
+## Implementation plan
 
-1. **Attachment reference detection** — when the body text contains phrases like "attached", "see attachment", "enclosed" but `attachments: []`, surface a hint: "This email references attachments that may be on the original/forwarded message." Helps the agent set user expectations.
-2. **Thread-aware attachment lookup** — if a message references attachments but has none, check other messages in the same thread (In-Reply-To / References headers) for attachments. The original message may be in the mailbox.
-3. **Google Drive link detection** — some forwarded attachments become Drive sharing links in the body. Detect and surface these as "linked attachments."
+### Step 1 — Detect phantom attachments at context assembly time
+
+In `src/ask/agent.ts` `assembleContext()`, after fetching a message and finding `attachments.length === 0`, scan the body text for attachment-referencing language. If found, append a hint to the message context.
+
+```
+Location: src/ask/agent.ts, assembleContext() — after the attachment processing block (~line 166)
+```
+
+**Detection heuristic** — simple keyword scan on `body_text`:
+- Match phrases: `attached`, `see attached`, `see the attached`, `please find attached`, `enclosed`, `I've attached`, `I have attached`, `attaching`, `the attachment`
+- Only trigger when `attachments.length === 0` for that message
+- Append to the message context block: `\n[Note: This email references attachments in its body text but none were found. The attachments may be on the original/forwarded message or shared via a link.]`
+
+This gives Mini (the synthesis model) the information it needs to set expectations in the answer rather than promising attachments it can't deliver.
+
+**Where to put the helper:** Create a small utility function `detectPhantomAttachments(bodyText: string): boolean` in `src/ask/tools.ts` (or inline in `assembleContext`). Keep it simple — no NLP, just substring matching.
+
+### Step 2 — Surface phantom hint in MCP/CLI too
+
+In `src/messages/lean-shape.ts` or `src/messages/presenter.ts`, when formatting a message for `get_message` / `read` output:
+- If `attachments: []` and body references attachments → add a `phantomAttachments: true` flag or a `hint` field
+- MCP `get_message` and CLI `read` output the hint so agents outside of `ask` also benefit
+
+This makes the hint available to any agent using the MCP or CLI, not just the ask pipeline.
+
+### Step 3 (future) — Google Drive link detection
+
+Scan body text for Google Drive sharing URLs (`drive.google.com/file`, `docs.google.com`, `drive.google.com/open`). When found and `attachments: []`, surface them as linked attachments in the output. Lower priority — Drive links are rarer than stripped-forward attachments.
+
+### Scope and constraints
+
+- **No threading required.** This fix works per-message, no cross-thread lookup needed. Thread-aware attachment fallback is a separate, larger effort.
+- **No false positive risk.** The hint only appears when body says "attached" but attachment list is empty — worst case, the email genuinely has no attachments and just uses "attached" loosely (rare; low cost if it happens).
+- **Minimal code change.** Step 1 is ~15 lines in `assembleContext`. Step 2 is ~10 lines in the presenter. No schema change, no new dependencies.
 
 ---
 
