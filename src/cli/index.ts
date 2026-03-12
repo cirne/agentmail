@@ -975,18 +975,22 @@ async function main() {
         process.exit(1);
       }
 
-      let results: Array<SearchResult & { body?: string; attachments?: AttachmentMetadata }> = run.results;
+      let baseResults: SearchResult[];
       if (effectiveDetail === "body") {
-        results = hydrateBodies(db, run.results);
+        baseResults = hydrateBodies(db, run.results);
+      } else {
+        baseResults = run.results;
       }
 
       // Hydrate attachment metadata for all results
       const attachmentMetadata = hydrateAttachmentMetadata(db, run.results);
-      results = results.map((r) => ({
-        ...r,
-        attachments: attachmentMetadata.get(r.messageId),
-      }));
-      const messagesWithAttachments = Array.from(attachmentMetadata.values()).filter(meta => meta.count > 0).length;
+      const results: Array<SearchResult & { body?: string; attachments?: AttachmentMetadata }> = baseResults.map((r) => {
+        const { attachments: _, ...rest } = r;
+        return {
+          ...rest,
+          attachments: attachmentMetadata.get(r.messageId),
+        } as SearchResult & { body?: string; attachments?: AttachmentMetadata };
+      });
 
       if (shouldOutputJson) {
         const rows = parsed.idsOnly

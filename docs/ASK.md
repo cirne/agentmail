@@ -40,24 +40,31 @@ Agent → zmail ask "<question>" → synthesized answer (streaming)
 
 ### How It Works Internally
 
-`zmail ask` uses a **two-LLM pipeline** optimized for speed:
+`zmail ask` uses a **4-step pipeline** optimized for speed:
 
-1. **Nano (GPT-4.1 nano)** — Fast exploration loop (~200-500ms per round)
-   - Uses metadata-only tools (headers, snippets, no body content)
-   - Explores email index to identify relevant messages/threads
-   - Outputs a "fetch plan" (list of message/thread IDs to retrieve)
+1. **Planner (GPT-4.1 nano)** — Single call with JSON output (~300ms)
+   - Analyzes the question and produces a structured search plan
+   - Outputs keyword patterns, optional domain/date filters, and noise inclusion flag
+   - No tool calls — pure planning decision
 
-2. **Context Assembler (pure code)** — Efficient data fetching
-   - Fetches full email bodies and attachments based on Nano's plan
-   - Applies content caps and formatting
-   - Prepares a single, comprehensive context blob
+2. **Scatter (pure code)** — Parallel FTS5 execution (~50ms)
+   - Executes all search patterns in parallel via `Promise.all`
+   - Deduplicates results by message ID, preserving best FTS5 rank
+   - Applies metadata filters (fromAddress, date range, noise)
 
-3. **Mini (GPT-4.1 mini)** — Final synthesis (~1-2s)
+3. **Assemble (pure code)** — Tiered context assembly (~100ms)
+   - Builds context from search hits using tiered relevance
+   - Tier 1 (subject match or strong rank): up to 3000 chars
+   - Tier 2 (any FTS match): up to 800 chars
+   - Tier 3 (filter-only match): 150-char snippet
+   - Includes attachment extraction, applies 80k char cap
+
+4. **Synthesize (GPT-4.1 nano)** — Final answer generation (~500ms-1s)
    - Receives original question + assembled context
    - Makes **no tool calls** — pure synthesis
    - Streams answer to stdout
 
-**Total latency: 4-12s** (vs 45-100s with primitive tools)
+**Total latency: 1.5-3s** (target), measured 4-10s on eval fixtures (vs 45-100s with primitive tools)
 
 ---
 
@@ -219,18 +226,18 @@ if user_wants_details:
 
 | Query Type | Primitives (Opus 4.6) | `zmail ask` | Improvement |
 |------------|----------------------|-------------|-------------|
-| Person lookup | ~60-100s (4 rounds) | ~4-12s | **5-10x faster** |
-| Spending summary | ~60-100s (4 rounds) | ~11-12s | **5-9x faster** |
-| Today's emails | ~45-75s (3 rounds) | ~11-12s | **4-7x faster** |
+| Person lookup | ~60-100s (4 rounds) | ~1.5-3s (target) | **20-67x faster** |
+| Spending summary | ~60-100s (4 rounds) | ~1.5-3s (target) | **20-67x faster** |
+| Today's emails | ~45-75s (3 rounds) | ~1.5-3s (target) | **15-50x faster** |
 
-**Target:** `zmail ask` achieves **≥50% latency improvement vs Google MCP** (e.g., ~50s → ~25s). Current results show **4-10x improvement** over primitive orchestration.
+**Target:** `zmail ask` achieves **≥50% latency improvement vs Google MCP** (e.g., ~50s → ~25s). Current results show **4-10x improvement** over primitive orchestration on eval fixtures (measured 4-10s), with target of 1.5-3s for simpler queries.
 
 ### Cost Comparison
 
 | Approach | Cost per Query | Notes |
 |----------|---------------|-------|
 | Primitives (Opus 4.6) | ~$0.10-0.20 | 3-4 rounds × $0.03-0.05/round |
-| `zmail ask` (Nano + Mini) | ~$0.003-0.01 | Nano: $0.10/1M tokens, Mini: $0.40/1M tokens |
+| `zmail ask` (Nano + Nano) | ~$0.001-0.005 | Two Nano calls: $0.10/1M tokens each |
 
 **Cost savings: ~10-20x** per query.
 
@@ -238,15 +245,16 @@ if user_wants_details:
 
 ## Debugging and Transparency
 
-`zmail ask` writes debug logs to `stderr`:
+`zmail ask` writes debug logs to `stderr` (use `--verbose` flag):
 
 ```
-[nano round 1] tool calls: 1
-[nano] calling search({"query":"apple.com","afterDate":"30d"})
-[nano] search returned 15 results
-[fetch plan] extracted: messageIds=29, threadIds=29
-[context assembler] fetching 20 messages by ID
-[context] assembled 46187 chars from 29 messageIds, 29 threadIds
+[pipeline] step 1: planner
+[planner] calling Nano to generate search plan
+[planner] generated plan: 4 patterns, fromAddress=apple.com, afterDate=30d, includeNoise=false
+[pipeline] step 2: scatter
+[pipeline] step 3: assemble
+[pipeline] assembled 46187 chars from 29 hits
+[pipeline] step 4: synthesize
 pipelineMs: 11550
 ```
 

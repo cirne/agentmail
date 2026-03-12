@@ -1,6 +1,6 @@
 # BUG-020: Apple / Vendor Spending Query — Domain Not Routed to fromAddress
 
-**Status:** Open (accepted for ship). **Created:** 2026-03-10. **Tags:** ask, eval, search
+**Status:** Fixed (v2 architecture). **Created:** 2026-03-10. **Fixed:** 2026-03-12. **Tags:** ask, eval, search
 
 **Design lens:** [Agent-first](../VISION.md) — For "summarize my spending on apple.com" (and similar vendor/domain spending queries), the system should return all transactional emails from that sender. Today the agent or the backend often treats the domain as a keyword, so we get incomplete or irrelevant results.
 
@@ -15,7 +15,7 @@ For questions like "summarize my spending on apple.com in the last 30 days":
 - **Intended behavior:** Treat "apple.com" as a sender/domain filter and return all non-noise messages from that domain (exhaustive list). With noise excluded by default, that set is mostly receipts/transactional and fits a reasonable limit.
 - **Current behavior:** The nano agent often sends the domain in the **query** parameter (e.g. `query: "apple.com"`) instead of the **fromAddress** parameter. The search layer then runs FTS with a phrase like `"apple.com"`, which can match the wrong set or truncate. The eval case scores ~0.4–0.6 and we accept it via `minScore: 0.4` and `knownIssue` (see [ask.eval.test.ts](../../src/ask/ask.eval.test.ts)).
 
-We are **OK shipping** with this gap: the eval is explicitly marked as a known issue, and instructions/tools were updated to tell the agent to use the fromAddress parameter. Backend domain→from routing (see below) would make the behavior robust even when the agent puts the domain in the query.
+**Fixed in v2 architecture (2026-03-12):** The planner prompt now explicitly teaches domain-to-`fromAddress` routing with brand examples (Apple → apple.com, Amazon → amazon.com, etc.). The planner produces structured `SearchPlan` with `fromAddress` field, and the scatter step executes filter-only searches when `fromAddress` is set. Combined with the date bug fix (relative dates now properly converted to ISO), domain-filtered spending queries now work correctly. Eval suite passes 8/8 including the apple spending case.
 
 ---
 

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
 import type { SqliteDatabase } from "~/db";
-import { createTestDb, insertTestMessage } from "~/db/test-helpers";
+import { createTestDb } from "~/db/test-helpers";
 import { runAsk } from "./agent";
 
 // Mock OpenAI - create a mock instance
@@ -64,6 +64,30 @@ vi.mock("~/messages/lean-shape", () => ({
   DEFAULT_BODY_CAP: 2000,
 }));
 
+// Mock planner
+vi.mock("./planner", () => ({
+  runPlanner: vi.fn().mockResolvedValue({
+    patterns: ["test"],
+    includeNoise: false,
+  }),
+}));
+
+// Mock scatter
+vi.mock("./scatter", () => ({
+  scatter: vi.fn().mockResolvedValue([]),
+}));
+
+// Mock assemble
+vi.mock("./assemble", () => ({
+  assembleContext: vi.fn().mockResolvedValue("---\nFrom: test@example.com\nSubject: Test\nDate: 2025-01-01\nTest content"),
+}));
+
+// Mock verbose
+vi.mock("./verbose", () => ({
+  setVerbose: vi.fn(),
+  verboseLog: vi.fn(),
+}));
+
 describe("runAsk", () => {
   let db: SqliteDatabase;
 
@@ -76,575 +100,110 @@ describe("runAsk", () => {
     vi.clearAllMocks();
   });
 
-  describe("date handling", () => {
-    // TODO: Update tests for new two-phase architecture (investigation + context assembly)
-    it.skip("applies default 30d filter when no dates specified", async () => {
-      insertTestMessage(db, {
-        messageId: "<test-msg@example.com>",
-        subject: "Recent email",
-        date: new Date().toISOString(),
-        bodyText: "content",
-      });
-
-      // Mock nano response with search tool call (no dates in args)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
+  it("runs full pipeline: planner → scatter → assemble → synthesize", async () => {
+    // Mock Mini synthesis response
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
           message: {
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "recent",
-                  limit: 50,
-                }),
-              },
-            }],
+            content: "Test answer",
           },
-        }],
-      });
+        },
+      ],
+    });
 
-      // Mock tool result response (nano sees tool result)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: JSON.stringify({
-              messageIds: ["<test-msg@example.com>"],
-            }),
-          },
-        }],
-      });
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-      // Mock mini synthesis (non-streaming)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
+    const answer = await runAsk("test question", db, { stream: false });
+
+    // Should call Nano once for synthesis
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockCreate.mock.calls[0][0].model).toBe("gpt-4.1-nano");
+    expect(answer).toBe("Test answer");
+
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
+  });
+
+  it("streams answer when stream=true", async () => {
+    // Mock streaming response
+    const streamChunks = [
+      { choices: [{ delta: { content: "Test " } }] },
+      { choices: [{ delta: { content: "answer" } }] },
+    ];
+
+    mockCreate.mockResolvedValueOnce({
+      [Symbol.asyncIterator]: async function* () {
+        for (const chunk of streamChunks) {
+          yield chunk;
+        }
+      },
+    });
+
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
+
+    await runAsk("test question", db, { stream: true });
+
+    // Should call Nano with stream: true
+    expect(mockCreate).toHaveBeenCalledTimes(1);
+    expect(mockCreate.mock.calls[0][0].stream).toBe(true);
+    expect(mockCreate.mock.calls[0][0].model).toBe("gpt-4.1-nano");
+
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
+  });
+
+  it("includes question and context in synthesis prompt", async () => {
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
           message: {
             content: "Answer",
           },
-        }],
-      });
-
-      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
-      await runAsk("what emails did I get?", db, { stream: false });
-
-      // Check that default 30d was applied (check stderr logs)
-      const stderrCalls = stderrSpy.mock.calls.map((call: any) => call[0]).join("");
-      expect(stderrCalls).toContain("applying default 30d date filter");
-
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
+        },
+      ],
     });
 
-    // TODO: Update tests for new two-phase architecture (investigation + context assembly)
-    it.skip("removes date filter when query says 'any'", async () => {
-      insertTestMessage(db, {
-        messageId: "<old-msg@example.com>",
-        subject: "Old email",
-        date: "2025-01-01T00:00:00Z",
-        bodyText: "content",
-      });
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-      // Mock nano response (nano might try to set dates, but code should remove them)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "email",
-                  limit: 50,
-                  // Nano might try to set dates, but code should remove them
-                  afterDate: "2025-01-01",
-                }),
-              },
-            }],
-          },
-        }],
-      });
+    await runAsk("what is this?", db, { stream: false });
 
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: JSON.stringify({
-              messageIds: ["<old-msg@example.com>"],
-            }),
-          },
-        }],
-      });
+    const messages = mockCreate.mock.calls[0][0].messages;
+    expect(messages[0].role).toBe("system");
+    expect(messages[1].role).toBe("user");
+    expect(messages[1].content).toContain("what is this?");
+    expect(messages[1].content).toContain("--- Email Context ---");
 
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "Answer",
-          },
-        }],
-      });
-
-      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
-      await runAsk("find any emails about test", db, { stream: false });
-
-      // Check that date filters were removed
-      const stderrCalls = stderrSpy.mock.calls.map((call: any) => call[0]).join("");
-      // Should log that dates were removed for "any" query
-      expect(stderrCalls).toContain("any/all");
-
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
-    });
-
-    it("rejects dates older than 1 year", async () => {
-      const currentYear = new Date().getFullYear();
-      const oldYear = currentYear - 2;
-
-      // Mock nano initial call (first iteration of loop) - tries to use old date
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "test",
-                  afterDate: `${oldYear}-01-01`,
-                  limit: 50,
-                }),
-              },
-            }],
-          },
-        }],
-      });
-
-      // After tool execution, code continues loop and calls nano again with tool result
-      // Mock nano's response (final message, no tool calls) - this is the second call
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: JSON.stringify({
-              messageIds: [],
-            }),
-            // No tool_calls - this is a final message
-          },
-        }],
-      });
-
-      // Mock mini synthesis
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "No results",
-          },
-        }],
-      });
-
-      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
-      try {
-        await runAsk("test query", db, { stream: false, verbose: true });
-      } catch (e) {
-        // If it fails due to missing mocks, that's ok - we're just testing date rejection logging
-      }
-
-      // Should log rejection of old date (verbose must be true for this to appear)
-      const stderrCalls = stderrSpy.mock.calls.map((call: any) => call[0]).join("");
-      expect(stderrCalls).toContain("rejecting old date");
-
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
-    });
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
   });
 
-  describe("nano loop", () => {
-    // TODO: Update tests for new two-phase architecture (investigation + context assembly)
-    it.skip("stops when enough context found", async () => {
-      // Create enough messages to trigger hasEnoughContext
-      const senders = ["alice@example.com", "bob@example.com", "charlie@example.com"];
-      for (let i = 0; i < 25; i++) {
-        insertTestMessage(db, {
-          messageId: `<msg-${i}@example.com>`,
-          subject: `Message ${i}`,
-          fromAddress: senders[i % senders.length],
-          bodyText: "content",
-        });
-      }
+  it("handles empty context gracefully", async () => {
+    // Mock assemble to return empty context
+    const { assembleContext } = await import("./assemble");
+    vi.mocked(assembleContext).mockResolvedValueOnce("");
 
-      // Mock nano search that returns hasEnoughContext
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
+    mockCreate.mockResolvedValueOnce({
+      choices: [
+        {
           message: {
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "message",
-                  limit: 50,
-                }),
-              },
-            }],
+            content: "I couldn't find any relevant emails.",
           },
-        }],
-      });
-
-      // Mock tool result with hasEnoughContext (50+ results)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: JSON.stringify({
-              messageIds: Array.from({ length: 25 }, (_, i) => `<msg-${i}@example.com>`),
-            }),
-          },
-        }],
-      });
-
-      // Mock mini synthesis
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "Found messages",
-          },
-        }],
-      });
-
-      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
-      await runAsk("what messages?", db, { stream: false });
-
-      // Should stop after finding enough context (check logs)
-      const stderrCalls = stderrSpy.mock.calls.map((call: any) => call[0]).join("");
-      expect(stderrCalls).toContain("enough context");
-
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
+        },
+      ],
     });
 
-    // TODO: Update tests for new two-phase architecture (investigation + context assembly)
-    it.skip("continues when 0 results", async () => {
-      // Mock enough nano calls to hit MAX_TRIES (5 attempts)
-      // Each attempt: one call with tool_calls, then one final message with no tool_calls
-      // After MAX_TRIES, mini is called
-      
-      // Attempt 1: tool call
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "nonexistent",
-                  limit: 50,
-                }),
-              },
-            }],
-          },
-        }],
-      });
+    const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+    const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
 
-      // Attempt 1: final message (no tool calls, 0 results -> continue)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "No results found",
-          },
-        }],
-      });
+    const answer = await runAsk("test question", db, { stream: false });
 
-      // Attempt 2: tool call
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            tool_calls: [{
-              id: "call-2",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "different term",
-                  limit: 50,
-                }),
-              },
-            }],
-          },
-        }],
-      });
+    expect(answer).toBe("I couldn't find any relevant emails.");
 
-      // Attempt 2: final message (no tool calls, 0 results -> continue)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "Still no results",
-          },
-        }],
-      });
-
-      // Attempt 3: tool call
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            tool_calls: [{
-              id: "call-3",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "another term",
-                  limit: 50,
-                }),
-              },
-            }],
-          },
-        }],
-      });
-
-      // Attempt 3: final message (no tool calls, 0 results -> continue)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "No results",
-          },
-        }],
-      });
-
-      // Attempt 4: tool call
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            tool_calls: [{
-              id: "call-4",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "yet another term",
-                  limit: 50,
-                }),
-              },
-            }],
-          },
-        }],
-      });
-
-      // Attempt 4: final message (no tool calls, 0 results -> continue)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "No results",
-          },
-        }],
-      });
-
-      // Attempt 5: tool call (MAX_TRIES reached)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            tool_calls: [{
-              id: "call-5",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "final term",
-                  limit: 50,
-                }),
-              },
-            }],
-          },
-        }],
-      });
-
-      // Attempt 5: final message (no tool calls, 0 results -> loop exits after MAX_TRIES)
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "No results after max tries",
-          },
-        }],
-      });
-
-      // After MAX_TRIES, mini is called
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "No results",
-          },
-        }],
-      });
-
-      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-      await runAsk("nonexistent query", db, { stream: false });
-
-      // Should have tried multiple times
-      const stderrCalls = stderrSpy.mock.calls.map((call: any) => call[0]).join("");
-      expect(stderrCalls).toContain("no results yet");
-
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
-      consoleLogSpy.mockRestore();
-    });
-
-    // TODO: Update tests for new two-phase architecture (investigation + context assembly)
-    it.skip("respects MAX_TRIES limit", async () => {
-      // Mock nano always returning tool calls (never enough context)
-      for (let i = 0; i < 5; i++) {
-        mockCreate.mockResolvedValueOnce({
-          choices: [{
-            message: {
-              tool_calls: [{
-                id: `call-${i}`,
-                type: "function",
-                function: {
-                  name: "search",
-                  arguments: JSON.stringify({
-                    query: "test",
-                    limit: 50,
-                  }),
-                },
-              }],
-            },
-          }],
-        });
-
-        // Mock tool result with 0 results
-        mockCreate.mockResolvedValueOnce({
-          choices: [{
-            message: {
-              content: JSON.stringify({
-                results: [],
-                totalMatched: 0,
-              }),
-            },
-          }],
-        });
-      }
-
-      // Mock mini synthesis
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "No results after max tries",
-          },
-        }],
-      });
-
-      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
-      await runAsk("test query", db, { stream: false });
-
-      // Should stop after MAX_TRIES (5)
-      const stderrCalls = stderrSpy.mock.calls.map((call: any) => call[0]).join("");
-      expect(stderrCalls).toMatch(/attempt 5/);
-
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
-    });
-  });
-
-  describe("relevance filtering", () => {
-    // TODO: Update tests for new two-phase architecture (investigation + context assembly)
-    it.skip("sorts results by rank", async () => {
-      // Create messages with different relevance
-      for (let i = 0; i < 10; i++) {
-        insertTestMessage(db, {
-          messageId: `<msg-${i}@example.com>`,
-          subject: `Test ${i}`,
-          bodyText: "test content",
-        });
-      }
-
-      // Mock nano search
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            tool_calls: [{
-              id: "call-1",
-              type: "function",
-              function: {
-                name: "search",
-                arguments: JSON.stringify({
-                  query: "test",
-                  limit: 50,
-                }),
-              },
-            }],
-          },
-        }],
-      });
-
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: JSON.stringify({
-              messageIds: Array.from({ length: 10 }, (_, i) => `<msg-${i}@example.com>`),
-            }),
-          },
-        }],
-      });
-
-      mockCreate.mockResolvedValueOnce({
-        choices: [{
-          message: {
-            content: "Answer",
-          },
-        }],
-      });
-
-      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-
-      await runAsk("test query", db, { stream: false });
-
-      // Should extract and sort results
-      const stderrCalls = stderrSpy.mock.calls.map((call: any) => call[0]).join("");
-      expect(stderrCalls).toContain("extracted");
-
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
-    });
-  });
-
-  describe("retry fallback with includeNoise", () => {
-    it.skip("retries searches with includeNoise=true when Phase 1 finds no candidates", async () => {
-      // TODO: Test retry fallback - requires mocking executeNanoTool to return different results
-      // for first call (0 results) vs retry (with includeNoise=true, finds noise messages)
-      // This is covered by integration tests (eval suite) for now
-    });
-  });
-
-  describe("error handling", () => {
-    it.skip("handles LLM API errors gracefully", async () => {
-      // TODO: Fix this test - error handling needs proper async error propagation
-      const error = new Error("API error");
-      // Mock the first nano call to reject
-      mockCreate.mockRejectedValueOnce(error);
-
-      const stdoutSpy = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
-      const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(() => true);
-      const consoleLogSpy = vi.spyOn(console, "log").mockImplementation(() => {});
-
-      await expect(runAsk("test query", db, { stream: false })).rejects.toThrow("API error");
-
-      stdoutSpy.mockRestore();
-      stderrSpy.mockRestore();
-      consoleLogSpy.mockRestore();
-    });
+    stdoutSpy.mockRestore();
+    stderrSpy.mockRestore();
   });
 });

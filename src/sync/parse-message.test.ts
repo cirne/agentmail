@@ -1,6 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { parseRawMessage } from "./parse-message";
 
 describe("parseRawMessage", () => {
@@ -229,12 +227,44 @@ Can we meet tomorrow?`
 
   describe("attachment filtering", () => {
     it("preserves attachments with disposition=attachment even when related=true", async () => {
-      // Real EML from bug report where postal-mime sets related: true on PDF attachments
-      const emlPath = join(__dirname, "__fixtures__", "attachment-related-true.eml");
-      const raw = readFileSync(emlPath);
+      // Tests bug fix: postal-mime sets related: true on attachments in multipart/mixed
+      // with nested multipart/alternative, but we should still preserve them if disposition=attachment
+      const raw = Buffer.from(
+        `Message-ID: <test@example.com>
+From: sender@example.com
+To: recipient@example.com
+Subject: Test with Related Attachments
+Content-Type: multipart/mixed; boundary="outer"
+
+--outer
+Content-Type: multipart/alternative; boundary="inner"
+
+--inner
+Content-Type: text/plain
+
+Please find attached documents.
+--inner
+Content-Type: text/html
+
+<html><body>Please find attached documents.</body></html>
+--inner--
+--outer
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="Will.pdf"
+Content-ID: <will@example.com>
+
+[PDF content]
+--outer
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="ancillaries.pdf"
+Content-ID: <ancillaries@example.com>
+
+[PDF content]
+--outer--`
+      );
       const parsed = await parseRawMessage(raw);
       
-      // Should have 2 PDF attachments (both have disposition: attachment but related: true)
+      // Should have 2 PDF attachments (both have disposition: attachment but related: true due to Content-ID)
       expect(parsed.attachments.length).toBe(2);
       expect(parsed.attachments[0].filename).toContain("Will.pdf");
       expect(parsed.attachments[1].filename).toContain("ancillaries.pdf");

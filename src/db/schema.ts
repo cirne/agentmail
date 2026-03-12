@@ -1,7 +1,7 @@
 // SQL schema — all tables and FTS5 virtual tables
 
 /** Schema version — bump this integer whenever the schema changes. */
-export const SCHEMA_VERSION = 9;
+export const SCHEMA_VERSION = 12;
 
 export const SCHEMA = /* sql */ `
   CREATE TABLE IF NOT EXISTS messages (
@@ -92,37 +92,81 @@ export const SCHEMA = /* sql */ `
     owner_pid            INTEGER
   );
 
-  -- FTS5 full-text search index over message subjects and bodies
+  -- FTS5 full-text search index over all message fields and attachment text
+  -- Indexes: subject, body_text, from_address, from_name, attachment_text
+  -- Note: to_addresses and cc_addresses are JSON arrays - not indexed (use filter-only search for to/cc)
+  -- Also includes aggregated attachment extracted_text for grep-style search across everything
   CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     message_id UNINDEXED,
     subject,
     body_text,
-    from_address UNINDEXED,
-    date UNINDEXED,
-    content='messages',
-    content_rowid='id'
+    from_address,
+    from_name,
+    attachment_text,
+    date UNINDEXED
   );
 
-  -- Triggers to keep FTS index in sync
+  -- Triggers to keep FTS index in sync with messages and attachments
+  -- Aggregates attachment extracted_text into attachment_text column for search
   CREATE TRIGGER IF NOT EXISTS messages_fts_insert
-    AFTER INSERT ON messages BEGIN
-      INSERT INTO messages_fts(rowid, message_id, subject, body_text, from_address, date)
-      VALUES (new.id, new.message_id, new.subject, new.body_text, new.from_address, new.date);
-    END;
+  AFTER INSERT ON messages BEGIN
+    INSERT INTO messages_fts(rowid, message_id, subject, body_text, from_address, from_name, attachment_text, date)
+    VALUES (
+      new.id,
+      new.message_id,
+      COALESCE(new.subject, ''),
+      COALESCE(new.body_text, ''),
+      COALESCE(new.from_address, ''),
+      COALESCE(new.from_name, ''),
+      COALESCE((SELECT GROUP_CONCAT(extracted_text, ' ') FROM attachments WHERE message_id = new.message_id AND extracted_text IS NOT NULL), ''),
+      COALESCE(new.date, '')
+    );
+  END;
 
   CREATE TRIGGER IF NOT EXISTS messages_fts_delete
-    AFTER DELETE ON messages BEGIN
-      INSERT INTO messages_fts(messages_fts, rowid, message_id, subject, body_text, from_address, date)
-      VALUES ('delete', old.id, old.message_id, old.subject, old.body_text, old.from_address, old.date);
-    END;
+  AFTER DELETE ON messages BEGIN
+    DELETE FROM messages_fts WHERE rowid = old.id;
+  END;
 
   CREATE TRIGGER IF NOT EXISTS messages_fts_update
-    AFTER UPDATE ON messages BEGIN
-      INSERT INTO messages_fts(messages_fts, rowid, message_id, subject, body_text, from_address, date)
-      VALUES ('delete', old.id, old.message_id, old.subject, old.body_text, old.from_address, old.date);
-      INSERT INTO messages_fts(rowid, message_id, subject, body_text, from_address, date)
-      VALUES (new.id, new.message_id, new.subject, new.body_text, new.from_address, new.date);
-    END;
+  AFTER UPDATE OF subject, body_text, from_address, from_name, date ON messages BEGIN
+    -- Only update FTS5 if indexed columns changed
+    DELETE FROM messages_fts WHERE rowid = old.id;
+    INSERT INTO messages_fts(rowid, message_id, subject, body_text, from_address, from_name, attachment_text, date)
+    VALUES (
+      new.id,
+      new.message_id,
+      COALESCE(new.subject, ''),
+      COALESCE(new.body_text, ''),
+      COALESCE(new.from_address, ''),
+      COALESCE(new.from_name, ''),
+      COALESCE((SELECT GROUP_CONCAT(extracted_text, ' ') FROM attachments WHERE message_id = new.message_id AND extracted_text IS NOT NULL), ''),
+      COALESCE(new.date, '')
+    );
+  END;
+
+  -- Trigger to update messages_fts when attachments are inserted/updated/deleted
+  -- This keeps attachment_text in sync when attachments are extracted
+  CREATE TRIGGER IF NOT EXISTS attachments_fts_update_on_insert
+  AFTER INSERT ON attachments BEGIN
+    UPDATE messages_fts SET
+      attachment_text = COALESCE((SELECT GROUP_CONCAT(extracted_text, ' ') FROM attachments WHERE message_id = new.message_id AND extracted_text IS NOT NULL), '')
+    WHERE message_id = new.message_id;
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS attachments_fts_update_on_update
+  AFTER UPDATE ON attachments BEGIN
+    UPDATE messages_fts SET
+      attachment_text = COALESCE((SELECT GROUP_CONCAT(extracted_text, ' ') FROM attachments WHERE message_id = new.message_id AND extracted_text IS NOT NULL), '')
+    WHERE message_id = new.message_id;
+  END;
+
+  CREATE TRIGGER IF NOT EXISTS attachments_fts_update_on_delete
+  AFTER DELETE ON attachments BEGIN
+    UPDATE messages_fts SET
+      attachment_text = COALESCE((SELECT GROUP_CONCAT(extracted_text, ' ') FROM attachments WHERE message_id = old.message_id AND extracted_text IS NOT NULL), '')
+    WHERE message_id = old.message_id;
+  END;
 
   -- Indexes for common query patterns
   CREATE INDEX IF NOT EXISTS idx_messages_thread  ON messages(thread_id);
