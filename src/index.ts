@@ -67,12 +67,16 @@ if (command === "wizard") {
 // If no command provided, show quick help
 if (!command) {
   console.log("zmail — agent-first email: sync, index, and search your inbox.\n");
-  console.log("  zmail sync              Start syncing email (background; waits until data flows)");
-  console.log("  zmail refresh           Fetch new email since last sync (fast, foreground)");
+  console.log("First time? Configure with:");
+  console.log("  zmail setup              Configure via flags/env (agent-friendly; no prompts)");
+  console.log("  zmail wizard             Interactive setup (prompts for input; less agent-friendly)");
+  console.log("");
+  console.log("  zmail sync               Start syncing email (background; waits until data flows)");
+  console.log("  zmail refresh            Fetch new email since last sync (fast, foreground)");
   console.log("  zmail search <query>    Search email — FTS5 full-text search");
-  console.log("  zmail who <query>       Find people by name or address");
-  console.log("  zmail status            Show sync and indexing progress");
-  console.log("  zmail read <id>         Read a message");
+  console.log("  zmail who <query>        Find people by name or address");
+  console.log("  zmail status             Show sync and indexing progress");
+  console.log("  zmail read <id>          Read a message");
   console.log("");
   console.log("Run 'zmail --help' for all commands and flags.");
   process.exit(0);

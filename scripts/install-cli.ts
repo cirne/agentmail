@@ -49,7 +49,14 @@ const repoPath = escapeForBash(projectRoot);
 const wrapper = `#!/usr/bin/env bash
 set -e
 ZMAIL_REPO='${repoPath}'
-cd "$ZMAIL_REPO" && exec npx tsx src/index.ts "$@"
+NODE_VERSION=\$(cat "\$ZMAIL_REPO/.nvmrc")
+NODE_DIR=\$(ls -d "\$HOME/.nvm/versions/node/v\${NODE_VERSION}."* 2>/dev/null | sort -V | tail -1)
+if [ -z "\$NODE_DIR" ]; then
+  echo "zmail: node v\${NODE_VERSION}.x not found in nvm. Run: nvm install \$NODE_VERSION" >&2
+  exit 1
+fi
+export PATH="\$NODE_DIR/bin:\$PATH"
+cd "\$ZMAIL_REPO" && exec npx tsx src/index.ts "\$@"
 `;
 
 mkdirSync(installDir, { recursive: true });
