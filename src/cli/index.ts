@@ -1647,7 +1647,10 @@ async function main() {
 
     case "ask": {
       const verbose = args.includes("--verbose") || args.includes("-v");
-      const askArgs = args.filter((a) => a !== "--verbose" && a !== "-v");
+      const askV1 = args.includes("--v1");
+      const askArgs = args.filter(
+        (a) => a !== "--verbose" && a !== "-v" && a !== "--v1"
+      );
       // Parse question: handle -- separator
       let question: string;
       if (askArgs[0] === "--") {
@@ -1657,8 +1660,10 @@ async function main() {
       }
 
       if (!question.trim()) {
-        console.error("Usage: zmail ask <question> [--verbose]");
+        console.error("Usage: zmail ask <question> [--verbose] [--v1]");
         console.error("  Answer a question about your email using an internal agent (requires ZMAIL_OPENAI_API_KEY).");
+        console.error("");
+        console.error("  --v1   Use the v1 ask algorithm (Nano tool loop + Mini synthesis) for comparison.");
         console.error("");
         console.error("Example: zmail ask \"summarize my tech news this week\"");
         console.error("  Use --verbose (or -v) to log pipeline progress (phase 1, context assembly, etc.).");
@@ -1679,7 +1684,9 @@ async function main() {
       }
 
       const db = getDb();
-      const { runAsk } = await import("~/ask/agent");
+      const { runAsk } = askV1
+        ? await import("~/ask/agent-v1")
+        : await import("~/ask/agent");
       await runAsk(question, db, { stream: true, verbose });
       break;
     }
@@ -1708,7 +1715,7 @@ Usage:
   zmail thread <id> [--json] [--raw]   Fetch thread (text by default)
   zmail attachment list <message_id>   List attachments (use message_id from search)
   zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]   Read by index (1-based) or filename
-  zmail ask "<question>"            Answer a question about your email (requires LLM API key)
+  zmail ask "<question>" [--v1]   Answer a question about your email (requires LLM API key; --v1: prior algorithm)
   zmail mcp                        Start MCP server (stdio)
 
 Agent interfaces:

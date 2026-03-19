@@ -96,7 +96,7 @@ zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [-
 zmail who <query> [--limit n] [--enrich] [--text]
 zmail read <message_id> [--raw]
 zmail thread <thread_id> [--json] [--raw]
-zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
+zmail ask "<question>" [--verbose] [--v1]  # Answer engine (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline; --v1 uses prior Nano+Mini algorithm
 zmail status [--json]
 zmail stats [--json]
 zmail attachment list <message_id> [--text]

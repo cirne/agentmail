@@ -245,6 +245,18 @@ if user_wants_details:
 
 ## Debugging and Transparency
 
+### Comparing algorithms
+
+The default pipeline is **Planner → Scatter → Assemble → Synthesize** (`src/ask/agent.ts`). To run **v1** for A/B comparison (Nano tool loop + Mini synthesis), use:
+
+```bash
+zmail ask --v1 "your question"
+```
+
+Same flags apply (`--verbose`, etc.). This loads `src/ask/agent-v1.ts`.
+
+### Verbose logging
+
 `zmail ask` writes debug logs to `stderr` (use `--verbose` flag):
 
 ```
