@@ -5,6 +5,7 @@ import { getDb } from "~/db";
 import { startMcpServer } from "~/mcp";
 import { config, requireImapConfig } from "~/lib/config";
 import { logger, SYNC_LOG_PATH } from "~/lib/logger";
+import { CLI_USAGE } from "~/lib/onboarding";
 import { parseSinceToDate } from "~/sync/parse-since";
 import type { SearchResult, WhoResult } from "~/lib/types";
 import type { SqliteDatabase } from "~/db";
@@ -404,7 +405,23 @@ function defaultFieldsForDetail(detail: SearchDetail): SearchField[] {
   return DEFAULT_HEADER_FIELDS;
 }
 
-function hydrateBodies(db: SqliteDatabase, results: SearchResult[]): Array<SearchResult & { body: string }> {
+interface AttachmentMetadata {
+  count: number;
+  types: string[];
+}
+
+/** CLI search row: aggregate attachment stats replace FTS `attachments` (per-file list) on output. */
+type CliSearchRow = Omit<SearchResult, "attachments"> & {
+  body?: string;
+  attachments?: AttachmentMetadata;
+};
+
+function toCliSearchRow(r: SearchResult): CliSearchRow {
+  const { attachments: _ftsAttachments, ...rest } = r;
+  return rest;
+}
+
+function hydrateBodies(db: SqliteDatabase, results: CliSearchRow[]): CliSearchRow[] {
   if (results.length === 0) return [];
   const ids = results.map((r) => r.messageId);
   const placeholders = ids.map(() => "?").join(",");
@@ -418,11 +435,6 @@ function hydrateBodies(db: SqliteDatabase, results: SearchResult[]): Array<Searc
     ...result,
     body: bodyByMessageId.get(result.messageId) ?? "",
   }));
-}
-
-interface AttachmentMetadata {
-  count: number;
-  types: string[];
 }
 
 function hydrateAttachmentMetadata(
@@ -454,11 +466,7 @@ function hydrateAttachmentMetadata(
   return metadataByMessageId;
 }
 
-function projectResult(
-  row: SearchResult & { body?: string; attachments?: AttachmentMetadata },
-  detail: SearchDetail,
-  fields?: SearchField[]
-): Record<string, unknown> {
+function projectResult(row: CliSearchRow, detail: SearchDetail, fields?: SearchField[]): Record<string, unknown> {
   const selected = new Set<SearchField>(fields?.length ? fields : defaultFieldsForDetail(detail));
   // Preserve stable IDs for shortlist -> hydrate workflows.
   selected.add("messageId");
@@ -642,10 +650,10 @@ function getUnknownCommandHint(unknownCommand: string): string {
   }
   const c = unknownCommand.toLowerCase();
   if (c === "show" || c === "get" || c === "open" || c === "view") {
-    return "Use: zmail read <message_id> to read a message, zmail search \"<query>\" to search.";
+    return "Use: zmail read <message_id>, zmail search \"<query>\", or zmail ask \"<question>\" for a summarized answer.";
   }
   if (c === "find" || c === "lookup") {
-    return "Use: zmail search \"<query>\" or zmail who <query>.";
+    return "Use: zmail search \"<query>\", zmail who <query>, or zmail ask \"<question>\".";
   }
   return "Run 'zmail' for usage.";
 }
@@ -975,9 +983,9 @@ async function main() {
         process.exit(1);
       }
 
-      let results: Array<SearchResult & { body?: string; attachments?: AttachmentMetadata }> = run.results;
+      let results: CliSearchRow[] = run.results.map(toCliSearchRow);
       if (effectiveDetail === "body") {
-        results = hydrateBodies(db, run.results);
+        results = hydrateBodies(db, results);
       }
 
       // Hydrate attachment metadata for all results
@@ -986,7 +994,6 @@ async function main() {
         ...r,
         attachments: attachmentMetadata.get(r.messageId),
       }));
-      const messagesWithAttachments = Array.from(attachmentMetadata.values()).filter(meta => meta.count > 0).length;
 
       if (shouldOutputJson) {
         const rows = parsed.idsOnly
@@ -1691,28 +1698,8 @@ async function main() {
         console.error(`Unknown command: ${command}. ${hint}`);
         process.exit(1);
       }
-      console.log(`zmail — agent-first email
-
-Usage:
-  zmail sync [--since <spec>]     Initial sync: fill gaps going backward (e.g. --since 7d, 5w, 3m, 2y)
-  zmail refresh [--force] [--include-noise] [--text]   Refresh: fetch new messages; JSON with newMail previews (default); --text for human output
-  zmail search <query> [flags]     Search email (FTS5 full-text search)
-  zmail who <query> [flags]        Find people by address or name (see --help for flags)
-  zmail status [--json] [--imap]   Sync/indexing status; --imap: compare with server
-  zmail stats [--json]             Database statistics
-  zmail read <id> [--raw]          Read a message (or: zmail message <id>)
-  zmail thread <id> [--json] [--raw]   Fetch thread (text by default)
-  zmail attachment list <message_id>   List attachments (use message_id from search)
-  zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]   Read by index (1-based) or filename
-  zmail ask "<question>"            Answer a question about your email (requires LLM API key)
-  zmail mcp                        Start MCP server (stdio)
-
-Agent interfaces:
-  CLI (this): Use for direct subprocess calls. Fast for one-off queries. Commands default to JSON (search, who, attachment list) or text (read, thread, status, stats). Use --text or --json flags to override.
-  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. Search returns bodyPreview and attachment metadata per result; use includeThreads: true for full threads, get_messages([ids]) to batch-read. See docs/MCP.md.
-
-Run 'zmail setup' for setup instructions.
-`);
+      console.log(CLI_USAGE);
+      console.log("Run 'zmail setup' for setup instructions.");
     }
   }
 }

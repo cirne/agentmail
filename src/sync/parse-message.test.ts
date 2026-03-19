@@ -1,6 +1,4 @@
 import { describe, it, expect } from "vitest";
-import { readFileSync } from "fs";
-import { join } from "path";
 import { parseRawMessage } from "./parse-message";
 
 describe("parseRawMessage", () => {
@@ -228,13 +226,35 @@ Can we meet tomorrow?`
   });
 
   describe("attachment filtering", () => {
-    it("preserves attachments with disposition=attachment even when related=true", async () => {
-      // Real EML from bug report where postal-mime sets related: true on PDF attachments
-      const emlPath = join(__dirname, "__fixtures__", "attachment-related-true.eml");
-      const raw = readFileSync(emlPath);
+    it("preserves attachments with disposition=attachment in multipart/related", async () => {
+      // postal-mime may omit or set related on parts; filter must keep explicit attachment dispositions
+      const raw = Buffer.from(
+        `Message-ID: <test-related-two-pdf@example.com>
+From: a@example.com
+To: b@example.com
+Subject: Two PDFs
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="boundary123"
+
+--boundary123
+Content-Type: text/html
+
+<html><body>Hi</body></html>
+--boundary123
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="Will.pdf"
+
+%PDF-1.4 fake1
+--boundary123
+Content-Type: application/pdf
+Content-Disposition: attachment; filename="ancillaries.pdf"
+
+%PDF-1.4 fake2
+--boundary123--
+`
+      );
       const parsed = await parseRawMessage(raw);
-      
-      // Should have 2 PDF attachments (both have disposition: attachment but related: true)
+
       expect(parsed.attachments.length).toBe(2);
       expect(parsed.attachments[0].filename).toContain("Will.pdf");
       expect(parsed.attachments[1].filename).toContain("ancillaries.pdf");

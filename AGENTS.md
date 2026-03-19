@@ -131,7 +131,7 @@ zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]   # -
 
 Supported formats: PDF, DOCX, XLSX, HTML, CSV, TXT. Extraction happens on first read and is cached in the DB.
 
-**CLI help and onboarding (no env required):** `zmail --help`, `zmail -h`, `zmail help` show usage. If any command fails due to missing config, the CLI prints "No config found. Run 'zmail setup' or 'zmail wizard' first."
+**CLI help and onboarding (no env required):** `zmail --help`, `zmail -h`, `zmail help` show usage, including when to use `zmail ask` versus search/read/thread/who/attachment (canonical string: `CLI_USAGE` in `src/lib/onboarding.ts`). For the full comparison and hybrid patterns, see [docs/ASK.md](docs/ASK.md). If any command fails due to missing config, the CLI prints "No config found. Run 'zmail setup' or 'zmail wizard' first."
 
 **Setup (CLI/agent-first):** Provide credentials via flags or env vars. For interactive prompts, use `zmail wizard`.
 

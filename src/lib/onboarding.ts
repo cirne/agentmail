@@ -15,6 +15,7 @@ Usage:
   zmail wizard [--no-validate]   Interactive setup (prompts for credentials)
   zmail sync [--since <spec>] [--foreground]     Initial sync: fill gaps going backward (runs in background by default; use --foreground to wait)
   zmail refresh                    Refresh: fetch new messages since last sync (frequent updates)
+  zmail ask "<question>" [--verbose]   Answer a natural-language question (zmail orchestrates search/read; needs OpenAI key: ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY)
   zmail search <query> [flags]    Search email (FTS5 full-text search)
   zmail who <query> [flags]       Find people by address or name (use --help for flags)
   zmail status [--imap]           Show sync and indexing status (--imap for IMAP server comparison, may take 10+ seconds)
@@ -25,7 +26,12 @@ Usage:
   zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
   zmail mcp                       Start MCP server (stdio)
 
+Ask vs search / read / thread / who / attachment:
+  ask — Use for one-shot natural-language questions and let zmail retrieve and summarize (fast path for agents; requires ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY).
+  search, read, thread, who, attachment — Use for structured JSON, exact filters or IDs, scripts, UI drill-down, raw/EML, or debugging. No API key for core use (optional: e.g. who --enrich).
+  Full tradeoffs and hybrid patterns: docs/ASK.md
+
 Agent interfaces:
-  CLI (this): Use for direct subprocess calls. Fast for one-off queries. Commands default to JSON (search, who, attachment list) or text (read, thread, status, stats). Use --text or --json flags to override.
-  MCP: Use for persistent tool-based integration. Run 'zmail mcp' to start stdio server. See docs/MCP.md.
+  CLI (this): Subprocess-friendly. Defaults: JSON for search, who, attachment list; text for read, thread, status, stats. Use --text or --json to override.
+  MCP: Run 'zmail mcp' (stdio). Same index as CLI. Tools and token-efficient patterns (e.g. includeThreads, batch get_messages): docs/MCP.md
 `;
