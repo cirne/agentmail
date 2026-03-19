@@ -8,7 +8,7 @@ import type { SearchPlan } from "./planner";
 /**
  * Resolve a date string to an ISO date string (YYYY-MM-DD).
  * Handles:
- *   - Relative strings:  "30d", "7d", "1w", "3m", "0d"
+ *   - Relative strings:  "30d", "7d", "1w", "3m", "0d" (0d = start of today)
  *   - ISO dates:         "2026-01-01" (passed through)
  *   - US short dates:    "1/1/26", "01/01/2026", "1/1/2026"
  */
@@ -17,6 +17,13 @@ function resolveDate(dateStr: string | undefined): string | undefined {
 
   // Already an ISO date (YYYY-MM-DD or full ISO)
   if (/^\d{4}-\d{2}-\d{2}/.test(dateStr)) return dateStr;
+
+  // "0d" = today (start of day). parseSinceToDate rejects num <= 0, so handle here.
+  const trimmed = dateStr.trim().toLowerCase();
+  if (trimmed === "0d" || trimmed === "0") {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  }
 
   // US date formats: M/D/YY or M/D/YYYY
   const usDate = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{2}|\d{4})$/);

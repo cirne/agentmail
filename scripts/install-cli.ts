@@ -1,13 +1,14 @@
 #!/usr/bin/env node
-// Install a wrapper script that runs zmail via `npx tsx src/index.ts` so the
-// CLI uses the source tree (avoids compiled-binary issues e.g. PDF extraction).
+// Install a wrapper script that runs zmail via the same Node binary that ran
+// this installer + local tsx (`node_modules/tsx/dist/cli.mjs`), so native deps
+// (e.g. better-sqlite3) match the runtime even when PATH/`npx` would pick another Node.
 //
 // Usage: npm run install-cli  (or: npx tsx scripts/install-cli.ts)
 //
 // Default install dir: ~/.local/bin (override with ZMAIL_INSTALL_DIR).
 // Ensure that directory is on your PATH so the installed `zmail` is found.
 //
-// The wrapper runs: npx tsx <projectRoot>/src/index.ts -- "$@"
+// The wrapper runs: <node from install> <projectRoot>/node_modules/tsx/dist/cli.mjs <projectRoot>/src/index.ts -- "$@"
 
 import { writeFileSync, mkdirSync, existsSync } from "fs";
 import { join, dirname } from "path";
@@ -46,17 +47,30 @@ function escapeForBash(path: string): string {
 }
 
 const repoPath = escapeForBash(projectRoot);
+const nodePath = escapeForBash(process.execPath);
+const tsxCli = join(projectRoot, "node_modules/tsx/dist/cli.mjs");
+const tsxCliRel = "node_modules/tsx/dist/cli.mjs";
+
+if (!existsSync(tsxCli)) {
+  console.error(
+    "install-cli: missing local tsx. Run `npm install` in the repo, then re-run install-cli."
+  );
+  process.exit(1);
+}
+
 const wrapper = `#!/usr/bin/env bash
 set -e
 ZMAIL_REPO='${repoPath}'
-NODE_VERSION=\$(cat "\$ZMAIL_REPO/.nvmrc")
-NODE_DIR=\$(ls -d "\$HOME/.nvm/versions/node/v\${NODE_VERSION}."* 2>/dev/null | sort -V | tail -1)
-if [ -z "\$NODE_DIR" ]; then
-  echo "zmail: node v\${NODE_VERSION}.x not found in nvm. Run: nvm install \$NODE_VERSION" >&2
+NODE_BIN='${nodePath}'
+# Pinned Node — not affected by which \`node\` is first on PATH.
+if [[ ! -x "\$NODE_BIN" ]]; then
+  echo "zmail wrapper: pinned Node is missing or not executable:" >&2
+  echo "  \$NODE_BIN" >&2
+  echo "Re-run from the zmail repo: npm run install-cli" >&2
+  echo "(Use the Node you use for npm install there.)" >&2
   exit 1
 fi
-export PATH="\$NODE_DIR/bin:\$PATH"
-cd "\$ZMAIL_REPO" && exec npx tsx src/index.ts "\$@"
+cd "\$ZMAIL_REPO" && exec "\$NODE_BIN" "\$ZMAIL_REPO/${tsxCliRel}" "\$ZMAIL_REPO/src/index.ts" -- "\$@"
 `;
 
 mkdirSync(installDir, { recursive: true });
@@ -64,8 +78,14 @@ writeFileSync(destPath, wrapper, { mode: 0o755 });
 
 console.log(`Installed zmail (source wrapper) → ${destPath}`);
 console.log("");
-console.log("The wrapper runs: npx tsx <repo>/src/index.ts <args>");
+console.log(
+  "The wrapper runs: <this Node> <repo>/node_modules/tsx/dist/cli.mjs <repo>/src/index.ts <args>"
+);
+console.log("Node pinned to: " + process.execPath);
 console.log("Repo path: " + projectRoot);
+console.log(
+  "(Default `node` on PATH does not matter; the wrapper always uses the path above.)"
+);
 console.log("");
 
 // Check for global npm installation

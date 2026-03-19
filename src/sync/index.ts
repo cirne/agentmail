@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { ImapFlow } from "imapflow";
 import { config, requireImapConfig } from "~/lib/config";
 import { getDb } from "~/db";
-import { acquireLock, releaseLock } from "~/lib/process-lock";
+import { acquireLock, isProcessAlive, releaseLock } from "~/lib/process-lock";
 import { parseRawMessage } from "./parse-message";
 import { parseSinceToDate } from "./parse-since";
 import { createFileLogger, SYNC_LOG_PATH, setLogger, type FileLogger } from "~/lib/logger";
@@ -137,13 +137,15 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     db.prepare(
       "UPDATE sync_summary SET target_start_date = ?, sync_start_earliest_date = ? WHERE id = 1"
     ).run(fromDate, currentEarliest?.earliest_synced_date ?? null);
+    // Fast path: bail before opening IMAP only when a *live* process holds the lock.
+    // Do not trust is_running alone — a crashed sync can leave is_running=1; acquireLock
+    // recovers stale locks but is never reached if we exit here unconditionally.
     const syncRunningCheck = db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1").get() as
       | { is_running: number; owner_pid: number | null }
       | undefined;
-    const isRunning = syncRunningCheck?.is_running === 1;
-    
-    if (isRunning) {
-      fileLogger.info("Sync already running, exiting", { ownerPid: syncRunningCheck.owner_pid });
+    const ownerPid = syncRunningCheck?.owner_pid;
+    if (syncRunningCheck?.is_running === 1 && ownerPid != null && isProcessAlive(ownerPid)) {
+      fileLogger.info("Sync already running, exiting", { ownerPid });
       const durationMs = Date.now() - startTime;
       phaseMs("runSync_exit_early");
       fileLogger.close();

@@ -72,7 +72,7 @@ IMPORTANT: Always use ${currentYear} as the current year when interpreting dates
 You are a search planner for a local email index. Given a question, output a JSON search plan with two separate concerns:
 
 1. METADATA FILTERS (structured SQL — always first-class):
-   - fromAddress: domain or full address for a specific sender or vendor. Use whenever a company/service name or domain appears in a purchase, spending, receipt, or "from" context. Map well-known brands to their domain: Apple → "apple.com", Amazon → "amazon.com", Google → "google.com", Stripe → "stripe.com", GitHub → "github.com", Netflix → "netflix.com", Spotify → "spotify.com", etc. Also use when user says "from X" or "emails from X".
+   - fromAddress: domain or full address for a specific sender or vendor. Use whenever a company/service name or domain appears in a purchase, spending, receipt, or "from" context. Map the company to its typical sending domain (e.g. Apple → apple.com, Amazon → amazon.com). If the user gave a domain, use it. Also use when user says "from X" or "emails from X".
    - toAddress: recipient address/domain, only when user asks about emails sent to someone.
    - afterDate: ISO date (YYYY-MM-DD) or relative value ("30d", "7d", "1w", "3m", "0d"). Set whenever the question mentions a time period. Convert US date formats: "1/1/26" → "2026-01-01", "since Jan 2026" → "2026-01-01". For "today" use "0d".
    - beforeDate: same format as afterDate.
@@ -84,16 +84,14 @@ You are a search planner for a local email index. Given a question, output a JSO
    - For generic date-only or listing queries ("today", "recent", "5 most recent", "list all from X"): use empty patterns [].
 
 Rules:
-- Set includeNoise: true for newsletter/news questions. Otherwise false.
+- Set includeNoise: true when the user wants promotional/newsletter/marketing mail included; otherwise false.
+- For calendar phrases like "last month", use afterDate/beforeDate as ISO days covering that range (see the range above when they say "last month").
 - Never hardcode old years. Always derive dates from TODAY'S DATE above.
 
-Examples:
-- "list all apple purchases since 1/1/26" → {"patterns": ["receipt", "purchase", "order"], "fromAddress": "apple.com", "afterDate": "2026-01-01", "includeNoise": false}
-- "summarize my spending on apple.com in the last 30 days" → {"patterns": ["receipt", "purchase", "order", "invoice"], "fromAddress": "apple.com", "afterDate": "30d", "includeNoise": false}
-- "invoices from stripe" → {"patterns": ["invoice", "receipt", "payment"], "fromAddress": "stripe.com", "includeNoise": false}
-- "who is marcio nunes" → {"patterns": ["marcio", "nunes"], "includeNoise": false}
-- "what are my 5 most recent emails" → {"patterns": [], "includeNoise": false}
-- "emails about the cabo trip" → {"patterns": ["cabo", "trip", "travel"], "includeNoise": false}
+Examples (illustrative shapes only):
+- Vendor spending + window → fromAddress for the company domain, patterns are transaction words (receipt, order, …), afterDate/beforeDate or relative as appropriate.
+- Person lookup → patterns are name tokens; usually no fromAddress unless they said "from X".
+- Recent-inbox-only → patterns [] and optional date/limit implied by question.
 
 Output JSON only.`;
 

@@ -9,6 +9,33 @@ import { reindexFromMaildir } from "./rebuild";
 
 export type SqliteDatabase = InstanceType<typeof Database>;
 
+type DatabaseOptions = ConstructorParameters<typeof Database>[1];
+
+/** Opens the DB; on ABI mismatch gives a clear fix instead of a raw dlopen stack. */
+function openDatabase(path: string, options?: DatabaseOptions): SqliteDatabase {
+  try {
+    return new Database(path, options);
+  } catch (err: unknown) {
+    const code = err && typeof err === "object" && "code" in err ? String((err as NodeJS.ErrnoException).code) : "";
+    if (code === "ERR_DLOPEN_FAILED") {
+      const hint = [
+        "zmail: SQLite native module does not match this Node.js version.",
+        `  Running: ${process.version}`,
+        "",
+        "  Install or rebuild dependencies with the same Node you use to run zmail:",
+        "    rm -rf node_modules && npm install",
+        "    npm rebuild better-sqlite3",
+        "",
+        "  Global install: npm uninstall -g @cirne/zmail && npm install -g @cirne/zmail",
+        "",
+        "  See AGENTS.md: Node.js and SQLite (no nvm required).",
+      ].join("\n");
+      throw new Error(hint);
+    }
+    throw err;
+  }
+}
+
 let _db: SqliteDatabase | null = null;
 
 /**
@@ -23,7 +50,7 @@ export function checkSchemaVersion(): boolean {
   }
 
   // Open DB without applying schema to read user_version
-  const db = new Database(config.dbPath);
+  const db = openDatabase(config.dbPath);
   try {
     const result = db.prepare("PRAGMA user_version").get() as { user_version: number } | undefined;
     const userVersion = result?.user_version ?? 0;
@@ -38,7 +65,7 @@ export function getDb(): SqliteDatabase {
 
   mkdirSync(dirname(config.dbPath), { recursive: true });
 
-  _db = new Database(config.dbPath);
+  _db = openDatabase(config.dbPath);
   _db.exec("PRAGMA journal_mode = WAL");
   _db.exec("PRAGMA foreign_keys = ON");
   _db.exec("PRAGMA synchronous = NORMAL");

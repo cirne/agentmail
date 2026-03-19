@@ -20,6 +20,12 @@ npm install -g @cirne/zmail
 
 Node.js 20+, TypeScript, SQLite (`better-sqlite3`), FTS5, imapflow. Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
 
+### Node.js and SQLite (no nvm required)
+
+- **`better-sqlite3` is a native addon:** it must be installed or rebuilt with the **same Node binary** you use to run zmail. That is true on laptops, CI, and cloud images—**nvm is not required** (the optional `.nvmrc` is only a hint for contributors who use nvm: `nvm use` before `npm install`).
+- **`npm run install-cli`** writes a wrapper that runs the repo with **the same `node` binary that executed the installer** (absolute path embedded in the script) and local `tsx` (`node_modules/tsx/dist/cli.mjs`), so native addons (e.g. `better-sqlite3`) match the runtime and **your shell’s default `node` on `PATH` does not affect the wrapper**. Re-run install-cli after upgrading Node, changing version managers, or moving the repo.
+- **Docker / minimal OS images:** use an [official Node image](https://hub.docker.com/_/node) (or your platform’s supported Node package). Run `npm install` / `npm ci` **in that same image** as production/runtime so the native module matches. If `better-sqlite3` has no prebuild for your OS/arch/Node combo, the install step needs a **build toolchain** (e.g. Debian/Ubuntu: `build-essential`, `python3`; Alpine is trickier—prefer the default `node:*-bookworm` variants over musl unless you know you need Alpine). If you see `ERR_DLOPEN_FAILED` / NODE_MODULE_VERSION, reinstall or `npm rebuild better-sqlite3` **on the machine (or image) that runs Node**, not a copy of `node_modules` from elsewhere.
+
 ## Project structure
 
 ```
@@ -119,7 +125,7 @@ The CLI prints the log file path to stdout (e.g., `Sync log: ~/.zmail/logs/sync-
 
 **Using `zmail` from the repo:** `npm run zmail -- <command> [args]` (the `--` is required so args reach the CLI). Or: `npx tsx src/index.ts -- <command> [args]`.
 
-**Using `zmail` from another directory:** Run `npm run install-cli` from the repo once. That installs a wrapper at `~/.local/bin/zmail` (or `ZMAIL_INSTALL_DIR`) that runs `npx tsx <repo>/src/index.ts -- "$@"`. Ensure that dir is on your PATH. Or install globally: `npm i -g .` (requires `npm run build` first).
+**Using `zmail` from another directory:** Run `npm run install-cli` from the repo once. That installs a wrapper at `~/.local/bin/zmail` (or `ZMAIL_INSTALL_DIR`) that runs `<install-node> <repo>/node_modules/tsx/dist/cli.mjs <repo>/src/index.ts -- "$@"`. Ensure that dir is on your PATH. Or install globally: `npm i -g .` (requires `npm run build` first).
 
 ### Attachment commands
 

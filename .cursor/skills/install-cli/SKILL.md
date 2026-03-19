@@ -1,18 +1,18 @@
 ---
 name: install-cli
-description: Install a zmail wrapper script to a directory on PATH so you can run `zmail` from any directory (e.g. other workspaces). The wrapper runs the source via `npx tsx` — no compiled binary.
+description: Install a zmail wrapper script to a directory on PATH so you can run `zmail` from any directory (e.g. other workspaces). The wrapper pins the Node binary from install time and runs local tsx — no compiled binary.
 ---
 
 # CLI installation (dev time)
 
 ## Principle
 
-Installs a small wrapper script at `~/.local/bin/zmail` (or `ZMAIL_INSTALL_DIR`) that runs `npx tsx <repo>/src/index.ts -- "$@"`. You can then run `zmail` from any directory; config is still read from `~/.zmail/`.
+Installs a small wrapper script at `~/.local/bin/zmail` (or `ZMAIL_INSTALL_DIR`) that runs `<install-node> <repo>/node_modules/tsx/dist/cli.mjs <repo>/src/index.ts -- "$@"`. The install-time Node path is **absolute**, so whichever `node` is first on `PATH` in your shell does not change how zmail runs. You can then run `zmail` from any directory; config is still read from `~/.zmail/`.
 
 ## What it does
 
 1. **Writes** a bash script to `~/.local/bin/zmail` (or `ZMAIL_INSTALL_DIR`)
-2. The script **exec**s `npx tsx "$ZMAIL_REPO/src/index.ts" -- "$@"` (repo path is embedded at install time)
+2. The script **exec**s the pinned Node + local tsx CLI (repo path and Node path are embedded at install time)
 3. **Creates** the install directory if needed and sets the script executable (755)
 4. **Prints** instructions for PATH and reinstall-after-move
 
@@ -49,14 +49,15 @@ Add this to your shell profile (`~/.zshrc`, `~/.bashrc`, etc.) to make it perman
 
 - **Testing from another workspace** — Install the wrapper so you can run `zmail` from a different directory
 - **After moving the repo** — Run `npm run install-cli` again from the new path to update the embedded repo path
+- **After changing Node** — Re-run install-cli so the embedded `node` path matches where you run `npm install` / native addons
 - **Cross-project testing** — Use zmail CLI from other Claude Code projects or workspaces
 
 ## How it works
 
 The script (`scripts/install-cli.ts`):
 1. Resolves the project root (from `import.meta.dirname`)
-2. Writes a bash script that sets `ZMAIL_REPO` to that path and runs `npx tsx "$ZMAIL_REPO/src/index.ts" -- "$@"`
-3. Creates the install directory if it doesn't exist and makes the script executable (755)
+2. Verifies `node_modules/tsx/dist/cli.mjs` exists (otherwise tells you to `npm install`)
+3. Writes a bash script that sets `ZMAIL_REPO` and `NODE_BIN` (`process.execPath`) and runs tsx with that Node
 
 ## Notes
 

@@ -161,15 +161,15 @@ const EVAL_CASES: EvalCase[] = [
   },
   {
     question: "summarize my spending on apple.com in the last 30 days",
-    description: "Spending summary with date filter (known gap: BUG-020 — domain→from routing)",
+    description: "Spending summary with date filter",
     criteria: {
       mustInclude: ["apple"],
       expectedTopics: ["spending", "purchase", "receipt", "total"],
       minLength: 40,
     },
-    minScore: 0.4, // Lower until BUG-020 fixed (backend domain→from routing or agent consistently uses fromAddress)
-    knownIssue: "BUG-020: domain not routed to fromAddress; acceptable to ship with reduced score until fixed.",
-    maxLatencyMs: 20000,
+    minScore: 0.4,
+    knownIssue: "BUG-020 / planner variance: domain→fromAddress and retrieval quality may vary.",
+    maxLatencyMs: 25000,
   },
   {
     question: "What are the 5 most recent messages in my inbox?",

@@ -195,6 +195,40 @@ describe("scatter", () => {
     expect(messageIds).not.toContain("<old@example.com>");
   });
 
+  it("resolves 0d as start of today for date filter", async () => {
+    const now = new Date();
+    const todayStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    const yesterday = new Date(now);
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+
+    insertTestMessage(db, {
+      messageId: "<today@example.com>",
+      subject: "Today message",
+      bodyText: "today",
+      date: `${todayStr}T12:00:00.000Z`,
+    });
+
+    insertTestMessage(db, {
+      messageId: "<yesterday@example.com>",
+      subject: "Yesterday message",
+      bodyText: "yesterday",
+      date: `${yesterdayStr}T12:00:00.000Z`,
+    });
+
+    const plan: SearchPlan = {
+      patterns: ["today", "yesterday"],
+      afterDate: "0d",
+      includeNoise: false,
+    };
+
+    const results = await scatter(plan, db);
+
+    const messageIds = results.map((r) => r.messageId);
+    expect(messageIds).toContain("<today@example.com>");
+    expect(messageIds).not.toContain("<yesterday@example.com>");
+  });
+
   it("handles empty patterns array", async () => {
     const plan: SearchPlan = {
       patterns: [],
@@ -215,5 +249,22 @@ describe("scatter", () => {
     const results = await scatter(plan, db);
 
     expect(results).toEqual([]);
+  });
+
+  it("skips patterns that cause FTS5 syntax errors instead of failing", async () => {
+    insertTestMessage(db, {
+      messageId: "<ok@example.com>",
+      subject: "Invoice",
+      bodyText: "invoice content",
+      fromAddress: "a@example.com",
+    });
+
+    const plan: SearchPlan = {
+      patterns: ["invoice)))", "invoice"],
+      includeNoise: false,
+    };
+
+    const results = await scatter(plan, db);
+    expect(results.some((r) => r.messageId === "<ok@example.com>")).toBe(true);
   });
 });

@@ -4,6 +4,19 @@ import { join } from "path";
 import { tmpdir } from "os";
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 
+/** Same Node as the test runner — `npx tsx` can resolve to a different (e.g. Node 18) binary on PATH. */
+const repoRoot = join(import.meta.dirname, "..", "..");
+const tsxCli = join(repoRoot, "node_modules", "tsx", "dist", "cli.mjs");
+const entryTs = join(import.meta.dirname, "..", "index.ts");
+
+function spawnZmailWizard() {
+  return spawn(process.execPath, [tsxCli, entryTs, "--", "wizard"], {
+    cwd: repoRoot,
+    env: { ...process.env },
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+}
+
 function streamToText(stream: NodeJS.ReadableStream | null): Promise<string> {
   if (!stream) return Promise.resolve("");
   return new Promise((resolve, reject) => {
@@ -46,15 +59,7 @@ describe("BUG-009: Wizard with non-interactive stdin", () => {
 
   it("should exit gracefully with error message when stdin is not a TTY", async () => {
     // Simulate non-TTY stdin by piping empty input
-    const proc = spawn(
-      "npx",
-      ["tsx", join(import.meta.dirname, "..", "index.ts"), "--", "wizard"],
-      {
-        cwd: join(import.meta.dirname, "..", ".."),
-        env: { ...process.env, ZMAIL_HOME: testHome },
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
+    const proc = spawnZmailWizard();
 
     // Close stdin immediately to simulate non-TTY
     proc.stdin?.end();
@@ -82,15 +87,9 @@ describe("BUG-009: Wizard with non-interactive stdin", () => {
 
   it("should exit gracefully when stdin is piped with empty input", async () => {
     // Simulate: echo "" | zmail wizard
-    const proc = spawn(
-      "sh",
-      ["-c", `echo "" | npx tsx ${join(import.meta.dirname, "..", "index.ts")} -- wizard`],
-      {
-        cwd: join(import.meta.dirname, "..", ".."),
-        env: { ...process.env, ZMAIL_HOME: testHome },
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
+    const proc = spawnZmailWizard();
+    proc.stdin?.write("\n");
+    proc.stdin?.end();
 
     const [stdout, stderr, exitCode] = await Promise.all([
       streamToText(proc.stdout),
