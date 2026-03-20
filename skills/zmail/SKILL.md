@@ -1,20 +1,52 @@
 ---
 name: zmail
 description: >-
-  zmail: IMAP sync into local maildir plus SQLite with FTS5. CLI primitives—search, read, thread,
-  who, attachment—and zmail ask for one-shot natural-language answers (OpenAI). Mail is indexed on
-  disk, not driven through the Gmail web UI or ad-hoc API exploration, so agents get fast lexical
-  search, stable message IDs, and subprocess-friendly output. Install: npm i -g @cirne/zmail; Node
-  20+. 
-metadata: { "version": "0.1.0" }
-compatibility: Node.js 20+; network for IMAP sync and OpenAI (ask, inbox); disk for local SQLite + maildir.
+  Local-first email for agents: IMAP sync to maildir + SQLite (FTS5); CLI search, read, thread, who,
+  attachments. Requires Node 20+, global install via npm (`npm install -g @cirne/zmail`; postinstall
+  rebuilds native better-sqlite3), and IMAP credentials. OpenAI API key required for `zmail setup` /
+  wizard, `zmail ask`, and `zmail inbox`—those features can send email-derived text to OpenAI.
+  Optional `who --enrich` may call third-party search APIs. Source: github.com/cirne/zmail.
+license: "Refer to https://github.com/cirne/zmail for project license and terms."
+compatibility: >-
+  Node.js 20+; npm; `zmail` on PATH after global install. Network: IMAP, OpenAI (ask/inbox/setup),
+  optional enrich providers. Disk: ~/.zmail (SQLite + maildir). Native addon: better-sqlite3 (rebuilt on install).
+metadata:
+  version: "0.1.1"
+  homepage: "https://github.com/cirne/zmail"
+  repository: "https://github.com/cirne/zmail"
+  openclaw:
+    requires:
+      bins:
+        - node
+        - npm
+        - zmail
+      config:
+        - ZMAIL_EMAIL
+        - ZMAIL_IMAP_PASSWORD
+        - ZMAIL_OPENAI_API_KEY
 ---
 
-# ZMAIL: Agent-First Email
+# /zmail — agent-first email
 
 **What zmail is:** Email reimagined for **agents and automation**—not a human-first inbox UI. It syncs mail over **IMAP**, stores messages as **files (maildir-style)** and indexes them in **local SQLite** with **FTS5**. The primary surface is the **CLI**: search, read, thread, who, attachments, and **`zmail ask`** for natural-language questions (OpenAI). Same index powers every command—queries stay **local and fast** so the assistant can treat mail like a **repository of communication artifacts** (invoices, travel, Zoom summaries, etc.) instead of paging through Gmail.
 
 **Why use it:** Traditional webmail is slow and awkward for AI workflows. zmail’s promise is **local-first, privacy-friendly** mail you control, **agent-intuitive** commands, and room to grow toward “the agent is the interface”—plain-language prompts become searches and reads, not manual digging.
+
+## Transparency (registries & security review)
+
+Use this block to keep **ClawHub / OpenClaw registry fields** aligned with the skill body—avoid “no credentials required” when the CLI clearly needs secrets.
+
+| Topic | What to declare |
+|--------|------------------|
+| **Provenance** | Source and issues: **[github.com/cirne/zmail](https://github.com/cirne/zmail)** |
+| **Install** | **`npm install -g @cirne/zmail`** (Node **20+**). Package runs **`postinstall`** → rebuilds **`better-sqlite3`** for the current Node/OS (native addon; supply-chain/install risk is the same as any npm global with native deps). If load fails: **`npm rebuild better-sqlite3`** with the same `node` that runs `zmail`. |
+| **On PATH** | Global npm `bin` must be on **`PATH`**, or use **`npx @cirne/zmail`** for one-off invocations. |
+| **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and optional **`zmail who --enrich`**. |
+| **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, and **`who --enrich`** can send **email-derived content** (subjects, snippets, bodies, addresses) to **OpenAI** or other APIs—only use if the **mailbox owner** accepts that. Primitives **`search` / `read` / `thread` / `attachment`** (without enrich) are local index + disk only once mail is synced. |
+| **Persistence & destructive actions** | Data lives under **`ZMAIL_HOME`** (default **`~/.zmail`**). **`zmail setup --clean --yes`** wipes config + data there—**irreversible** without a backup. |
+| **Shell safety** | Invoke **`zmail`** with **argument arrays** (or careful quoting). **Never** paste untrusted mail text or chat content into a **`sh -c "zmail …"`** string—**command-injection** risk. |
+
+OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://docs.openclaw.ai/tools/creating-skills): **`bins`** = executables expected on **`PATH`** (**`zmail`** exists only **after** the global install step). **`config`** lists environment variables this workflow expects for a configured mailbox (mirror the same in ClawHub package metadata if the UI has separate fields).
 
 ---
 
