@@ -2,6 +2,8 @@
 
 **For agents integrating with zmail** — This document explains how agents can use `zmail ask` as a high-level abstraction instead of orchestrating zmail's primitive tools directly.
 
+**Discovering behavior without memorizing flags:** Run **`zmail`**, **`zmail --help`**, and **`zmail <command> --help`**. The CLI embeds **hints** in output (e.g. JSON **`hint`** on **`search`** when results are truncated or a follow-up action is suggested). Prefer those live messages over stale prose. See [skills/zmail/references/CANONICAL-DOCS.md](../skills/zmail/references/CANONICAL-DOCS.md) (also shipped under `skills/zmail/` in the package).
+
 ---
 
 ## The Problem: Orchestration Overhead

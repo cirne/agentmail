@@ -6,7 +6,7 @@ description: >-
   disk, not driven through the Gmail web UI or ad-hoc API exploration, so agents get fast lexical
   search, stable message IDs, and subprocess-friendly output. Install: npm i -g @cirne/zmail; Node
   20+. 
-metadata: { "version": "0.6" }
+metadata: { "version": "0.1.0" }
 compatibility: Node.js 20+; network for IMAP sync and OpenAI (ask, inbox); disk for local SQLite + maildir.
 ---
 
@@ -25,8 +25,9 @@ compatibility: Node.js 20+; network for IMAP sync and OpenAI (ask, inbox); disk 
 3. Choose setup: **[`zmail wizard`](#zmail-wizard-interactive-humans)** (TTY) or **[`zmail setup`](#zmail-setup-agents--automation)** (flags/env, no prompts).
 4. User must have a **Gmail app password** (or compatible IMAP credentials)—[Gmail: app password](#gmail-get-an-app-password).
 5. Run **`zmail sync --since …`** then **`zmail refresh`** / **`zmail status`**.
-6. For questions over mail, prefer **`zmail ask`** first; use **`search` / `read` / `thread` / `who` / `attachment`** when you need fine control ([Ask vs primitives](#zmail-ask-vs-primitives)).
-7. Never paste secrets into chat logs; use env or flags in the **user’s** shell.
+6. **Learn the CLI from the CLI:** run **`zmail`**, **`zmail --help`**, and **`zmail <command> --help`**. Read any **`hint`** (and truncation fields) in **JSON** output—zmail uses them to disclose the next capability ([Canonical docs & discovery](references/CANONICAL-DOCS.md)).
+7. For questions over mail, prefer **`zmail ask`** first; use **`search` / `read` / `thread` / `who` / `attachment`** when you need fine control ([Ask vs primitives](#zmail-ask-vs-primitives)).
+8. Never paste secrets into chat logs; use env or flags in the **user’s** shell.
 
 ---
 
@@ -156,7 +157,7 @@ zmail search 'query'      # FTS hits (JSON default; --text for tables)
 
 **Rule of thumb:** **Start with `ask`.** If the answer is too shallow, wrong, or you need **more detail or accuracy**, switch to **`search` → `read` / `thread`** (and **`attachment`** when documents matter). Combine both: e.g. **`ask`** for orientation, then **`read`** on specific `message_id`s from search if you must verify.
 
-Full tradeoffs and hybrid patterns: packaged **`docs/ASK.md`** (see [references/CANONICAL-DOCS.md](references/CANONICAL-DOCS.md)).
+Full tradeoffs and hybrid patterns: **`docs/ASK.md`** at the package/repo root (paths in [references/CANONICAL-DOCS.md](references/CANONICAL-DOCS.md)).
 
 ---
 
@@ -176,4 +177,4 @@ Folder name must stay **`zmail`** to match frontmatter `name` ([Agent Skills spe
 
 ## More detail
 
-- [references/CANONICAL-DOCS.md](references/CANONICAL-DOCS.md) — **`AGENTS.md`**, **`docs/VISION.md`**, **`docs/ASK.md`**, **`docs/ARCHITECTURE.md`**, and related indexes.
+- [references/CANONICAL-DOCS.md](references/CANONICAL-DOCS.md) — **CLI-first discovery** (`zmail`, `--help`, per-command help), **hints in output**, and a **table of canonical markdown** (`AGENTS.md`, `docs/VISION.md`, `docs/ASK.md`, `docs/ARCHITECTURE.md`, `docs/MCP.md`, OPP-025).

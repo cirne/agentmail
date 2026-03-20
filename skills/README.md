@@ -9,6 +9,7 @@ Directories here are **[Agent Skills](https://agentskills.io/specification.md)-s
 | Path | Audience |
 |------|-----------|
 | [`zmail/`](zmail/) | Agents helping an **end user** run the **installed** CLI — not for editing this repo. |
+| [`zmail/references/CANONICAL-DOCS.md`](zmail/references/CANONICAL-DOCS.md) | **CLI-first discovery** (`zmail --help`, per-command `--help`), **hints** in JSON/text output, and links to repo/npm docs — prefer the live CLI over memorizing this README. |
 
 ## OpenClaw (this machine)
 
