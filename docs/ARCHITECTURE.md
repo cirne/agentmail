@@ -529,6 +529,8 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Packaging / ABI:** `package.json` **`postinstall`** runs **`npm rebuild better-sqlite3`** for the **current** Node when `node_modules` is present. That aligns the prebuilt or freshly compiled `.node` with the runtime’s **`NODE_MODULE_VERSION`**, reducing `ERR_DLOPEN_FAILED` after **`npm install -g`** when install-time Node ≠ runtime Node. Documented fallback: run **`npm rebuild better-sqlite3`** with the same `node` that runs `zmail`.
 
+**Global install vs `overrides`:** For **`npm install -g`**, npm’s install root is the global prefix, so **`overrides` in `@cirne/zmail/package.json` are not applied** to the dependency tree the way they are in a repo-root install. **`bundledDependencies`** (the **`exceljs`** stack) ships the maintainer’s resolved **`node_modules` subtrees** in the published tarball so global installs pick up the same pinned/override-resolved versions. Remaining install noise is mostly **`prebuild-install`** (from **`better-sqlite3`**) until that chain changes upstream.
+
 **Schema changes:** Unchanged philosophy (ADR-021): bump **`SCHEMA_VERSION`**, delete stale DB files, **rebuild from maildir** — no row-level migration from old DB files when the driver or schema changes.
 
 **Deferred:** WASM SQLite with a custom file VFS for Node remains an alternative if native rebuild stops being sufficient; FTS5 and file-backed behavior would need to be re-validated before switching.

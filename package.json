@@ -1,6 +1,6 @@
 {
   "name": "@cirne/zmail",
-  "version": "0.1.0-alpha.20260307.194325",
+  "version": "0.1.0-alpha.20260320.172824",
   "description": "Agent-first email system — sync, index, and search email for AI agents",
   "scripts": {
     "postinstall": "node scripts/rebuild-better-sqlite.mjs",
@@ -23,19 +23,38 @@
   "bin": {
     "zmail": "dist/index.js"
   },
+  "bundledDependencies": [
+    "archiver",
+    "dayjs",
+    "exceljs",
+    "fast-csv",
+    "jszip",
+    "readable-stream",
+    "saxes",
+    "tmp",
+    "unzipper",
+    "uuid"
+  ],
+  "overrides": {
+    "exceljs": {
+      "archiver": "^7.0.1",
+      "fast-csv": "^5.0.5"
+    },
+    "unzipper": "^0.12.3"
+  },
   "dependencies": {
     "@cedrugs/pdf-parse": "^1.0.0",
-    "@inquirer/prompts": "^8.3.0",
-    "@modelcontextprotocol/sdk": "latest",
+    "@inquirer/prompts": "^7.10.1",
+    "@modelcontextprotocol/sdk": "^1.27.1",
     "better-sqlite3": "^12.6.2",
     "double-metaphone": "^0.1.4",
     "exceljs": "^4.4.0",
     "fastest-levenshtein": "^1.0.16",
-    "imapflow": "latest",
+    "imapflow": "^1.2.16",
     "libphonenumber-js": "^1.11.0",
     "mailparser": "^3.9.3",
     "mammoth": "^1.11.0",
-    "openai": "latest",
+    "openai": "^6.27.0",
     "postal-mime": "^2.7.3",
     "search-query-parser": "^1.6.0",
     "turndown": "^7.2.2"
@@ -48,7 +67,7 @@
     "pdf-lib": "^1.17.1",
     "tsc-alias": "^1.8.10",
     "tsx": "^4.19.2",
-    "typescript": "latest",
+    "typescript": "^5.9.3",
     "vitest": "^3.2.4",
     "yaml": "^2.8.2"
   }

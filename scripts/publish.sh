@@ -67,6 +67,10 @@ if npm view "@cirne/zmail@$VERSION" version &> /dev/null; then
     error "Version $VERSION already exists on npm. Wait a moment and try again."
 fi
 
+# bundleDependencies pack copies from node_modules; overrides only apply here, not on consumers' npm install -g
+info "Installing dependencies (sync node_modules for bundled Excel stack)..."
+npm install || error "npm install failed"
+
 # Publish
 info "Publishing @cirne/zmail@$VERSION to npm..."
 if npm publish --access public --tag="$DIST_TAG"; then

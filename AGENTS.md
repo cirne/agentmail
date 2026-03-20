@@ -20,7 +20,7 @@ npm install -g @cirne/zmail
 
 Node.js 20+, TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native addon, OS page cache — not a whole-DB-in-RAM WASM/sql.js model), FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db`). Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
 
-**Native addon ABI:** `npm install` runs **`postinstall`** → `npm rebuild better-sqlite3` for the **current** Node, so the `.node` binary matches `NODE_MODULE_VERSION` (common pain point with `npm i -g` when prebuilds don’t match the runtime). If load still fails, run `npm rebuild better-sqlite3` using the same `node` that executes `zmail`.
+**Native addon ABI:** `npm install` runs **`postinstall`** → `npm rebuild better-sqlite3` for the **current** Node, so the `.node` binary matches `NODE_MODULE_VERSION` (common pain point with `npm i -g` when prebuilds don’t match the runtime). If load still fails, run `npm rebuild better-sqlite3` using the same `node` that executes `zmail`. **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Project structure
 
