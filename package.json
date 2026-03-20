@@ -1,6 +1,6 @@
 {
   "name": "@cirne/zmail",
-  "version": "0.1.0-alpha.20260320.190010",
+  "version": "0.1.0-alpha.20260320.191124",
   "description": "Agent-first email system — sync, index, and search email for AI agents",
   "scripts": {
     "postinstall": "node scripts/rebuild-better-sqlite.mjs",
@@ -9,6 +9,7 @@
     "sync": "tsx src/sync/index.ts",
     "build": "tsc && tsc-alias && node scripts/post-build.js",
     "install-cli": "tsx scripts/install-cli.ts",
+    "install-skill:openclaw": "node scripts/install-openclaw-skill.mjs",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "eval": "vitest run --config vitest.eval.config.ts",

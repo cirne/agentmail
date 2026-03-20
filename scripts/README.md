@@ -13,6 +13,10 @@ These scripts are part of the development workflow and should be kept:
   - Documented in: `AGENTS.md`
   - Purpose: Allows running `zmail` from any directory using source code
 
+- **`install-openclaw-skill.mjs`** — Copy `skills/zmail/` into OpenClaw’s skill directory on this machine
+  - Usage: `npm run install-skill:openclaw` (optional: `OPENCLAW_ZMAIL_SKILL_DIR`, `--dry-run`)
+  - Documented in: `skills/README.md` (see [OpenClaw creating skills](https://docs.openclaw.ai/tools/creating-skills))
+
 - **`reset.ts`** — Wipe local data and start fresh
   - Usage: `npm run reset` (if added to package.json) or `npx tsx scripts/reset.ts`
   - Purpose: Dev utility to clear DB, maildir, and vectors for fresh start

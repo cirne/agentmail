@@ -9,6 +9,8 @@ npm install -g @cirne/zmail
 
 ## Key documents
 
+- **End users of zmail (publishable skill `/zmail`):** [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md) — [Agent Skills](https://agentskills.io/specification.md) playbook (`name: zmail`); install, setup, sync, usage; see [`skills/README.md`](skills/README.md). Distinct from internal **`.cursor/skills/*`** below.
+- **Developing this repo in Cursor:** `.cursor/skills/` — internal skills (`commit`, `db-dev`, `install-cli`, `process-feedback`). Not the publishable user skill in `skills/zmail/`.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical decisions and rationale (**read before making storage, sync, or interface decisions**)
 - [`docs/MCP.md`](docs/MCP.md) — MCP server interface documentation (**read for agent integration**)
 - [`docs/VISION.md`](docs/VISION.md) — product vision

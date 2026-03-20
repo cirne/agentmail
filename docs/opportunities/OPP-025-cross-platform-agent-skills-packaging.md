@@ -1,155 +1,175 @@
-# OPP-025: Cross-Platform Agent Skills — Cursor, Claude Code, OpenClaw
+# OPP-025: Conform to Agent Skills spec — packaging and platform map
 
 **Status:** Open (research + proposal). No implementation commitment yet.
 
-**Problem:** zmail is agent-first (CLI, MCP, docs), but **agent products disagree on what a “skill” is**, where it lives, and how it is **published**. Shipping “one skill” that works in Cursor, Claude Code, and OpenClaw requires a deliberate packaging story—not a single universal install path.
+**Canonical target:** The **end-user** portable skill at [`skills/zmail/`](../../skills/zmail/) (shipped in-repo and in npm) should **conform to the [Agent Skills specification](https://agentskills.io/specification.md)** — not an informal markdown file. That means: required directory layout, valid `SKILL.md` YAML frontmatter, naming rules, optional `scripts/` / `references/` / `assets/`, and validation (e.g. [`skills-ref validate`](https://github.com/agentskills/agentskills/tree/main/skills-ref) per the spec). **Out of scope for this OPP:** [`.cursor/skills/`](../../.cursor/skills/) in this repo — internal dev skills (`commit`, `db-dev`, `install-cli`, `process-feedback`), not the publishable **`/zmail`** user skill.
 
-**Strategic tilt (this doc):** Treat **migrating from MCP toward skills as the preferred packaging and usage model** for agents: primary onboarding should be **install CLI + install skill** (markdown playbook that steers `zmail` subprocess use), not **wire up an MCP server**. MCP remains **supported** for hosts and workflows that benefit from persistent tool sessions, but docs, examples, and mental model should **default to skill-first**.
+**Problem (reframed):** zmail is agent-first (CLI, MCP, docs), but products disagree on **where** skills live and **what else** they support **beyond** the [Agent Skills](https://agentskills.io/) baseline (extra frontmatter, gating, registries). If we own **one spec-conformant skill tree**, we get a clear bar for CI/docs and **one folder** to copy into Cursor, Claude Code, and OpenClaw — with small, documented deltas where a host’s parser or OpenClaw-specific `metadata` matters.
 
-**Example:** We publish `@cirne/zmail` on npm and want agents to **default** to a bundled or copied **`SKILL.md`** that teaches install, config, `zmail search` / `zmail ask`, and background sync—without requiring MCP client configuration. MCP setup moves to an **advanced / optional** section (and stays essential for some OpenClaw deployments until a native or shell-backed skill story exists there).
+**Strategic tilt:** Prefer **install CLI + install spec-conformant skill** (instructions that steer subprocess `zmail`) over **MCP as the default onboarding path**. MCP stays **supported** for hosts and workflows that want persistent tool sessions. Docs and mental model should default **skill-first**.
 
----
-
-## Why prefer skill over MCP (for zmail)
-
-Skills and MCP solve different layers (instructions vs protocol), but **for end-user packaging** the skill-first model wins on several axes:
-
-| Dimension | Skill-first (`SKILL.md` + `zmail` CLI) | MCP-first (`zmail mcp`) |
-|-----------|----------------------------------------|-------------------------|
-| **Install surface** | npm global (or wrapper) + copy skill folder; no IDE/host MCP config | Per-client MCP registration, stdio paths, env injection, restarts |
-| **Portability** | Same playbook in Cursor, Claude Code, any agent that runs shell | Each MCP host has its own config shape and discovery |
-| **Debugging** | User/agent runs `zmail status`; logs are CLI-shaped | Extra hop: server lifecycle, transport, tool list sync |
-| **Alignment** | Matches [Agent Skills](https://agentskills.io/) “instructions + optional scripts” | zmail-specific server contract ([docs/MCP.md](../../docs/MCP.md)) |
-
-**Tradeoffs to own:** A subprocess CLI can mean **more discrete tool-like steps** from the outer LLM’s perspective than a single MCP session with many tools; that cost is partially addressed by richer CLI output and `zmail ask` (see [OPP-018](OPP-018-reduce-agent-round-trips.md)). The migration is **not** “delete MCP”—it is **reorder defaults** and **reduce mandatory MCP surface** for typical agent users.
+**Example:** We publish `@cirne/zmail` on npm with **`skills/zmail/`** (frontmatter `name: zmail` → often invoked as **`/zmail`**): valid `SKILL.md` plus optional `references/`. **End users** copy that folder into **`~/.cursor/skills/zmail`**, **another project’s** `.cursor/skills/zmail`, **`~/.claude/skills/zmail`**, OpenClaw **`<workspace>/skills/zmail`** or **`~/.openclaw/skills/zmail`**, etc. — **not** into the zmail **upstream** repo’s `.cursor/skills/` (reserved for internal dev skills). MCP setup sits under **optional / advanced**.
 
 ---
 
-## Research summary (2026-03)
+## Spec conformance (what “done” means for the artifact)
 
-Primary sources are linked; details may evolve as vendors ship updates.
+Per [Agent Skills — Specification](https://agentskills.io/specification.md):
 
-### 1. Cursor — “Skills” as markdown on disk
+| Area | Requirement (summary) |
+|------|------------------------|
+| **Layout** | Skill is a **directory** with at minimum `SKILL.md`; optional `scripts/`, `references/`, `assets/`. |
+| **Frontmatter** | Required: `name` (lowercase, hyphens, matches parent directory, length/charset rules), `description` (what + when, keywords for discovery). Optional: `license`, `compatibility`, `metadata`, experimental `allowed-tools`. |
+| **Body** | Markdown instructions after frontmatter; keep main file focused; split detail into `references/` for progressive disclosure. |
+| **Validation** | Run **`skills-ref validate ./zmail`** (or equivalent) in CI or release checklist when we adopt the tooling. |
 
-- **What:** Skills are **directories** containing a required **`SKILL.md`** with YAML frontmatter (`name`, `description`, …) and a markdown body. Optional siblings: reference files, `scripts/`, etc.
-- **Discovery:** The agent uses the **description** (and context) to decide when to load a skill; content is not fetched from a central registry by the authoring docs we use internally.
-- **Where:** **Project:** `.cursor/skills/<skill-name>/`. **Personal:** `~/.cursor/skills/<skill-name>/`. (Cursor’s built-in skills live under a separate managed path; third-party skills should not be placed there.)
-- **Publishing:** There is **no** npm-integrated “Cursor skill store” in the documented model. Distribution = **ship files** (git repo, tarball, npm package as a **carrier**) + **document** where to copy or symlink them.
-
-**Implication for zmail:** Keep a **portable skill folder** in-repo (already aligned with `.cursor/skills/`) and optionally **publish the same files** inside the npm tarball with documented install paths.
-
----
-
-### 2. Claude Code — Agent Skills (open format) + extensions
-
-- **Standard:** Claude Code documents skills as following the **[Agent Skills](https://agentskills.io/)** open format: folders of instructions, optional scripts/resources, intended for **cross-product** reuse ([overview](https://agentskills.io/); spec lives in the [agentskills/agentskills](https://github.com/agentskills/agentskills) repo).
-- **What:** Same core idea as Cursor: **`SKILL.md`** with frontmatter + body; supporting files referenced from `SKILL.md`.
-- **Discovery:** Claude can load skills **when relevant** from the description, or the user can invoke **`/skill-name`**. Nested monorepo discovery: `.claude/skills/` in subdirectories may be picked up when working in those trees ([Claude Code skills docs](https://docs.claude.com/en/docs/claude-code/skills)).
-- **Where:** **Personal:** `~/.claude/skills/<name>/`. **Project:** `.claude/skills/<name>/`. **Enterprise / plugins:** additional locations per vendor docs.
-- **Publishing:** Same pattern as Cursor—**files on disk**. Optional ecosystem directories (third-party indexes) exist outside Anthropic; they are **not** a substitute for a canonical source of truth in our repo or npm package.
-
-**Claude-specific extensions** (may not port to other tools): e.g. `allowed-tools`, `disable-model-invocation`, subagent/`context` options—see [frontmatter reference](https://docs.claude.com/en/docs/claude-code/skills). A **portable** zmail skill should use a **minimal** frontmatter set that still works if copied to Cursor.
+**zmail-specific content rules** (on top of the spec): default to subprocess `zmail` commands; treat MCP as a short optional section pointing to [docs/MCP.md](../../docs/MCP.md). Keep [AGENTS.md](../../AGENTS.md), [docs/ASK.md](../../docs/ASK.md), and `onboarding.ts` as canonical detail; the skill is the **entry playbook**, not a duplicate manual.
 
 ---
 
-### 3. OpenClaw — Native “skills” vs MCP “plugins”
+## Which popular agents work with this spec?
 
-OpenClaw’s docs draw a **sharp line** between capability types ([Skills & ClawHub](https://learnopenclaw.com/core-concepts/skills)):
+The [Agent Skills](https://agentskills.io/) format is an **open, file-based** contract. **“Works with”** below means: the product **loads `SKILL.md` skills from disk** in a way that aligns with (or is intended to align with) that spec — not “any agent that can run shell,” though many can still **follow** the markdown if given the file.
 
-| Concept | Meaning in OpenClaw |
-|--------|----------------------|
-| **Built-in tools** | Core tools shipped with the product (~20). |
-| **Skills** | **OpenClaw-native** extensions: workspace `skills/` directory, registered in **`openclaw.json`**, often installed from **ClawHub** via `/skills install @author/name`. Custom skills use a **manifest** (`manifest.json`), entry module (`index.js` / `index.py`), declared **tools** and **permissions**—closer to a **sandboxed app** than a single markdown file. |
-| **Plugins** | **MCP-based** integrations—general interoperability with MCP servers (including those built for other clients). |
+| Product | Spec-conformant skill folder as **native** skill? | Notes |
+|---------|---------------------------------------------------|--------|
+| **Claude Code** | **Yes** (intended) | Documents skills in the Agent Skills open format; discovery under `.claude/skills/` and `~/.claude/skills/`. May support **extra** frontmatter beyond the spec — we should stay **spec-minimal** for portability and add Claude-only keys only if needed in a separate optional file or documented extension. See [Claude Code — skills](https://docs.claude.com/en/docs/claude-code/skills). |
+| **Cursor** | **Yes** (practical) | Project/personal skill dirs with `SKILL.md` + frontmatter (`.cursor/skills/`, `~/.cursor/skills/`). Align our artifact with the spec so the same folder validates and ships everywhere; verify naming/path rules match Cursor’s docs as they evolve. |
+| **OpenClaw** | **Yes** ([docs](https://docs.openclaw.ai/tools/skills)) | OpenClaw documents **[AgentSkills-compatible](https://agentskills.io/)** skill folders: a directory with `SKILL.md` (YAML frontmatter + instructions). Skills load from **bundled** install, **`~/.openclaw/skills`**, **`<workspace>/skills`** (workspace wins on name conflict), plus optional `skills.load.extraDirs` in `~/.openclaw/openclaw.json`. **[ClawHub](https://clawhub.com)** installs into workspace `./skills` by default. **Caveats:** format is “AgentSkills + Pi-compatible” — e.g. parser expects **single-line** frontmatter keys; `metadata` for OpenClaw gating is often a **single-line JSON** blob (`metadata.openclaw.requires.bins`, env, config). Use `{baseDir}` in instructions for the skill folder path. Skills are **filtered at load time** (bins, env, config). **MCP** (`zmail mcp`) remains optional for tool-session ergonomics, not a substitute for the skill folder story. |
+| **Other IDEs / assistants** | **Varies** | Any environment that discovers markdown skills on disk may align over time; anything **without** skill discovery still benefits from a **validated, stable** folder to paste or bundle. |
 
-**Implication for zmail (migration-aware):** Today, **`zmail mcp`** is the **straightforward** OpenClaw path as an MCP **plugin**. Under a **skill-first** strategy, that is an **intermediate** state: **preferred long-term** is either (a) a **native** OpenClaw skill that wraps or shells out to `zmail` with a minimal manifest, or (b) documented **shell + markdown** usage (agent runs `zmail` via built-in shell tools) plus a portable `SKILL.md`—so users are not **required** to maintain MCP wiring for basic email access. MCP stays valid for deep tool integration until (a) or (b) is shipped.
+**Bottom line:** **Claude Code**, **Cursor**, and **OpenClaw** can all consume **one** spec-validated **`SKILL.md` skill directory**; document **install paths** and **OpenClaw-only** frontmatter/gating only where we need binary presence (`zmail` on `PATH`) or env hints.
 
-**Publishing:** ClawHub supports **`/skills publish`** for native skills. MCP servers are configured per deployment (e.g. `openclaw.json` / managed UI)—not the same pipeline as dropping a `SKILL.md` into `.cursor/skills/`. **Migration:** invest in **one** native or documented shell-backed path rather than treating MCP as the only “real” integration.
+---
+
+## Why prefer skill (+ CLI) over MCP as default
+
+Skills and MCP solve different layers (instructions vs protocol). For **end-user packaging**, spec-conformant skill + CLI wins on:
+
+| Dimension | Skill-first (spec `SKILL.md` + `zmail` CLI) | MCP-first (`zmail mcp`) |
+|-----------|---------------------------------------------|-------------------------|
+| **Install surface** | npm + copy skill dir; no MCP registration | Per-client MCP config, stdio, env, restarts |
+| **Portability** | Same validated tree for Claude Code + Cursor + OpenClaw (skill dirs) | Each MCP host has its own config shape |
+| **Debugging** | `zmail status`, CLI-shaped logs | Server lifecycle, transport, tool sync |
+| **Contract** | [Agent Skills spec](https://agentskills.io/specification.md) | zmail MCP contract ([docs/MCP.md](../../docs/MCP.md)) |
+
+**Tradeoffs:** Subprocess CLI can mean more round-trips than batched MCP tools; mitigations include richer CLI output and `zmail ask` ([OPP-018](OPP-018-reduce-agent-round-trips.md)). We are **not** deleting MCP — we **reorder defaults** and reduce mandatory MCP surface.
+
+---
+
+## Platform notes (install locations, publishing)
+
+Details may evolve as vendors ship updates; the **artifact** stays spec-bound.
+
+### Cursor
+
+- **Where:** `.cursor/skills/<skill-name>/` or `~/.cursor/skills/<skill-name>/`.
+- **Publishing:** No central store in core docs — distribute **files** (git, tarball, **npm as carrier**) + document copy/symlink targets.
+
+### Claude Code
+
+- **Where:** `.claude/skills/<name>/` or `~/.claude/skills/<name>/`.
+- **Publishing:** Same — **files on disk**; optional ecosystem indexes are not our source of truth.
+
+### OpenClaw
+
+Per [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills):
+
+- **Format:** **AgentSkills-compatible** directory + `SKILL.md` (plus optional `scripts/`, etc.), aligned with [agentskills.io](https://agentskills.io/specification.md) layout/intent; OpenClaw adds **Pi-compatible** parsing rules and optional frontmatter (`user-invocable`, `command-dispatch`, …).
+- **Where (precedence high → low):** `<workspace>/skills` → `~/.openclaw/skills` → bundled skills; optional lowest-precedence dirs via `skills.load.extraDirs`.
+- **Distribution:** [ClawHub](https://clawhub.com) (`clawhub install …`, sync/update flows); plugins can ship skills via `openclaw.plugin.json`.
+- **Gating:** `metadata.openclaw` can require bins on `PATH`, env vars, or config paths — useful to **hide** the zmail skill until `zmail` is installed (or document install in-body).
+- **MCP:** Still optional — use when users want **`zmail mcp`** tool batching alongside skills.
 
 ---
 
 ## Fragmentation at a glance
 
-| Platform | Primary artifact | Typical location | Registry / marketplace | **Target** zmail integration (skill-first) |
-|----------|------------------|------------------|-------------------------|------------------------------------------|
-| **Cursor** | `SKILL.md` + optional files | `.cursor/skills/` or `~/.cursor/skills/` | None in core docs; file-based | **Default:** markdown skill + subprocess `zmail`. MCP: optional. |
-| **Claude Code** | `SKILL.md` (+ optional extras) | `.claude/skills/` or `~/.claude/skills/` | Agent Skills ecosystem + file-based | **Default:** same portable skill + CLI. MCP: optional. |
-| **OpenClaw** | Native: `manifest.json` + code; MCP: server config | `skills/` + `openclaw.json` | ClawHub for native skills | **Today:** MCP plugin is practical. **Target:** native skill or shell-backed playbook so MCP is not the only path. |
+| Platform | Loads spec `SKILL.md` skill dir? | Typical location | zmail default story |
+|----------|----------------------------------|------------------|---------------------|
+| **Cursor** | Yes | `.cursor/skills/` or `~/.cursor/skills/` | Spec skill + CLI; MCP optional |
+| **Claude Code** | Yes | `.claude/skills/` or `~/.claude/skills/` | Same folder + CLI; MCP optional |
+| **OpenClaw** | Yes (AgentSkills-compatible) | `<workspace>/skills`, `~/.openclaw/skills`, bundled | Same folder + CLI; optional `metadata.openclaw` for `zmail` bin; MCP optional |
 
 ---
 
-## Migration: MCP → skill as preferred model
+## Migration: MCP → skill-first defaults
 
-**Current state:** Many agents discover zmail through **MCP** ([docs/MCP.md](../../docs/MCP.md)); AGENTS.md documents both CLI and MCP.
+**Current state:** Many users/agents discover zmail via **MCP**; AGENTS.md documents CLI and MCP.
 
 **Target state:**
 
-1. **Documentation and onboarding** lead with **skill + CLI** (install `@cirne/zmail`, copy/symlink skill, `zmail setup`, `zmail search` / `zmail ask`). MCP is documented under **“Optional: MCP”** with clear use cases (persistent IDE integration, hosts that strongly prefer MCP tools, batch tool ergonomics).
-2. **Packaging** ships a **first-class skill directory** in the npm tarball and repo; MCP remains a **code path** we maintain but not the **primary** story for new users.
-3. **OpenClaw** moves from “MCP only” to “skill or native extension preferred” over time—either a **thin native skill** invoking the CLI or ClawHub-published package that wraps zmail; MCP documented as **legacy / power-user** until parity.
-4. **No rushed removal:** MCP deprecation is **narrative and ordering** first; breaking changes only after skill-based flows are validated in real agent sessions.
+1. **Onboarding** leads with **spec-conformant skill + CLI**; MCP under **Optional: MCP**.
+2. **npm** ships the skill directory via `package.json` `files`; documented paths for **Cursor, Claude Code, and OpenClaw** (`~/.openclaw/skills` / workspace `skills/`, or ClawHub publish flow if we choose it).
+3. **OpenClaw:** document **skill folder** install alongside optional **MCP**; call out **gating** (`requires.bins: ["zmail"]`) if we add OpenClaw-specific `metadata`.
+4. **No rushed MCP removal** — narrative and ordering first; validate skill flows in real sessions before any breaking change.
 
 **Phasing (suggested):**
 
 | Phase | What changes |
 |-------|----------------|
-| **0 — Now** | Research + this doc; optional in-repo skill path experiment. |
-| **1** | Canonical `SKILL.md` in repo + npm `files`; AGENTS.md / README “preferred: skill + CLI.” |
-| **2** | MCP section retitled advanced; MCP tools unchanged. |
-| **3** | OpenClaw: evaluate native skill or documented shell playbook; reduce dependence on MCP for basic queries. |
-| **4** | Reassess MCP long-term: keep for compatibility vs slim surface (only if metrics show skill-only suffices). |
+| **0 — Now** | This doc; optional experiment with spec layout + `skills-ref validate`. |
+| **1** | Canonical spec-conformant **`skills/zmail/`** (`/zmail`) in repo + npm tarball; optional: contributors dogfood via **personal** `~/.cursor/skills/zmail` — **never** replace this repo’s internal `.cursor/skills/*` dev folders with the user skill. |
+| **2** | AGENTS.md / README: **skill + CLI first**; MCP advanced. |
+| **3** | OpenClaw: verify skill paths + optional gating metadata; keep MCP docs for users who want both. |
+| **4** | Reassess MCP emphasis vs metrics. |
 
 ---
 
-## Proposed directions (for zmail)
+## Proposed directions
 
-1. **Canonical markdown skill as the primary artifact (Cursor + Claude Code)**  
-   - Maintain **one** skill body under a stable path, e.g. `extras/agent-skills/zmail/` or `skills/zmail/` at repo root, with `SKILL.md` validated against the **Agent Skills** spec.  
-   - **Symlink or duplicate** into `.cursor/skills/zmail/` for repo contributors if we want zero drift.  
-   - **npm:** Add the folder to `package.json` `files` so global installs expose `SKILL.md`; document **copy** to `~/.cursor/skills/` and `~/.claude/skills/`.  
-   - **Content default:** subprocess `zmail` commands; **do not** present MCP as step zero.
+1. **Single spec-conformant skill directory**  
+   - **Canonical path in-repo:** [`skills/zmail/`](../../skills/zmail/) (directory name = frontmatter `name`: `zmail`).  
+   - Validate with **`skills-ref validate`** in CI or pre-publish checklist.  
+   - Optional `references/` for deep links to repo docs (progressive disclosure per spec).  
+   - **npm:** tarball already includes `skills/zmail` (no `files` whitelist today); document copy to `~/.cursor/skills/zmail`, `~/.claude/skills/zmail`, and OpenClaw **`~/.openclaw/skills/zmail`** or **`<workspace>/skills/zmail`**.
 
-2. **OpenClaw: parallel track off MCP-only**  
-   - **Short term:** Keep MCP plugin instructions for users who already use MCP.  
-   - **Skill-first alignment:** Document **running `zmail` via shell** under the same playbook where the host allows it; pursue **native** OpenClaw skill (manifest + thin wrapper) or ClawHub publication so “install skill” does not imply “configure MCP.”
+2. **OpenClaw**  
+   - Same **spec-conformant folder** as other hosts; optionally add **`metadata.openclaw`** (single-line JSON per OpenClaw docs) for `requires.bins: ["zmail"]` once global/npm install guarantees `PATH`.  
+   - Optional: publish or document **ClawHub** install for discoverability — still the same `SKILL.md` tree, not a second format.
 
 3. **Optional CLI helper (later)**  
-   - e.g. `zmail skill-path` printing the bundled skill directory, or `zmail skill-install --target cursor|claude` copying into user skill dirs—**opt-in** to avoid surprising `postinstall` writes to home directories.
+   - e.g. `zmail skill-path` or `zmail skill-install --target cursor|claude|openclaw` — opt-in only (no silent writes to home).
 
-4. **Cross-links and DRY**  
-   - `SKILL.md` stays **short**: triggers, command cheat sheet, setup, when to use `zmail ask`. **MCP:** one subsection—“use when your environment already uses MCP or you need …” Canonical detail remains **AGENTS.md**, **docs/MCP.md**, **docs/ASK.md**, **onboarding.ts**—with **ordering** updated so skill-first readers meet CLI before MCP.
+4. **DRY**  
+   - Short `SKILL.md` body; one MCP subsection; canonical prose stays in AGENTS.md / docs.
 
 ---
 
 ## Relationship to prior work
 
-- [OPP-005 (archived)](archive/OPP-005-onboarding-claude-code.md) listed an **“Agent-first skill”** as an optional remaining goal; this opportunity refines that into a **multi-platform** packaging and terminology map.
-- In-repo Cursor skills today: [.cursor/skills/](../../.cursor/skills/).
+- [OPP-005 (archived)](archive/OPP-005-onboarding-claude-code.md): “Agent-first skill” — this opportunity makes the **Agent Skills spec** the explicit bar; **OpenClaw** also loads AgentSkills-compatible folders ([docs](https://docs.openclaw.ai/tools/skills)), with optional host-specific `metadata`.
+- **Internal** Cursor skills (this repo only): [.cursor/skills/](../../.cursor/skills/) — separate from **`skills/zmail/`** (publishable **`/zmail`**).
 
 ---
 
 ## Risks and unknowns
 
-- **Spec drift:** Agent Skills spec vs Claude-only frontmatter fields—mitigate with minimal portable frontmatter and product-specific optional files if needed.  
-- **OpenClaw evolution:** Marketplace and skill format may change; native skill work is **extra** surface until we commit; MCP remains the reliable bridge meanwhile.  
-- **Security narrative:** OpenClaw explicitly warns about **malicious skills**; zmail’s story should emphasize **reviewed** official paths (npm scope, GitHub paths). Shell-based usage still needs the same **don’t exfiltrate `.env`** guidance as MCP.  
-- **Latency / round-trips:** Skill-first often means **more CLI invocations** than batched MCP tools for some workflows; mitigations are richer CLI output, `zmail ask`, and optional MCP for users who need tool batching—see [OPP-018](OPP-018-reduce-agent-round-trips.md).
+- **Spec vs vendor extensions:** Claude, OpenClaw, etc. may add frontmatter or parsing rules — mitigate with **spec-minimal** core; add **OpenClaw `metadata.openclaw`** only in a way that still validates or lives in a documented optional snippet.  
+- **OpenClaw parser constraints:** Single-line keys / single-line JSON `metadata` per [their docs](https://docs.openclaw.ai/tools/skills) — multi-line YAML maps may need adjustment for OpenClaw even if valid elsewhere.  
+- **Security:** Emphasize official paths (npm scope, repo); same `.env` hygiene as MCP.  
+- **Latency:** More CLI invocations vs MCP batching — see [OPP-018](OPP-018-reduce-agent-round-trips.md).
 
 ---
 
-## Test / acceptance criteria (documentation deliverable)
+## Test / acceptance criteria
 
-- [x] One opportunity doc (this file) + index entry in [OPPORTUNITIES.md](../OPPORTUNITIES.md).  
-- [ ] When implemented: `SKILL.md` passes any **Agent Skills** validator the project adopts; manual smoke: copy skill to Cursor and Claude Code and confirm discovery via description match.  
-- [ ] AGENTS.md / README reflect **skill + CLI first**, MCP second (acceptance: new reader hits skill path before MCP).  
-- [ ] OpenClaw: document **both** transitional MCP steps and **target** native/shell-backed path when available; verify MCP steps against a current OpenClaw release (version noted in doc).
+- [x] Opportunity doc + index entry in [OPPORTUNITIES.md](../OPPORTUNITIES.md).  
+- [ ] Shipped skill directory passes **`skills-ref validate`** (or adopted equivalent).  
+- [ ] Manual smoke: copy into Cursor + Claude Code skill dirs; discovery via description.  
+- [ ] Manual smoke (OpenClaw): install skill into `~/.openclaw/skills` or workspace `skills/`; confirm load + optional bin gating.  
+- [ ] AGENTS.md / README: skill + CLI before MCP.  
+- [ ] OpenClaw: skill install path + optional MCP verified against a current OpenClaw release (version noted).
 
 ---
 
 ## References
 
+- [Agent Skills — Specification](https://agentskills.io/specification.md)  
 - [Agent Skills overview](https://agentskills.io/)  
+- [skills-ref (validate)](https://github.com/agentskills/agentskills/tree/main/skills-ref)  
 - [Claude Code — Extend Claude with skills](https://docs.claude.com/en/docs/claude-code/skills)  
-- [OpenClaw — Skills & ClawHub](https://learnopenclaw.com/core-concepts/skills)  
+- [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills)  
+- [ClawHub](https://clawhub.com)  
 - [anthropics/skills (examples)](https://github.com/anthropics/skills)  
 - zmail: [AGENTS.md](../../AGENTS.md), [docs/MCP.md](../../docs/MCP.md)
