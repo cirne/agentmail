@@ -5,6 +5,7 @@ import { config } from "~/lib/config";
 import { formatMessageForOutput } from "~/messages/presenter";
 import { toLeanMessage, DEFAULT_BODY_CAP } from "~/messages/lean-shape";
 import { extractAndCache } from "~/attachments";
+import { listAttachmentsForMessage } from "~/attachments/list-for-message";
 import { executeNanoTool } from "./tools";
 import { setVerbose, verboseLog } from "./verbose";
 
@@ -113,18 +114,7 @@ async function assembleContext(
       const shouldProcessAttachments = specificAttachmentIds !== null || shouldIncludeAttachments(question);
       
       if (shouldProcessAttachments) {
-        const attachments = (await (
-          await db.prepare(
-            `SELECT id, filename, mime_type, size, stored_path, extracted_text FROM attachments WHERE message_id = ? ORDER BY filename`
-          )
-        ).all(msg.message_id)) as Array<{
-          id: number;
-          filename: string;
-          mime_type: string;
-          size: number;
-          stored_path: string;
-          extracted_text: string | null;
-        }>;
+        const attachments = await listAttachmentsForMessage(db, msg.message_id);
         
         if (attachments.length > 0) {
           const attachmentParts: string[] = [];

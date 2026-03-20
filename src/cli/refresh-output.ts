@@ -110,6 +110,12 @@ export function printRefreshStyleOutput(
         console.log(`From:    ${fromLine}`);
         console.log(`Subject: ${r.subject}`);
         console.log(`Id:      ${r.messageId}`);
+        if (r.attachments && r.attachments.length > 0) {
+          console.log("Attachments:");
+          for (const a of r.attachments) {
+            console.log(`  ${a.index}. ${a.filename} (${a.mimeType})`);
+          }
+        }
         if (r.note) {
           const noteOneLine = r.note.replace(/\s+/g, " ").trim();
           console.log(`Note:    ${noteOneLine}`);
@@ -120,6 +126,9 @@ export function printRefreshStyleOutput(
       console.log(MESSAGE_SEPARATOR);
     }
   } else {
-    console.log(JSON.stringify(output, null, 2));
+    const payload = omitRefreshMetrics
+      ? { newMail, ...(extras ?? {}) }
+      : output;
+    console.log(JSON.stringify(payload, null, 2));
   }
 }

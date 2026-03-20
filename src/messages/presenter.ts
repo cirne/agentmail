@@ -11,6 +11,7 @@ import { config } from "~/lib/config";
 import { parseRawMessage } from "~/sync/parse-message";
 import { htmlToMarkdown } from "~/lib/content-normalize";
 import { formatMessageLlmFriendly, type ShapedContent } from "~/cli/format-message";
+import { listAttachmentsForMessage } from "~/attachments/list-for-message";
 
 /**
  * Message row from database - matches the messages table schema.
@@ -64,19 +65,7 @@ export async function formatMessageForOutput(
   db?: SqliteDatabase
 ): Promise<Record<string, unknown> & ShapedContent> {
   const database = db ?? (await getDb());
-  const attachments = (await (
-    await database.prepare(
-      `SELECT id, filename, mime_type, size, stored_path, extracted_text
-       FROM attachments WHERE message_id = ? ORDER BY filename`
-    )
-  ).all(message.message_id)) as Array<{
-    id: number;
-    filename: string;
-    mime_type: string;
-    size: number;
-    stored_path: string;
-    extracted_text: string | null;
-  }>;
+  const attachments = await listAttachmentsForMessage(database, message.message_id);
 
   if (raw) {
     const rawEmail = readRawEmail(message.raw_path);

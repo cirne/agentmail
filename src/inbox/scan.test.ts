@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { createTestDb, insertTestMessage } from "~/db/test-helpers";
+import { createTestDb, insertTestMessage, insertTestAttachment } from "~/db/test-helpers";
 import { runInboxScan } from "./scan";
 
 describe("runInboxScan", () => {
@@ -24,6 +24,26 @@ describe("runInboxScan", () => {
     expect(result.newMail).toHaveLength(1);
     expect(result.newMail[0].messageId).toBe("<new@x>");
     expect(result.newMail[0].note).toBe("needs reply");
+  });
+
+  it("includes attachment filenames on notable rows", async () => {
+    const db = await createTestDb();
+    const recent = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    const mid = await insertTestMessage(db, { messageId: "<att@x>", subject: "Paper", date: recent });
+    await insertTestAttachment(db, mid, { filename: "report.pdf" });
+
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    const result = await runInboxScan(db, {
+      cutoffIso: cutoff,
+      includeNoise: true,
+      classifyBatch: async (batch) =>
+        batch.filter((m) => m.messageId === "<att@x>").map((m) => ({ messageId: m.messageId })),
+    });
+
+    expect(result.newMail).toHaveLength(1);
+    expect(result.newMail[0].attachments).toEqual([
+      expect.objectContaining({ filename: "report.pdf", index: 1, mimeType: "application/pdf" }),
+    ]);
   });
 
   it("excludes is_noise when includeNoise is false", async () => {

@@ -13,11 +13,14 @@ import { readFileSync, existsSync } from "fs";
 import { join } from "path";
 import { formatMessageForOutput, formatMessageLlmFriendly } from "~/messages/presenter";
 import { extractAndCache } from "~/attachments";
+import { indexAttachmentsByMessageId, listAttachmentsForMessage } from "~/attachments/list-for-message";
 import { getStatus, getImapServerStatus, formatTimeAgo } from "~/lib/status";
 import { spawn } from "child_process";
 import { ImapFlow } from "imapflow";
 import { isProcessAlive } from "~/lib/process-lock";
+import { resolveZmailSpawnArgs } from "~/lib/zmail-child-process";
 import { emptySyncResult, printRefreshStyleOutput } from "~/cli/refresh-output";
+import type { RefreshPreviewRow } from "~/lib/refresh-preview";
 import { parseInboxWindowToIsoCutoff } from "~/inbox/parse-window";
 import { runInboxScan } from "~/inbox/scan";
 
@@ -863,14 +866,14 @@ async function main() {
       const messageCount = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
       const isFirstTime = messageCount.count === 0;
 
-      // Spawn subprocess
-      const entrypointScript = join(import.meta.dirname, "..", "index.ts");
-      const subprocessArgs = ["tsx", entrypointScript, "--", "sync", "--foreground"];
+      // Spawn subprocess (node dist/index.js when installed; npx tsx src/index.ts in dev)
+      const argvSuffix = ["--", "sync", "--foreground"];
       if (since) {
-        subprocessArgs.push("--since", since);
+        argvSuffix.push("--since", since);
       }
+      const { executable, args: subprocessArgs } = resolveZmailSpawnArgs(argvSuffix);
 
-      const proc = spawn("npx", subprocessArgs, {
+      const proc = spawn(executable, subprocessArgs, {
         cwd: process.cwd(),
         env: { ...process.env },
         stdio: "ignore",
@@ -1314,7 +1317,7 @@ async function main() {
       const syncResult = await runSync(syncOptions);
 
       // New-mail preview: up to 10 summaries (headers + snippet), noise excluded unless --include-noise
-      let newMail: Array<{ messageId: string; date: string; fromAddress: string; fromName: string | null; subject: string; snippet: string }> = [];
+      let newMail: RefreshPreviewRow[] = [];
       if (syncResult.synced > 0 && syncResult.newMessageIds?.length) {
         const db = await getDb();
         const placeholders = syncResult.newMessageIds.map(() => "?").join(",");
@@ -1339,7 +1342,7 @@ async function main() {
           isNoise: number;
         }>;
         const filtered = includeNoise ? rows : rows.filter((r) => r.isNoise === 0);
-        newMail = filtered.slice(0, 10).map((r) => ({
+        const base = filtered.slice(0, 10).map((r) => ({
           messageId: r.messageId,
           date: r.date,
           fromAddress: r.fromAddress,
@@ -1347,6 +1350,15 @@ async function main() {
           subject: r.subject,
           snippet: r.snippet.replace(/<[^>]+>/g, "").trim(),
         }));
+        const attMap = await indexAttachmentsByMessageId(
+          db,
+          base.map((m) => m.messageId)
+        );
+        newMail = base.map((m) => {
+          const att = attMap.get(m.messageId);
+          if (!att?.length) return m;
+          return { ...m, attachments: att };
+        });
       }
 
       printRefreshStyleOutput(syncResult, newMail, {
@@ -1357,7 +1369,7 @@ async function main() {
     }
 
     case "inbox": {
-      // Scan indexed mail in a time window; LLM surfaces notable messages. Same JSON envelope as refresh.
+      // Scan indexed mail in a time window; LLM surfaces notable messages. JSON: scan-only unless --refresh (then refresh-shaped).
       if (args.includes("--help") || args.includes("-h")) {
         console.error("Usage: zmail inbox [<window>] [--since <window>] [--refresh] [--force] [--include-noise] [--text]");
         console.error("");
@@ -1404,15 +1416,7 @@ async function main() {
         process.exit(1);
       }
 
-      let newMail: Array<{
-        messageId: string;
-        date: string;
-        fromAddress: string;
-        fromName: string | null;
-        subject: string;
-        snippet: string;
-        note?: string;
-      }>;
+      let newMail: RefreshPreviewRow[];
       let candidatesScanned = 0;
       let llmDurationMs = 0;
       try {
@@ -1596,19 +1600,7 @@ async function main() {
           break;
         }
 
-        const attachments = (await (
-          await db.prepare(
-            `SELECT id, filename, mime_type, size, stored_path, extracted_text
-             FROM attachments WHERE message_id = ? ORDER BY filename`
-          )
-        ).all(messageId)) as Array<{
-          id: number;
-          filename: string;
-          mime_type: string;
-          size: number;
-          stored_path: string;
-          extracted_text: string | null;
-        }>;
+        const attachments = await listAttachmentsForMessage(db, messageId);
 
         const quotedMsgId = messageId.includes(" ") ? `"${messageId}"` : messageId;
         if (shouldOutputJson) {
@@ -1666,19 +1658,7 @@ async function main() {
 
         const db = await getDb();
         const messageId = normalizeMessageId(messageIdArg);
-        const list = (await (
-          await db.prepare(
-            `SELECT id, message_id, filename, mime_type, size, stored_path
-             FROM attachments WHERE message_id = ? ORDER BY filename`
-          )
-        ).all(messageId)) as Array<{
-          id: number;
-          message_id: string;
-          filename: string;
-          mime_type: string;
-          size: number;
-          stored_path: string;
-        }>;
+        const list = await listAttachmentsForMessage(db, messageId);
         if (list.length === 0) {
           console.error(`No attachments found for message.`);
           process.exit(1);

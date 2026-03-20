@@ -94,7 +94,7 @@ zmail who <query> [--limit n] [--enrich] [--text]
 zmail read <message_id> [--raw]
 zmail thread <thread_id> [--json] [--raw]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
-zmail inbox [<window>] [--since <window>] [--refresh] [--force] [--include-noise] [--text]  # LLM notable-mail scan; JSON like refresh (requires OpenAI key)
+zmail inbox [<window>] [--since <window>] [--refresh] [--force] [--include-noise] [--text]  # LLM notable-mail scan; default JSON is scan-only unless --refresh (then sync metrics + scan extras; requires OpenAI key)
 zmail status [--json]
 zmail stats [--json]
 zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)

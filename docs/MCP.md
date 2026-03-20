@@ -42,9 +42,9 @@ Search emails using FTS5 full-text search. Returns matching messages with **body
 - `includeThreads` (boolean, optional): When true, also return full threads (all messages per matching thread) as a `threads` array (default: false)
 - `includeNoise` (boolean, optional): When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false — noise messages are excluded by default.
 
-**Returns:** JSON array of message objects with `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, index }` when present). When `includeThreads: true`, response is an object `{ results, threads, totalMatched?, timings? }` with `threads` being an array of `{ threadId, subject, messages }` (each message has `messageId`, `fromAddress`, `fromName`, `subject`, `date`, `bodyPreview`).
+**Returns:** JSON array of message objects with `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, index }` when present; **index** and ordering match `zmail attachment list`, i.e. sorted by filename). When `includeThreads: true`, response is an object `{ results, threads, totalMatched?, timings? }` with `threads` being an array of `{ threadId, subject, messages }` (each message has `messageId`, `fromAddress`, `fromName`, `subject`, `date`, `bodyPreview`).
 
-**Note:** CLI search results include attachment metadata (`attachments` count and `attachmentTypes` array). MCP `search_mail` currently returns basic message fields; use `list_attachments` tool to check for attachments.
+**Note:** CLI JSON search adds `attachmentTypes` (derived from the same attachment rows) for quick scanning; MCP returns the `attachments` array as above. Use `list_attachments` when you need full rows (e.g. `size`, `stored_path`) without searching first.
 
 **Example:**
 ```json

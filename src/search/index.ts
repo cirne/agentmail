@@ -1,5 +1,6 @@
 import type { SqliteDatabase } from "~/db";
-import type { SearchResult, SearchResultAttachment } from "~/lib/types";
+import type { SearchResult } from "~/lib/types";
+import { indexAttachmentsByMessageId } from "~/attachments/list-for-message";
 import { parseSearchQuery } from "./query-parse";
 import { buildFilterClause, buildWhereClause } from "./filter-compiler";
 
@@ -59,30 +60,16 @@ export interface SearchResultSet {
 
 const BODY_PREVIEW_LEN = 300;
 
-/** Batch-load attachment metadata for result message_ids and merge onto each result (1-based index). */
+/** Batch-load attachment metadata (filename order + 1-based index, same as `zmail attachment list`). */
 async function mergeAttachmentMetadata(
   db: SqliteDatabase,
   results: SearchResult[]
 ): Promise<SearchResult[]> {
   if (results.length === 0) return results;
-  const ids = results.map((r) => r.messageId);
-  const placeholders = ids.map(() => "?").join(",");
-  const rows = (await (
-    await db.prepare(
-      /* sql */ `
-    SELECT message_id AS messageId, id, filename, mime_type AS mimeType
-    FROM attachments
-    WHERE message_id IN (${placeholders})
-    ORDER BY message_id, id
-    `
-    )
-  ).all(...ids)) as Array<{ messageId: string; id: number; filename: string; mimeType: string }>;
-  const byMessage = new Map<string, SearchResultAttachment[]>();
-  for (const row of rows) {
-    const list = byMessage.get(row.messageId) ?? [];
-    list.push({ id: row.id, filename: row.filename, mimeType: row.mimeType, index: list.length + 1 });
-    byMessage.set(row.messageId, list);
-  }
+  const byMessage = await indexAttachmentsByMessageId(
+    db,
+    results.map((r) => r.messageId)
+  );
   return results.map((r) => ({
     ...r,
     attachments: byMessage.get(r.messageId) ?? [],

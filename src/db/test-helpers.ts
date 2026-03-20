@@ -53,3 +53,25 @@ export async function insertTestMessage(
 
   return messageId;
 }
+
+/** Insert an attachment row linked to an existing message (filename-ordered listing). */
+export async function insertTestAttachment(
+  db: SqliteDatabase,
+  messageId: string,
+  overrides: Partial<{
+    filename: string;
+    mimeType: string;
+    size: number;
+    storedPath: string;
+  }> = {}
+): Promise<void> {
+  const filename = overrides.filename ?? "doc.pdf";
+  const mimeType = overrides.mimeType ?? "application/pdf";
+  const size = overrides.size ?? 0;
+  const storedPath = overrides.storedPath ?? "attachments/test-msg/doc.pdf";
+  await (
+    await db.prepare(
+      `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path) VALUES (?, ?, ?, ?, ?)`
+    )
+  ).run(messageId, filename, mimeType, size, storedPath);
+}

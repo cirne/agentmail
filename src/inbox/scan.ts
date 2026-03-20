@@ -2,6 +2,7 @@ import OpenAI from "openai";
 import type { RefreshPreviewRow } from "~/lib/refresh-preview";
 import { config } from "~/lib/config";
 import type { SqliteDatabase } from "~/db";
+import { indexAttachmentsByMessageId, type AttachmentIndexedByFilename } from "~/attachments/list-for-message";
 
 type InboxCandidate = {
   messageId: string;
@@ -10,6 +11,7 @@ type InboxCandidate = {
   fromName: string | null;
   subject: string;
   snippet: string;
+  attachments: AttachmentIndexedByFilename[];
 };
 
 const DEFAULT_CANDIDATE_CAP = 80;
@@ -43,6 +45,11 @@ async function defaultClassifyBatch(
     from: c.fromName ? `${c.fromName} <${c.fromAddress}>` : c.fromAddress,
     subject: c.subject,
     snippet: c.snippet.slice(0, 400),
+    ...(c.attachments.length > 0
+      ? {
+          attachments: c.attachments.map((a) => ({ filename: a.filename, mimeType: a.mimeType })),
+        }
+      : {}),
   }));
 
   const completion = await client.chat.completions.create({
@@ -127,6 +134,10 @@ export async function runInboxScan(
     snippet: string;
   }>;
 
+  const attMap = await indexAttachmentsByMessageId(
+    db,
+    rows.map((r) => r.messageId)
+  );
   const candidates: InboxCandidate[] = rows.map((r) => ({
     messageId: r.messageId,
     date: r.date,
@@ -134,6 +145,7 @@ export async function runInboxScan(
     fromName: r.fromName,
     subject: r.subject,
     snippet: stripSnippetHtml(r.snippet),
+    attachments: attMap.get(r.messageId) ?? [],
   }));
 
   const byId = new Map(candidates.map((c) => [c.messageId, c]));
@@ -167,6 +179,7 @@ export async function runInboxScan(
       subject: c.subject,
       snippet: c.snippet,
       ...(p.note ? { note: p.note } : {}),
+      ...(c.attachments.length > 0 ? { attachments: c.attachments } : {}),
     });
   }
 

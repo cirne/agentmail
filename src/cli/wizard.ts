@@ -4,6 +4,7 @@
 import { spawn } from "child_process";
 import { existsSync, mkdirSync, writeFileSync, rmSync } from "fs";
 import { join } from "path";
+import { resolveZmailSpawnArgs } from "~/lib/zmail-child-process";
 import { input, password, select, confirm } from "@inquirer/prompts";
 import { ZMAIL_HOME } from "~/lib/config";
 import {
@@ -197,8 +198,8 @@ export async function runWizard(options: { noValidate?: boolean; clean?: boolean
 
   if (shouldStartSync) {
     console.log(`\nStarting sync in background (--since ${since})...`);
-    const entrypointScript = join(import.meta.dirname, "..", "index.ts");
-    const proc = spawn("npx", ["tsx", entrypointScript, "sync", "--since", since], {
+    const { executable, args } = resolveZmailSpawnArgs(["sync", "--since", since]);
+    const proc = spawn(executable, args, {
       cwd: process.cwd(),
       env: { ...process.env, ZMAIL_HOME: process.env.ZMAIL_HOME || ZMAIL_HOME },
       stdio: "pipe",

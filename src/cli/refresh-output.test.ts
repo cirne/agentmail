@@ -75,6 +75,7 @@ describe("refresh-output", () => {
             subject: "Hello there",
             snippet: "First line of body\nSecond line",
             note: "Worth reading",
+            attachments: [{ id: 1, filename: "a.pdf", mimeType: "application/pdf", index: 1 }],
           },
         ],
         { forceText: true, previewTitle: "New mail:", omitRefreshMetrics: true }
@@ -86,8 +87,45 @@ describe("refresh-output", () => {
       expect(out).toContain("Preview:");
       expect(out).toContain("First line of body");
       expect(out).toMatch(/Note:\s+Worth reading/);
+      expect(out).toContain("Attachments:");
+      expect(out).toContain("1. a.pdf (application/pdf)");
       expect(out.indexOf("Note:")).toBeLessThan(out.indexOf("Preview:"));
       expect(out).not.toMatch(/DATE\s+FROM\s+SUBJECT\s+SNIPPET/);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("JSON mode with omitRefreshMetrics omits sync fields (inbox without --refresh)", () => {
+    const lines: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...args: unknown[]) => {
+      lines.push(args.map(String).join(" "));
+    });
+    const sync: SyncResult = {
+      synced: 0,
+      messagesFetched: 0,
+      bytesDownloaded: 0,
+      durationMs: 0,
+      bandwidthBytesPerSec: 0,
+      messagesPerMinute: 0,
+      logPath: "",
+    };
+    try {
+      printRefreshStyleOutput(
+        sync,
+        [{ messageId: "<x>", date: "2025-01-01", fromAddress: "a@b", fromName: null, subject: "S", snippet: "Hi" }],
+        {
+          forceText: false,
+          previewTitle: "Inbox:",
+          extras: { candidatesScanned: 3, llmDurationMs: 99 },
+          omitRefreshMetrics: true,
+        }
+      );
+      const parsed = JSON.parse(lines.join("\n")) as Record<string, unknown>;
+      expect(parsed.synced).toBeUndefined();
+      expect(parsed.newMail).toHaveLength(1);
+      expect(parsed.candidatesScanned).toBe(3);
+      expect(parsed.llmDurationMs).toBe(99);
     } finally {
       spy.mockRestore();
     }

@@ -7,6 +7,7 @@ import { searchWithMeta } from "~/search";
 import { who } from "~/search/who";
 import { logger } from "~/lib/logger";
 import { extractAndCache } from "~/attachments";
+import { listAttachmentsForMessage } from "~/attachments/list-for-message";
 import { config } from "~/lib/config";
 import { getStatus, formatTimeAgo } from "~/lib/status";
 import {
@@ -117,19 +118,7 @@ export function createMcpServer() {
     async ({ messageId }) => {
       const db = await getDb();
       const normalizedId = normalizeMessageId(messageId);
-      const attachments = (await (
-        await db.prepare(
-          `SELECT id, filename, mime_type, size, stored_path, extracted_text
-           FROM attachments WHERE message_id = ? ORDER BY filename`
-        )
-      ).all(normalizedId)) as Array<{
-        id: number;
-        filename: string;
-        mime_type: string;
-        size: number;
-        stored_path: string;
-        extracted_text: string | null;
-      }>;
+      const attachments = await listAttachmentsForMessage(db, normalizedId);
 
       return {
         content: [
