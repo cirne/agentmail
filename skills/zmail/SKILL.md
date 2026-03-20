@@ -10,7 +10,7 @@ metadata: { "version": "0.1.0" }
 compatibility: Node.js 20+; network for IMAP sync and OpenAI (ask, inbox); disk for local SQLite + maildir.
 ---
 
-# /zmail — install and run (agent how-to)
+# ZMAIL: Agent-First Email
 
 **What zmail is:** Email reimagined for **agents and automation**—not a human-first inbox UI. It syncs mail over **IMAP**, stores messages as **files (maildir-style)** and indexes them in **local SQLite** with **FTS5**. The primary surface is the **CLI**: search, read, thread, who, attachments, and **`zmail ask`** for natural-language questions (OpenAI). Same index powers every command—queries stay **local and fast** so the assistant can treat mail like a **repository of communication artifacts** (invoices, travel, Zoom summaries, etc.) instead of paging through Gmail.
 
@@ -172,6 +172,18 @@ Copy the **`zmail`** directory (this skill) into an **end-user** location—not 
 | OpenClaw | `<workspace>/skills/zmail/`, `~/.openclaw/skills/zmail/`, or from this repo: **`npm run install-skill:openclaw`** ([OpenClaw creating skills](https://docs.openclaw.ai/tools/creating-skills)) |
 
 Folder name must stay **`zmail`** to match frontmatter `name` ([Agent Skills spec](https://agentskills.io/specification.md)). Copy the **whole** `skills/zmail/` directory (includes `references/`).
+
+### OpenClaw: heartbeat + fresh mail
+
+For **[OpenClaw](https://docs.openclaw.ai/)**, use a **heartbeat** (not a separate cron per mailbox tick) for periodic “anything new in email?” awareness—OpenClaw’s own guide recommends heartbeat for inbox-style checks because it **batches** with other routine work and can **suppress noise** when nothing matters. See **[Cron vs heartbeat](https://docs.openclaw.ai/cron-vs-heartbeat)** and **[Heartbeat](https://docs.openclaw.ai/gateway/heartbeat)** (interval, `HEARTBEAT.md`, `HEARTBEAT_OK`, `agents.defaults.heartbeat`, etc.).
+
+**Put zmail on the workspace `HEARTBEAT.md` checklist**, for example:
+
+1. **Ingest new mail:** run **`zmail refresh`** (forward IMAP sync into the local index), or use **`zmail inbox <window> --refresh`** so the forward sync runs immediately before the scan (same sync path as `refresh`; optional **`--force`** if you need to skip STATUS fast-path—see **`zmail inbox --help`**).
+2. **Surface what’s worth attention:** run **`zmail inbox`** over a window (e.g. **`24h`**, **`3d`**, or your **`inbox.defaultWindow`** in `config.json`) so the LLM returns **notable** recent mail in JSON (`newMail`, …). Requires **`ZMAIL_OPENAI_API_KEY`** (or `OPENAI_API_KEY`). Use **`--text`** if you want a human-readable digest. Add **`--include-noise`** only if marketing/social should count as “notable.”
+3. **If nothing needs a human ping**, answer **`HEARTBEAT_OK`** so OpenClaw drops the turn quietly (per Heartbeat docs).
+
+**Cost / habit:** `refresh` alone does **not** call OpenAI; **`inbox`** does. Keep the checklist short; widen the inbox window only when needed.
 
 ---
 
