@@ -1,14 +1,23 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import { describe, it, expect, beforeAll, beforeEach, afterEach } from "vitest";
+import { execSync } from "node:child_process";
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { reindexFromMaildir } from "./rebuild";
-import { getDb, closeDb } from "./index";
+import { getDb, closeDb, rebuildLocalIndexFromMaildirForced } from "./index";
+import { insertTestMessage } from "./test-helpers";
 import { writeMessageMeta } from "~/lib/message-meta";
 
 describe("reindexFromMaildir", () => {
   let testTempDir: string;
   let originalEnv: string | undefined;
+
+  beforeAll(() => {
+    const workerJs = join(process.cwd(), "dist", "db", "rebuild-parse-worker.js");
+    if (!existsSync(workerJs)) {
+      execSync("npm run build", { stdio: "inherit", cwd: process.cwd() });
+    }
+  });
 
   beforeEach(async () => {
     testTempDir = mkdtempSync(join(tmpdir(), "zmail-rebuild-test-"));
@@ -33,6 +42,51 @@ describe("reindexFromMaildir", () => {
       delete process.env.ZMAIL_HOME;
     }
     rmSync(testTempDir, { recursive: true, force: true });
+  });
+
+  it("reindexes messages from maildir/cur/ using worker pool when ZMAIL_WORKER_CONCURRENCY>1", async () => {
+    const prev = process.env.ZMAIL_WORKER_CONCURRENCY;
+    process.env.ZMAIL_WORKER_CONCURRENCY = "2";
+    try {
+      const maildirCur = join(testTempDir, "data", "maildir", "cur");
+
+      const eml1 = Buffer.from(
+        `Message-ID: <pool1@example.com>
+From: alice@example.com
+To: bob@example.com
+Subject: Pool test 1
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+Content-Type: text/plain
+
+Hello pool 1.`
+      );
+      writeFileSync(join(maildirCur, "100_pool1@example.com.eml"), eml1);
+
+      const eml2 = Buffer.from(
+        `Message-ID: <pool2@example.com>
+From: bob@example.com
+To: alice@example.com
+Subject: Pool test 2
+Date: Mon, 2 Jan 2024 12:00:00 +0000
+Content-Type: text/plain
+
+Hello pool 2.`
+      );
+      writeFileSync(join(maildirCur, "200_pool2@example.com.eml"), eml2);
+
+      const result = await reindexFromMaildir();
+      expect(result.parsed).toBe(2);
+      expect(result.failed).toBe(0);
+
+      const db = await getDb();
+      const messages = (await (await db.prepare("SELECT message_id FROM messages ORDER BY message_id")).all()) as Array<{
+        message_id: string;
+      }>;
+      expect(messages.map((m) => m.message_id).sort()).toEqual(["<pool1@example.com>", "<pool2@example.com>"]);
+    } finally {
+      if (prev === undefined) delete process.env.ZMAIL_WORKER_CONCURRENCY;
+      else process.env.ZMAIL_WORKER_CONCURRENCY = prev;
+    }
   });
 
   it("reindexes messages from maildir/cur/", async () => {
@@ -155,6 +209,36 @@ Invalid message.`
     const result = await reindexFromMaildir();
     expect(result.parsed).toBe(0);
     expect(result.failed).toBe(0);
+  });
+
+  it("rebuildLocalIndexFromMaildirForced wipes DB and reindexes only from maildir", async () => {
+    const maildirCur = join(testTempDir, "data", "maildir", "cur");
+
+    const eml = Buffer.from(
+      `Message-ID: <only@example.com>
+From: only@example.com
+To: user@example.com
+Subject: Only from maildir
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+Content-Type: text/plain
+
+Body.`
+    );
+    writeFileSync(join(maildirCur, "100_only@example.com.eml"), eml);
+
+    const dbBefore = await getDb();
+    await insertTestMessage(dbBefore, { messageId: "<orphan@example.com>", subject: "Not in maildir" });
+
+    const count = (await (await dbBefore.prepare("SELECT COUNT(*) as c FROM messages")).get()) as { c: number };
+    expect(count.c).toBe(1);
+
+    await rebuildLocalIndexFromMaildirForced();
+
+    const db = await getDb();
+    const rows = (await (await db.prepare("SELECT message_id FROM messages ORDER BY message_id")).all()) as {
+      message_id: string;
+    }[];
+    expect(rows).toEqual([{ message_id: "<only@example.com>" }]);
   });
 
   it("handles missing maildir/cur/ directory", async () => {

@@ -1,16 +1,24 @@
 /**
  * Rebuild database index from existing EML files in maildir.
  * Used when schema version changes — faster than re-syncing from IMAP.
+ *
+ * Parse (CPU-heavy) may run on worker threads; SQLite writes stay on the main thread in one
+ * transaction with reused prepared statements.
  */
 
-import { existsSync, readdirSync, readFileSync } from "fs";
+import { existsSync, readdirSync } from "fs";
 import { join } from "path";
 import { config } from "~/lib/config";
 import { getDb } from "./index";
-import { parseRawMessage } from "~/sync/parse-message";
 import { logger } from "~/lib/logger";
-import { persistMessage, persistAttachmentsFromDisk, persistAttachmentsFromParsed } from "./message-persistence";
-import { readMessageMeta } from "~/lib/message-meta";
+import {
+  persistMessage,
+  persistAttachmentsFromDisk,
+  persistAttachmentsFromParsed,
+  prepareMessagePersistStatements,
+} from "./message-persistence";
+import { getRebuildParseConcurrency, parseMaildirJobsWithPool } from "./rebuild-parse-pool";
+import type { MaildirParseJob } from "./rebuild-parse-job";
 
 /** Get mailbox name (same logic as sync). */
 function getSyncMailbox(host: string): string {
@@ -46,13 +54,12 @@ export async function reindexFromMaildir(): Promise<{ parsed: number; failed: nu
     return { parsed: 0, failed: 0 };
   }
 
-  let parsed = 0;
-  let failed = 0;
-  let earliestDate: string | null = null;
-  let latestDate: string | null = null;
-
   const files = readdirSync(maildirCurPath).filter((f) => f.endsWith(".eml"));
-  logger.info("Reindexing from maildir", { fileCount: files.length, mailbox });
+  const parseConcurrency = getRebuildParseConcurrency();
+  logger.info("Reindexing from maildir", { fileCount: files.length, mailbox, workerConcurrency: parseConcurrency });
+
+  const jobs: MaildirParseJob[] = [];
+  let failed = 0;
 
   for (const filename of files) {
     const filePath = join(maildirCurPath, filename);
@@ -64,50 +71,79 @@ export async function reindexFromMaildir(): Promise<{ parsed: number; failed: nu
       continue;
     }
 
-    try {
-      const raw = readFileSync(filePath);
-      const parsedMsg = await parseRawMessage(raw);
+    jobs.push({
+      filePath,
+      filename,
+      uid,
+      relPath: join("cur", filename),
+    });
+  }
 
-      const existing = await (await db.prepare("SELECT 1 FROM messages WHERE message_id = ?")).get(parsedMsg.messageId);
-      if (existing) {
+  const parseResults = await parseMaildirJobsWithPool(jobs, parseConcurrency);
+
+  const stmts = await prepareMessagePersistStatements(db);
+  const insertAtt = stmts.insertAttachment;
+
+  let parsed = 0;
+  let earliestDate: string | null = null;
+  let latestDate: string | null = null;
+
+  await db.exec("BEGIN IMMEDIATE");
+  try {
+    for (let i = 0; i < parseResults.length; i++) {
+      const result = parseResults[i]!;
+
+      if (!result.ok) {
+        logger.warn("Failed to parse message during reindex", {
+          filename: result.filename,
+          error: result.error,
+        });
+        failed++;
+        continue;
+      }
+
+      const { parsedMsg, labelsJson, relPath, uid } = result;
+
+      const { inserted } = await persistMessage(db, parsedMsg, mailbox, uid, labelsJson, relPath, {
+        mode: "insertOrIgnore",
+        statements: stmts,
+      });
+
+      if (!inserted) {
         logger.debug("Skipping duplicate message", { messageId: parsedMsg.messageId });
         continue;
       }
 
-      const relPath = join("cur", filename);
-
-      const meta = readMessageMeta(filePath);
-      const labelsJson = meta.labels?.length ? JSON.stringify(meta.labels) : "[]";
-
-      await persistMessage(db, parsedMsg, mailbox, uid, labelsJson, relPath);
-
       if (parsedMsg.attachments.length > 0) {
-        await persistAttachmentsFromParsed(db, parsedMsg.messageId, parsedMsg.attachments);
+        await persistAttachmentsFromParsed(db, parsedMsg.messageId, parsedMsg.attachments, {
+          insertAttachment: insertAtt,
+        });
       } else {
-        await persistAttachmentsFromDisk(db, parsedMsg.messageId, attachmentsBasePath);
+        await persistAttachmentsFromDisk(db, parsedMsg.messageId, attachmentsBasePath, {
+          insertAttachment: insertAtt,
+        });
       }
 
       parsed++;
       if (!earliestDate || parsedMsg.date < earliestDate) earliestDate = parsedMsg.date;
       if (!latestDate || parsedMsg.date > latestDate) latestDate = parsedMsg.date;
-    } catch (err) {
-      logger.warn("Failed to parse message during reindex", {
-        filename,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      failed++;
     }
-  }
 
-  await (
-    await db.prepare(
-      `UPDATE sync_summary SET
+    await (
+      await db.prepare(
+        `UPDATE sync_summary SET
       earliest_synced_date = COALESCE(?, earliest_synced_date),
       latest_synced_date = COALESCE(?, latest_synced_date),
       total_messages = (SELECT COUNT(*) FROM messages)
      WHERE id = 1`
-    )
-  ).run(earliestDate, latestDate);
+      )
+    ).run(earliestDate, latestDate);
+
+    await db.exec("COMMIT");
+  } catch (err) {
+    await db.exec("ROLLBACK");
+    throw err;
+  }
 
   logger.info("Reindex complete", { parsed, failed, mailbox });
   return { parsed, failed };

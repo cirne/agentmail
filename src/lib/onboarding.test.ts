@@ -15,8 +15,9 @@ describe("onboarding", () => {
       expect(CLI_USAGE).toContain("zmail setup");
     });
 
-    it("includes sync, search, who, status, stats, mcp, ask", () => {
+    it("includes sync, search, who, status, stats, rebuild-index, mcp, ask", () => {
       expect(CLI_USAGE).toContain("zmail sync");
+      expect(CLI_USAGE).toContain("zmail rebuild-index");
       expect(CLI_USAGE).toContain("zmail search");
       expect(CLI_USAGE).toContain("zmail who");
       expect(CLI_USAGE).toContain("zmail status");

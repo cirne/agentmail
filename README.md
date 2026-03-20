@@ -105,6 +105,8 @@ rm -rf ~/.zmail/data/
 zmail sync --since 7d
 ```
 
+For a **maildir-only** SQLite reindex without deleting raw email (same steps as a schema bump), use `zmail rebuild-index` — see [AGENTS.md](AGENTS.md).
+
 ## Architecture
 
 Built with TypeScript + Node.js 20+. All data stored locally on a persistent volume — no cloud sync service, no third-party access to your email. 

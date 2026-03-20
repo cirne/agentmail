@@ -15,6 +15,7 @@ Usage:
   zmail wizard [--no-validate]   Interactive setup (prompts for credentials)
   zmail sync [--since <spec>] [--foreground]     Initial sync: fill gaps going backward (runs in background by default; use --foreground to wait)
   zmail refresh                    Refresh: fetch new messages since last sync (frequent updates)
+  zmail rebuild-index              Wipe SQLite and reindex from local maildir (same as schema bump; dev/test)
   zmail ask "<question>" [--verbose]   Answer a natural-language question (zmail orchestrates search/read; needs OpenAI key: ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY)
   zmail search <query> [flags]    Search email (FTS5 full-text search)
   zmail who <query> [flags]       Find people by address or name (use --help for flags)

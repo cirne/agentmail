@@ -66,16 +66,11 @@ export async function closeDb(): Promise<void> {
 }
 
 /**
- * Ensure database schema is up to date. If schema version has changed, rebuilds the index
- * from existing EML files in maildir. This should be called early in any command that uses the DB.
+ * Delete the SQLite files, open a fresh DB at the current schema, and reindex from maildir/cur.
+ * Shared by schema-drift handling and `zmail rebuild-index`.
  */
-export async function ensureSchemaUpToDate(): Promise<void> {
-  const stale = await checkSchemaVersion();
-  if (!stale) {
-    return;
-  }
-
-  process.stderr.write("Schema updated — rebuilding index from local cache (up to 20s)...\n");
+async function runRebuildIndexFromMaildir(stderrIntro: string): Promise<void> {
+  process.stderr.write(stderrIntro);
   await closeDb();
   rmSync(config.dbPath, { force: true });
   rmSync(`${config.dbPath}-shm`, { force: true });
@@ -96,4 +91,25 @@ export async function ensureSchemaUpToDate(): Promise<void> {
     fileLogger.close();
     restoreLogger();
   }
+}
+
+/**
+ * Ensure database schema is up to date. If schema version has changed, rebuilds the index
+ * from existing EML files in maildir. This should be called early in any command that uses the DB.
+ */
+export async function ensureSchemaUpToDate(): Promise<void> {
+  const stale = await checkSchemaVersion();
+  if (!stale) {
+    return;
+  }
+
+  await runRebuildIndexFromMaildir("Schema updated — rebuilding index from local cache (up to 20s)...\n");
+}
+
+/**
+ * Wipe SQLite and reindex from local maildir — same steps as a schema version bump, without changing SCHEMA_VERSION.
+ * For dev/test when the index is suspect; does not re-fetch from IMAP.
+ */
+export async function rebuildLocalIndexFromMaildirForced(): Promise<void> {
+  await runRebuildIndexFromMaildir("Rebuilding index from local maildir cache (up to 20s)...\n");
 }

@@ -73,6 +73,7 @@ if (!command) {
   console.log("");
   console.log("  zmail sync               Start syncing email (background; waits until data flows)");
   console.log("  zmail refresh            Fetch new email since last sync (fast, foreground)");
+  console.log("  zmail rebuild-index      Rebuild local SQLite index from maildir (dev/test)");
   console.log("  zmail search <query>    Search email — FTS5 full-text search");
   console.log("  zmail who <query>        Find people by name or address");
   console.log("  zmail status             Show sync and indexing progress");

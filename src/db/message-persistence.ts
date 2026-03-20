@@ -5,9 +5,48 @@
 
 import { existsSync, mkdirSync, writeFileSync, readdirSync, statSync } from "fs";
 import { join } from "path";
-import type { SqliteDatabase } from "~/db";
+import type { SqliteDatabase, SqliteStatement } from "~/db/sqlite-types";
 import type { ParsedMessage } from "~/sync/parse-message";
 import { config } from "~/lib/config";
+
+const SQL_INSERT_MESSAGE = `INSERT INTO messages (
+      message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name,
+      to_addresses, cc_addresses, subject, date, body_text, raw_path
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+const SQL_INSERT_MESSAGE_OR_IGNORE = `INSERT OR IGNORE INTO messages (
+      message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name,
+      to_addresses, cc_addresses, subject, date, body_text, raw_path
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+const SQL_UPSERT_THREAD = `INSERT OR REPLACE INTO threads (thread_id, subject, participant_count, message_count, last_message_at)
+     VALUES (?, ?, 1, 1, ?)`;
+
+const SQL_INSERT_ATTACHMENT = `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
+       VALUES (?, ?, ?, ?, ?, NULL)`;
+
+export type MessagePersistStatements = {
+  insertMessage: SqliteStatement;
+  insertMessageOrIgnore: SqliteStatement;
+  insertThreadOrReplace: SqliteStatement;
+  insertAttachment: SqliteStatement;
+};
+
+export async function prepareMessagePersistStatements(db: SqliteDatabase): Promise<MessagePersistStatements> {
+  const insertMessage = await db.prepare(SQL_INSERT_MESSAGE);
+  const insertMessageOrIgnore = await db.prepare(SQL_INSERT_MESSAGE_OR_IGNORE);
+  const insertThreadOrReplace = await db.prepare(SQL_UPSERT_THREAD);
+  const insertAttachment = await db.prepare(SQL_INSERT_ATTACHMENT);
+  return { insertMessage, insertMessageOrIgnore, insertThreadOrReplace, insertAttachment };
+}
+
+export type PersistMessageOptions = {
+  /** Rebuild uses insertOrIgnore to skip duplicates without a pre-read. */
+  mode?: "insert" | "insertOrIgnore";
+  statements?: MessagePersistStatements;
+};
+
+export type PersistMessageResult = { inserted: boolean };
 
 /**
  * Sanitize filename for filesystem safety.
@@ -65,8 +104,12 @@ export async function persistMessage(
   mailbox: string,
   uid: number,
   labels: string,
-  rawPath: string
-): Promise<void> {
+  rawPath: string,
+  options?: PersistMessageOptions
+): Promise<PersistMessageResult> {
+  const mode = options?.mode ?? "insert";
+  const stmts = options?.statements;
+
   const threadId = parsed.messageId;
 
   let labelIsNoise = false;
@@ -94,14 +137,7 @@ export async function persistMessage(
 
   const isNoise = parsed.isNoise || labelIsNoise ? 1 : 0;
 
-  await (
-    await db.prepare(
-      `INSERT INTO messages (
-      message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name,
-      to_addresses, cc_addresses, subject, date, body_text, raw_path
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    )
-  ).run(
+  const params = [
     parsed.messageId,
     threadId,
     mailbox,
@@ -115,15 +151,27 @@ export async function persistMessage(
     parsed.subject,
     parsed.date,
     parsed.bodyText,
-    rawPath
-  );
+    rawPath,
+  ] as const;
 
-  await (
-    await db.prepare(
-      `INSERT OR REPLACE INTO threads (thread_id, subject, participant_count, message_count, last_message_at)
-     VALUES (?, ?, 1, 1, ?)`
-    )
-  ).run(threadId, parsed.subject, parsed.date);
+  const messageStmt =
+    stmts != null
+      ? mode === "insertOrIgnore"
+        ? stmts.insertMessageOrIgnore
+        : stmts.insertMessage
+      : await db.prepare(mode === "insertOrIgnore" ? SQL_INSERT_MESSAGE_OR_IGNORE : SQL_INSERT_MESSAGE);
+
+  const runMessage = await messageStmt.run(...params);
+  const inserted = runMessage.changes > 0;
+
+  if (!inserted) {
+    return { inserted: false };
+  }
+
+  const threadStmt = stmts?.insertThreadOrReplace ?? (await db.prepare(SQL_UPSERT_THREAD));
+  await threadStmt.run(threadId, parsed.subject, parsed.date);
+
+  return { inserted: true };
 }
 
 /**
@@ -133,13 +181,15 @@ export async function persistAttachmentsFromParsed(
   db: SqliteDatabase,
   messageId: string,
   attachments: Array<{ filename: string; content: Buffer; mimeType: string; size: number }>,
-  maildirPath?: string
+  options?: { maildirPath?: string; insertAttachment?: SqliteStatement }
 ): Promise<void> {
   if (attachments.length === 0) return;
 
-  const basePath = maildirPath ?? config.maildirPath;
+  const basePath = options?.maildirPath ?? config.maildirPath;
   const attachmentsDir = join(basePath, "attachments", messageId);
   mkdirSync(attachmentsDir, { recursive: true });
+
+  const insertStmt = options?.insertAttachment ?? (await db.prepare(SQL_INSERT_ATTACHMENT));
 
   for (const att of attachments) {
     const uniqueFilename = ensureUniqueFilename(attachmentsDir, att.filename);
@@ -147,12 +197,7 @@ export async function persistAttachmentsFromParsed(
     writeFileSync(attachmentPath, att.content, "binary");
 
     const storedPath = join("attachments", messageId, uniqueFilename);
-    await (
-      await db.prepare(
-        `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
-       VALUES (?, ?, ?, ?, ?, NULL)`
-      )
-    ).run(messageId, att.filename, att.mimeType, att.size, storedPath);
+    await insertStmt.run(messageId, att.filename, att.mimeType, att.size, storedPath);
   }
 }
 
@@ -162,9 +207,11 @@ export async function persistAttachmentsFromParsed(
 export async function persistAttachmentsFromDisk(
   db: SqliteDatabase,
   messageId: string,
-  attachmentsBasePath: string
+  attachmentsBasePath: string,
+  options?: { insertAttachment?: SqliteStatement }
 ): Promise<void> {
   const attachmentDir = join(attachmentsBasePath, messageId);
+  const insertStmt = options?.insertAttachment ?? (await db.prepare(SQL_INSERT_ATTACHMENT));
   try {
     const attachmentFiles = readdirSync(attachmentDir, { withFileTypes: true }).filter((f) => f.isFile());
     for (const attFile of attachmentFiles) {
@@ -175,12 +222,7 @@ export async function persistAttachmentsFromDisk(
       const ext = attFile.name.split(".").pop()?.toLowerCase() || "";
       const mimeType = getMimeType(ext);
 
-      await (
-        await db.prepare(
-          `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
-         VALUES (?, ?, ?, ?, ?, NULL)`
-        )
-      ).run(messageId, attFile.name, mimeType, stats.size, storedPath);
+      await insertStmt.run(messageId, attFile.name, mimeType, stats.size, storedPath);
     }
   } catch {
     // Attachment directory doesn't exist or can't be read — skip

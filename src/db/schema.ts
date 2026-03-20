@@ -1,6 +1,6 @@
 // SQL schema — all tables and FTS5 virtual tables
 
-/** Schema version — bump this integer whenever the schema changes (or to force a maildir rebuild). */
+/** Schema version — bump when the schema changes. To force a maildir rebuild without a bump, use `zmail rebuild-index`. */
 export const SCHEMA_VERSION = 11;
 
 export const SCHEMA = /* sql */ `

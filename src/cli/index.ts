@@ -1254,6 +1254,12 @@ async function main() {
       break;
     }
 
+    case "rebuild-index": {
+      const { rebuildLocalIndexFromMaildirForced } = await import("~/db");
+      await rebuildLocalIndexFromMaildirForced();
+      break;
+    }
+
     case "refresh": {
       // Refresh: Frequent updates, brings local copy up to date
       // Usage: zmail refresh [--force] [--include-noise] [--text]

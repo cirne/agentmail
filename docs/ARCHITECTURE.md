@@ -460,7 +460,7 @@ This replaces timestamp-based staleness detection. PID checks are instantaneous 
 - Agents and remote clients can poll status at any time without depending on stdout.
 - Stdout progress lines are emitted periodically for environments that stream output.
 
-**No standalone indexing command.** There is no `zmail index` or backfill tool. `zmail sync` and `zmail refresh` are the only entry points for data ingestion — one command, one process (indexing/embedding pipeline removed).
+**Ingestion from IMAP:** `zmail sync` and `zmail refresh` are the entry points for fetching mail — one command, one process (no separate backfill tool). **Local index rebuild:** `zmail rebuild-index` wipes SQLite and reindexes from `maildir/cur/` using the same path as a schema version bump (dev/test; no IMAP).
 
 ---
 
@@ -473,6 +473,8 @@ This replaces timestamp-based staleness detection. PID checks are instantaneous 
 **Sidecar metadata:** EML files lack IMAP-only data (e.g. Gmail labels/categories). During sync, a companion `.meta.json` sidecar is written alongside each `.eml` (same basename, e.g. `100_msg.meta.json`) containing a JSON catch-all for non-standard metadata (`{ "labels": [...] }`). Rebuild reads sidecars to restore label-based noise classification and any future metadata. The sidecar format is extensible — add new fields without creating additional files.
 
 **Result:** Fresh environments bootstrap directly from source schema. Stale local DBs trigger an automatic rebuild from maildir (typically under 20s for moderate mailboxes). If maildir is empty or missing, rebuild completes with 0 messages and the user can run `zmail sync` to fetch from IMAP.
+
+**Rebuild throughput:** Reindex parses `.eml` files in parallel using Node `worker_threads` — **one OS process**, not multiple Node binaries; each worker is a separate **V8 isolate** (parallel JS requires that; a single isolate stays single-threaded for JS execution). SQLite writes run only on the main thread inside one `BEGIN IMMEDIATE` … `COMMIT` transaction with reused prepared statements (`INSERT OR IGNORE` for idempotent message rows, then thread and attachment rows). Workers load from `dist/db/rebuild-parse-worker.js` after `npm run build` (plain Node ESM). Optional env `ZMAIL_WORKER_CONCURRENCY` sets the worker count (non-negative integer; **default 8** when unset; Vitest defaults to 1 unless set). Legacy: `ZMAIL_REBUILD_PARSE_CONCURRENCY` if the new var is unset. This is intentionally **not** multi-writer SQLite: it avoids the contention that motivated retiring an earlier multi-worker *sync* design (see observability section above).
 
 ---
 

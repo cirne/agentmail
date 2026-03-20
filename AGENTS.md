@@ -95,6 +95,7 @@ zmail thread <thread_id> [--json] [--raw]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
 zmail status [--json]
 zmail stats [--json]
+zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)
 zmail attachment list <message_id> [--text]
 zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]
 zmail mcp  # Start MCP server (stdio)
@@ -192,6 +193,7 @@ Run `zmail setup` (with flags/env) or `zmail wizard` (interactive) to create the
 Optional environment variables:
 
 - `ZMAIL_HOME` — override config directory (default: `~/.zmail`)
+- `ZMAIL_WORKER_CONCURRENCY` — optional. Max **`worker_threads`** for CPU-parallel zmail work (maildir parse during reindex / `zmail rebuild-index` today; same knob for future pools). One Node **process**, several V8 isolates; SQLite stays on the main thread. Non-negative integer; **defaults to 8** when unset (see `DEFAULT_ZMAIL_WORKER_CONCURRENCY` in `src/lib/worker-concurrency.ts`). Under Vitest, defaults to **1** unless this var is set. Parallel rebuild parse loads `dist/db/rebuild-parse-worker.js` — run `npm run build` once if you use `tsx`/source without `dist/`. Legacy alias: `ZMAIL_REBUILD_PARSE_CONCURRENCY` (used only if `ZMAIL_WORKER_CONCURRENCY` is unset).
 
 Required environment variables (for `zmail setup`):
 
