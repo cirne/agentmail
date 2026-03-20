@@ -129,10 +129,9 @@ function mergeByDisplayName(clusters: Map<string, Cluster>): Map<string, Cluster
  * Cluster identities from messages into person clusters.
  * Returns a map of cluster keys to clusters.
  */
-export function clusterIdentities(db: SqliteDatabase): Map<string, Cluster> {
-  // Fetch all distinct identities from messages (from, to, cc)
-  const rows = db
-    .prepare(
+export async function clusterIdentities(db: SqliteDatabase): Promise<Map<string, Cluster>> {
+  const rows = (await (
+    await db.prepare(
       /* sql */ `
     WITH all_addresses AS (
       SELECT DISTINCT LOWER(from_address) as address, from_name as display_name, 'from' as source
@@ -163,7 +162,7 @@ export function clusterIdentities(db: SqliteDatabase): Map<string, Cluster> {
     SELECT * FROM identities
   `
     )
-    .all() as Array<{
+  ).all()) as Array<{
     address: string;
     display_name: string | null;
     sent_count: number;

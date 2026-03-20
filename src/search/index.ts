@@ -60,15 +60,15 @@ export interface SearchResultSet {
 const BODY_PREVIEW_LEN = 300;
 
 /** Batch-load attachment metadata for result message_ids and merge onto each result (1-based index). */
-function mergeAttachmentMetadata(
+async function mergeAttachmentMetadata(
   db: SqliteDatabase,
   results: SearchResult[]
-): SearchResult[] {
+): Promise<SearchResult[]> {
   if (results.length === 0) return results;
   const ids = results.map((r) => r.messageId);
   const placeholders = ids.map(() => "?").join(",");
-  const rows = db
-    .prepare(
+  const rows = (await (
+    await db.prepare(
       /* sql */ `
     SELECT message_id AS messageId, id, filename, mime_type AS mimeType
     FROM attachments
@@ -76,7 +76,7 @@ function mergeAttachmentMetadata(
     ORDER BY message_id, id
     `
     )
-    .all(...ids) as Array<{ messageId: string; id: number; filename: string; mimeType: string }>;
+  ).all(...ids)) as Array<{ messageId: string; id: number; filename: string; mimeType: string }>;
   const byMessage = new Map<string, SearchResultAttachment[]>();
   for (const row of rows) {
     const list = byMessage.get(row.messageId) ?? [];
@@ -90,15 +90,15 @@ function mergeAttachmentMetadata(
 }
 
 /** Load full thread messages (for includeThreads). */
-function loadThreads(
+async function loadThreads(
   db: SqliteDatabase,
   threadIds: string[]
-): ThreadSearchResult[] {
+): Promise<ThreadSearchResult[]> {
   if (threadIds.length === 0) return [];
   const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(body_text, 1, ${BODY_PREVIEW_LEN})), '') || (CASE WHEN LENGTH(TRIM(body_text)) > ${BODY_PREVIEW_LEN} THEN '…' ELSE '' END)`;
   const placeholders = threadIds.map(() => "?").join(",");
-  const rows = db
-    .prepare(
+  const rows = (await (
+    await db.prepare(
       /* sql */ `
     SELECT thread_id AS threadId, message_id AS messageId, from_address AS fromAddress, from_name AS fromName,
            subject, date, ${bodyPreviewSql} AS bodyPreview
@@ -107,7 +107,7 @@ function loadThreads(
     ORDER BY thread_id, date ASC
     `
     )
-    .all(...threadIds) as Array<{
+  ).all(...threadIds)) as Array<{
       threadId: string;
       messageId: string;
       fromAddress: string;
@@ -141,27 +141,28 @@ function loadThreads(
  * Filter-only search (no query text, just WHERE clauses).
  * Returns results and total count.
  */
-function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchResult[]; totalCount: number } {
+async function filterOnlySearch(
+  db: SqliteDatabase,
+  opts: SearchOptions
+): Promise<{ results: SearchResult[]; totalCount: number }> {
   const { limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
   const filterClause = buildFilterClause(opts);
   const where = filterClause.conditions.length > 0 ? `WHERE ${buildWhereClause(filterClause)}` : "";
 
-  // Get total count first
-  const countResult = db
-    .prepare(
+  const countResult = (await (
+    await db.prepare(
       /* sql */ `
       SELECT COUNT(*) as count
       FROM messages m
       ${where}
     `
     )
-    .get(...filterClause.params) as { count: number };
+  ).get(...filterClause.params)) as { count: number };
 
-  // Then get results (bodyPreview = first 300 chars to reduce follow-up reads)
   const params = [...filterClause.params, limit, offset];
   const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
-  const rows = db
-    .prepare(
+  const rows = (await (
+    await db.prepare(
       /* sql */ `
       SELECT
         m.message_id   AS messageId,
@@ -179,7 +180,7 @@ function filterOnlySearch(db: SqliteDatabase, opts: SearchOptions): { results: S
       LIMIT ? OFFSET ?
     `
     )
-    .all(...params) as SearchResult[];
+  ).all(...params)) as unknown as SearchResult[];
   return { results: rows, totalCount: countResult.count };
 }
 
@@ -316,7 +317,10 @@ function escapeFts5Query(query: string): string {
  * Returns results and total count.
  * Throws a user-friendly error if FTS5 syntax error occurs.
  */
-function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchResult[]; totalCount: number } {
+async function ftsSearch(
+  db: SqliteDatabase,
+  opts: SearchOptions
+): Promise<{ results: SearchResult[]; totalCount: number }> {
   const { query, limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
   if (!query?.trim()) return { results: [], totalCount: 0 };
 
@@ -352,8 +356,8 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
   try {
     // First, get total count (before limit/offset)
     const countParams = [escapedQuery, ...filterClause.params];
-    const totalCount = db
-      .prepare(
+    const totalCount = (await (
+      await db.prepare(
         /* sql */ `
         SELECT COUNT(*) as count
         FROM messages_fts
@@ -361,7 +365,7 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
         ${where}
       `
       )
-      .get(...countParams) as { count: number };
+    ).get(...countParams)) as { count: number };
 
     // Then get results
     const params = [escapedQuery, ...filterClause.params, limit + offset + 50];
@@ -384,8 +388,8 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
       END
     `;
     
-    const rows = db
-      .prepare(
+    const rows = (await (
+      await db.prepare(
         /* sql */ `
         SELECT
           m.message_id  AS messageId,
@@ -405,7 +409,7 @@ function ftsSearch(db: SqliteDatabase, opts: SearchOptions): { results: SearchRe
         LIMIT ?
       `
       )
-      .all(...params) as SearchResult[];
+    ).all(...params)) as unknown as SearchResult[];
 
     // Apply post-query filtering and limit/offset
     const results = rows.slice(offset, offset + limit);
@@ -488,11 +492,11 @@ export async function searchWithMeta(
   };
 
   if (!parsedQuery?.trim()) {
-    const { results, totalCount } = filterOnlySearch(db, effectiveOpts);
+    const { results, totalCount } = await filterOnlySearch(db, effectiveOpts);
     timings.totalMs = Date.now() - startedAt;
-    const resultsWithAttachments = mergeAttachmentMetadata(db, results);
+    const resultsWithAttachments = await mergeAttachmentMetadata(db, results);
     const threads = effectiveOpts.includeThreads
-      ? loadThreads(db, [...new Set(resultsWithAttachments.map((r) => r.threadId))])
+      ? await loadThreads(db, [...new Set(resultsWithAttachments.map((r) => r.threadId))])
       : undefined;
     return {
       results: resultsWithAttachments,
@@ -508,7 +512,7 @@ export async function searchWithMeta(
 
   // FTS search only
   const ftsStart = Date.now();
-  const { results, totalCount } = ftsSearch(db, effectiveOpts);
+  const { results, totalCount } = await ftsSearch(db, effectiveOpts);
   // #region agent log
   if (/apple/i.test(effectiveOpts.query ?? "")) {
     fetch("http://127.0.0.1:7346/ingest/335842d0-019d-4436-8e39-976da7aa5bff", {
@@ -527,9 +531,9 @@ export async function searchWithMeta(
   // #endregion
   timings.ftsMs = Date.now() - ftsStart;
   timings.totalMs = Date.now() - startedAt;
-  const resultsWithAttachments = mergeAttachmentMetadata(db, results);
+  const resultsWithAttachments = await mergeAttachmentMetadata(db, results);
   const threads = effectiveOpts.includeThreads
-    ? loadThreads(db, [...new Set(resultsWithAttachments.map((r) => r.threadId))])
+    ? await loadThreads(db, [...new Set(resultsWithAttachments.map((r) => r.threadId))])
     : undefined;
   return {
     results: resultsWithAttachments,

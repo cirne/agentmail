@@ -197,10 +197,9 @@ describe("zmail ask evaluation suite", () => {
   let db: SqliteDatabase;
 
   // Setup database once for all tests (readonly tests share the same DB)
-  beforeAll(() => {
-    db = createTestDb();
-    // Load all eval fixtures from YAML file
-    loadEvalFixtures(db);
+  beforeAll(async () => {
+    db = await createTestDb();
+    await loadEvalFixtures(db);
   });
 
   // Skip if OpenAI API key is not configured
@@ -270,7 +269,7 @@ describe("zmail ask evaluation suite", () => {
   describe("performance benchmarks", () => {
     beforeAll(async () => {
       // Setup benchmark test data (readonly, so safe to share)
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         messageId: "<simple@example.com>",
         subject: "Test",
         bodyText: "Test content",

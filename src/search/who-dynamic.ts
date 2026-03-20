@@ -70,9 +70,8 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
   const queryLower = query.trim().toLowerCase();
   const pattern = `%${queryLower}%`;
 
-  // Step 1: Find matching identities from messages
-  const matchingRows = db
-    .prepare(
+  const matchingRows = (await (
+    await db.prepare(
       /* sql */ `
     WITH all_addresses AS (
       SELECT DISTINCT LOWER(from_address) as address, from_name as display_name
@@ -109,13 +108,13 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
     LIMIT ?
   `
     )
-    .all(
-      pattern,
-      pattern,
-      pattern,
-      pattern,
-      limit * 10 // Fetch more candidates before filtering
-    ) as Array<{
+  ).all(
+    pattern,
+    pattern,
+    pattern,
+    pattern,
+    limit * 10
+  )) as Array<{
     address: string;
     display_name: string | null;
     sent_count: number;
@@ -372,8 +371,8 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
     if (!cluster.isNoreply) {
       for (const address of cluster.addresses.slice(0, 3)) {
         // Only check first 3 addresses to limit signature extraction overhead
-        const recentMessage = db
-          .prepare(
+        const recentMessage = (await (
+          await db.prepare(
             /* sql */ `
           SELECT body_text, date
           FROM messages
@@ -382,7 +381,7 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
           LIMIT 1
         `
           )
-          .get(address.toLowerCase()) as { body_text: string; date: string } | null;
+        ).get(address.toLowerCase())) as { body_text: string; date: string } | null;
 
         if (recentMessage) {
           const sigData = extractSignatureData(recentMessage.body_text, address);

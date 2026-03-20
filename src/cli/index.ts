@@ -421,15 +421,15 @@ function toCliSearchRow(r: SearchResult): CliSearchRow {
   return rest;
 }
 
-function hydrateBodies(db: SqliteDatabase, results: CliSearchRow[]): CliSearchRow[] {
+async function hydrateBodies(db: SqliteDatabase, results: CliSearchRow[]): Promise<CliSearchRow[]> {
   if (results.length === 0) return [];
   const ids = results.map((r) => r.messageId);
   const placeholders = ids.map(() => "?").join(",");
-  const rows = db
-    .prepare(
+  const rows = (await (
+    await db.prepare(
       `SELECT message_id AS messageId, body_text AS body FROM messages WHERE message_id IN (${placeholders})`
     )
-    .all(...ids) as Array<{ messageId: string; body: string }>;
+  ).all(...ids)) as Array<{ messageId: string; body: string }>;
   const bodyByMessageId = new Map(rows.map((row) => [row.messageId, row.body]));
   return results.map((result) => ({
     ...result,
@@ -437,19 +437,19 @@ function hydrateBodies(db: SqliteDatabase, results: CliSearchRow[]): CliSearchRo
   }));
 }
 
-function hydrateAttachmentMetadata(
+async function hydrateAttachmentMetadata(
   db: SqliteDatabase,
   results: SearchResult[]
-): Map<string, AttachmentMetadata> {
+): Promise<Map<string, AttachmentMetadata>> {
   if (results.length === 0) return new Map();
   const ids = results.map((r) => r.messageId);
   const placeholders = ids.map(() => "?").join(",");
-  const rows = db
-    .prepare(
+  const rows = (await (
+    await db.prepare(
       `SELECT message_id, COUNT(*) as count, GROUP_CONCAT(DISTINCT mime_type) as types
        FROM attachments WHERE message_id IN (${placeholders}) GROUP BY message_id`
     )
-    .all(...ids) as Array<{ message_id: string; count: number; types: string | null }>;
+  ).all(...ids)) as Array<{ message_id: string; count: number; types: string | null }>;
   
   const metadataByMessageId = new Map<string, AttachmentMetadata>();
   for (const row of rows) {
@@ -663,8 +663,9 @@ const STATUS_LABEL_WIDTH = 13;
 /**
  * Print sync and indexing status (reusable for status command and early exits)
  */
-function printStatus(db: SqliteDatabase = getDb()): void {
-  const status = getStatus(db);
+async function printStatus(db?: SqliteDatabase): Promise<void> {
+  const d = db ?? (await getDb());
+  const status = await getStatus(d);
   const pad = (s: string) => s.padEnd(STATUS_LABEL_WIDTH);
 
   // Calculate progress or status message if we have target, start, and current earliest dates
@@ -792,15 +793,14 @@ async function main() {
       }
 
       // Background mode (default): spawn subprocess, wait until data flows, then exit
-      const db = getDb();
+      const db = await getDb();
 
-      // Check lock before spawning
-      const syncRow = db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1").get() as
+      const syncRow = (await (await db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1")).get()) as
         | { is_running: number; owner_pid: number | null }
         | undefined;
       if (syncRow?.is_running) {
         console.log(`Sync already running (PID: ${syncRow.owner_pid})\n`);
-        printStatus(db);
+        await printStatus(db);
         process.exit(0);
       }
 
@@ -826,8 +826,7 @@ async function main() {
         process.exit(1);
       }
 
-      // Detect first-time indexing
-      const messageCount = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+      const messageCount = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
       const isFirstTime = messageCount.count === 0;
 
       // Spawn subprocess
@@ -860,7 +859,7 @@ async function main() {
 
       while (Date.now() - startTime < MAX_WAIT_MS) {
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
-        const { count } = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+        const { count } = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
         const elapsed = Math.round((Date.now() - startTime) / 1000);
 
         if (process.stdout.isTTY) {
@@ -903,14 +902,14 @@ async function main() {
 
       // Add encouraging first-time messages
       if (exitReason === 'data' && isFirstTime) {
-        const { count } = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+        const { count } = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
         console.log(`\nData is flowing! ${count} messages synced so far — search is ready.\n`);
         console.log("Try a few queries to see what's in your inbox:");
         console.log('  zmail search "invoice"');
         console.log('  zmail search "from:boss@example.com"');
         console.log('  zmail who "alice"');
       } else if (exitReason === 'done' && isFirstTime) {
-        const { count } = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+        const { count } = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
         
         // BUG-007 fix: Check sync log for errors before printing success
         const logCheck = checkSyncLogForErrors();
@@ -930,7 +929,7 @@ async function main() {
           console.log("Try: zmail search \"your query\"  |  zmail who \"name\"");
         }
       } else if (exitReason === 'timeout') {
-        const { count } = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+        const { count } = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
         if (count === 0) {
           console.warn("\nWarning: No messages synced yet. This may indicate:");
           console.warn("  - Invalid IMAP credentials (check with 'zmail setup')");
@@ -965,7 +964,7 @@ async function main() {
         effectiveLimit = JSON_LIMIT_CAP;
       }
 
-      const db = getDb();
+      const db = await getDb();
       const effectiveDetail = resolveDetail(parsed.detail, parsed.fields);
       let run;
       try {
@@ -985,11 +984,10 @@ async function main() {
 
       let results: CliSearchRow[] = run.results.map(toCliSearchRow);
       if (effectiveDetail === "body") {
-        results = hydrateBodies(db, results);
+        results = await hydrateBodies(db, results);
       }
 
-      // Hydrate attachment metadata for all results
-      const attachmentMetadata = hydrateAttachmentMetadata(db, run.results);
+      const attachmentMetadata = await hydrateAttachmentMetadata(db, run.results);
       results = results.map((r) => ({
         ...r,
         attachments: attachmentMetadata.get(r.messageId),
@@ -1092,7 +1090,7 @@ async function main() {
 
       const shouldOutputJson = !whoParsed.forceText;
 
-      const db = getDb();
+      const db = await getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
 
       const startTime = Date.now();
@@ -1195,11 +1193,11 @@ async function main() {
         throw new Error("Usage: zmail thread <thread_id> [--json] [--raw]");
       }
 
-      const db = getDb();
+      const db = await getDb();
       const normalizedThreadId = normalizeMessageId(threadId);
-      const messages = db
-        .prepare("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
-        .all(normalizedThreadId) as MessageRow[];
+      const messages = (await (
+        await db.prepare("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
+      ).all(normalizedThreadId)) as unknown as MessageRow[];
 
       if (messages.length === 0) {
         if (json) {
@@ -1242,11 +1240,11 @@ async function main() {
         process.exit(1);
       }
 
-      const db = getDb();
+      const db = await getDb();
       const messageId = normalizeMessageId(parsed.id);
-      const message = db
-        .prepare("SELECT * FROM messages WHERE message_id = ?")
-        .get(messageId) as MessageRow | undefined;
+      const message = (await (await db.prepare("SELECT * FROM messages WHERE message_id = ?")).get(messageId)) as
+        | MessageRow
+        | undefined;
       if (!message) {
         console.error(`Message not found: ${messageId}`);
         process.exit(1);
@@ -1277,10 +1275,10 @@ async function main() {
       // New-mail preview: up to 10 summaries (headers + snippet), noise excluded unless --include-noise
       let newMail: Array<{ messageId: string; date: string; fromAddress: string; fromName: string | null; subject: string; snippet: string }> = [];
       if (syncResult.synced > 0 && syncResult.newMessageIds?.length) {
-        const db = getDb();
+        const db = await getDb();
         const placeholders = syncResult.newMessageIds.map(() => "?").join(",");
-        const rows = db
-          .prepare(
+        const rows = (await (
+          await db.prepare(
             /* sql */ `
             SELECT message_id AS messageId, from_address AS fromAddress, from_name AS fromName, subject, date,
               COALESCE(TRIM(SUBSTR(body_text, 1, 200)), '') || (CASE WHEN LENGTH(TRIM(body_text)) > 200 THEN '…' ELSE '' END) AS snippet,
@@ -1290,7 +1288,7 @@ async function main() {
             ORDER BY date DESC
           `
           )
-          .all(...syncResult.newMessageIds) as Array<{
+        ).all(...syncResult.newMessageIds)) as Array<{
           messageId: string;
           fromAddress: string;
           fromName: string | null;
@@ -1357,10 +1355,10 @@ async function main() {
       const showImapStatus = args.includes("--imap") || args.includes("--server");
       const outputJson = args.includes("--json");
       
-      const db = getDb();
-      
+      const db = await getDb();
+
       if (outputJson) {
-        const status = getStatus(db);
+        const status = await getStatus(db);
         const output: Record<string, unknown> = { ...status };
         const latestMailAgo = formatTimeAgo(status.dateRange?.latest ?? null);
         const lastSyncAgo = status.sync.isRunning ? null : formatTimeAgo(status.sync.lastSyncAt);
@@ -1378,7 +1376,7 @@ async function main() {
         
         console.log(JSON.stringify(output, null, 2));
       } else {
-        printStatus(db);
+        await printStatus(db);
 
         // Compare with server using STATUS (only if flag is provided)
         if (showImapStatus) {
@@ -1405,7 +1403,7 @@ async function main() {
           }
         } else {
           console.log("");
-          const syncStatus = getStatus(db);
+          const syncStatus = await getStatus(db);
           const TEN_MIN_MS = 10 * 60 * 1000; // 10 minutes
           const lastSyncAt = syncStatus.sync.lastSyncAt;
           const lastSyncMs = lastSyncAt
@@ -1425,19 +1423,19 @@ async function main() {
 
     case "stats": {
       const outputJson = args.includes("--json");
-      const db = getDb();
-      const total = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
-      const dateRange = db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages").get() as
-        | { earliest: string | null; latest: string | null }
-        | undefined;
-      const topSenders = db
-        .prepare(
+      const db = await getDb();
+      const total = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
+      const dateRange = (await (
+        await db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages")
+      ).get()) as { earliest: string | null; latest: string | null } | undefined;
+      const topSenders = (await (
+        await db.prepare(
           "SELECT from_address, COUNT(*) as count FROM messages GROUP BY from_address ORDER BY count DESC LIMIT 10"
         )
-        .all() as Array<{ from_address: string; count: number }>;
-      const folderBreakdown = db
-        .prepare("SELECT folder, COUNT(*) as count FROM messages GROUP BY folder ORDER BY count DESC")
-        .all() as Array<{ folder: string; count: number }>;
+      ).all()) as Array<{ from_address: string; count: number }>;
+      const folderBreakdown = (await (
+        await db.prepare("SELECT folder, COUNT(*) as count FROM messages GROUP BY folder ORDER BY count DESC")
+      ).all()) as Array<{ folder: string; count: number }>;
 
       if (outputJson) {
         console.log(
@@ -1497,13 +1495,10 @@ async function main() {
           process.exit(1);
         }
 
-        const db = getDb();
+        const db = await getDb();
         const messageId = normalizeMessageId(messageIdArg);
-        
-        // Check if message exists first
-        const messageExists = db
-          .prepare("SELECT 1 FROM messages WHERE message_id = ?")
-          .get(messageId);
+
+        const messageExists = await (await db.prepare("SELECT 1 FROM messages WHERE message_id = ?")).get(messageId);
         const shouldOutputJson = !args.includes("--text");
         if (!messageExists) {
           if (shouldOutputJson) {
@@ -1515,12 +1510,12 @@ async function main() {
           break;
         }
 
-        const attachments = db
-          .prepare(
+        const attachments = (await (
+          await db.prepare(
             `SELECT id, filename, mime_type, size, stored_path, extracted_text
              FROM attachments WHERE message_id = ? ORDER BY filename`
           )
-          .all(messageId) as Array<{
+        ).all(messageId)) as Array<{
           id: number;
           filename: string;
           mime_type: string;
@@ -1583,14 +1578,14 @@ async function main() {
           process.exit(1);
         }
 
-        const db = getDb();
+        const db = await getDb();
         const messageId = normalizeMessageId(messageIdArg);
-        const list = db
-          .prepare(
+        const list = (await (
+          await db.prepare(
             `SELECT id, message_id, filename, mime_type, size, stored_path
              FROM attachments WHERE message_id = ? ORDER BY filename`
           )
-          .all(messageId) as Array<{
+        ).all(messageId)) as Array<{
           id: number;
           message_id: string;
           filename: string;
@@ -1670,7 +1665,7 @@ async function main() {
 
       // Require OpenAI key
       try {
-        getDb(); // Ensure DB is accessible
+        await getDb();
         config.openai.apiKey; // This will throw if missing
       } catch (error) {
         if (error instanceof Error && error.message.includes("ZMAIL_OPENAI_API_KEY")) {
@@ -1681,7 +1676,7 @@ async function main() {
         throw error;
       }
 
-      const db = getDb();
+      const db = await getDb();
       const { runAsk } = await import("~/ask/agent");
       await runAsk(question, db, { stream: true, verbose });
       break;

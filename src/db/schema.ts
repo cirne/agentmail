@@ -1,7 +1,7 @@
 // SQL schema — all tables and FTS5 virtual tables
 
-/** Schema version — bump this integer whenever the schema changes. */
-export const SCHEMA_VERSION = 9;
+/** Schema version — bump this integer whenever the schema changes (or to force a maildir rebuild). */
+export const SCHEMA_VERSION = 11;
 
 export const SCHEMA = /* sql */ `
   CREATE TABLE IF NOT EXISTS messages (

@@ -6,8 +6,8 @@ import { search, searchWithMeta } from "./index";
 describe("search", () => {
   let db: SqliteDatabase;
 
-  beforeEach(() => {
-    db = createTestDb();
+  beforeEach(async () => {
+    db = await createTestDb();
   });
 
   it("returns empty array when no messages exist", async () => {
@@ -16,14 +16,14 @@ describe("search", () => {
   });
 
   it("finds a message by subject keyword", async () => {
-    insertTestMessage(db, { subject: "Invoice from Stripe" });
+    await insertTestMessage(db, { subject: "Invoice from Stripe" });
     const results = await search(db, { query: "Invoice" });
     expect(results.length).toBe(1);
     expect(results[0].subject).toBe("Invoice from Stripe");
   });
 
   it("finds a message by body keyword", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Meeting notes",
       bodyText: "We discussed the Q4 roadmap and budget allocation",
     });
@@ -32,15 +32,15 @@ describe("search", () => {
   });
 
   it("returns multiple matches ranked by relevance", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Contract renewal",
       bodyText: "Please review the attached contract for renewal",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Quick question",
       bodyText: "Can you check the contract?",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Unrelated email",
       bodyText: "Lunch plans for tomorrow",
     });
@@ -51,14 +51,14 @@ describe("search", () => {
 
   it("respects the limit option", async () => {
     for (let i = 0; i < 5; i++) {
-      insertTestMessage(db, { subject: `Report number ${i}`, bodyText: "report content" });
+      await insertTestMessage(db, { subject: `Report number ${i}`, bodyText: "report content" });
     }
     const results = await search(db, { query: "report", limit: 3 });
     expect(results.length).toBe(3);
   });
 
   it("returns expected fields on each result", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Hello from Alice",
       fromAddress: "alice@example.com",
       bodyText: "Just checking in",
@@ -78,23 +78,23 @@ describe("search", () => {
   });
 
   it("does not return messages that do not match", async () => {
-    insertTestMessage(db, { subject: "Cats are great", bodyText: "I love cats" });
+    await insertTestMessage(db, { subject: "Cats are great", bodyText: "I love cats" });
     const results = await search(db, { query: "dogs" });
     expect(results.length).toBe(0);
   });
 
   it("handles FTS special characters without throwing", async () => {
-    insertTestMessage(db, { subject: "Normal email" });
+    await insertTestMessage(db, { subject: "Normal email" });
     expect(async () => await search(db, { query: "hello world" })).not.toThrow();
   });
 
   it("filters by fromAddress", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Message from Alice",
       fromAddress: "alice@example.com",
       bodyText: "Hello",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Message from Bob",
       fromAddress: "bob@example.com",
       bodyText: "Hello",
@@ -106,12 +106,12 @@ describe("search", () => {
   });
 
   it("filters by afterDate", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Old message",
       date: "2024-01-01T00:00:00Z",
       bodyText: "test",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Recent message",
       date: "2024-12-01T00:00:00Z",
       bodyText: "test",
@@ -123,12 +123,12 @@ describe("search", () => {
   });
 
   it("filters by beforeDate", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Old message",
       date: "2024-01-01T00:00:00Z",
       bodyText: "test",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Recent message",
       date: "2024-12-01T00:00:00Z",
       bodyText: "test",
@@ -140,19 +140,19 @@ describe("search", () => {
   });
 
   it("combines multiple filters", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Match 1",
       fromAddress: "alice@example.com",
       date: "2024-06-15T00:00:00Z",
       bodyText: "contract discussion",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Match 2",
       fromAddress: "alice@example.com",
       date: "2024-01-15T00:00:00Z",
       bodyText: "contract discussion",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "No match",
       fromAddress: "bob@example.com",
       date: "2024-06-15T00:00:00Z",
@@ -169,12 +169,12 @@ describe("search", () => {
   });
 
   it("filter-only search returns results sorted by date", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Older",
       fromAddress: "alice@example.com",
       date: "2024-01-01T00:00:00Z",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "Newer",
       fromAddress: "alice@example.com",
       date: "2024-12-01T00:00:00Z",
@@ -186,7 +186,7 @@ describe("search", () => {
   });
 
   it("uses FTS search", async () => {
-    insertTestMessage(db, { subject: "Invoice from Stripe" });
+    await insertTestMessage(db, { subject: "Invoice from Stripe" });
     const run = await searchWithMeta(db, { query: "Invoice" });
     expect(run.timings.ftsMs).toBeDefined();
     expect(run.results.length).toBeGreaterThanOrEqual(1);
@@ -194,12 +194,12 @@ describe("search", () => {
 
   describe("inline query operators", () => {
     it("parses from: operator in query string", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Message from Alice",
         fromAddress: "alice@example.com",
         bodyText: "Hello",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Message from Bob",
         fromAddress: "bob@example.com",
         bodyText: "Hello",
@@ -211,11 +211,11 @@ describe("search", () => {
     });
 
     it("parses subject: operator in query string", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Invoice from Stripe",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Meeting notes",
         bodyText: "test",
       });
@@ -231,12 +231,12 @@ describe("search", () => {
       const oldDate = new Date();
       oldDate.setDate(oldDate.getDate() - 10); // 10 days ago
 
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Recent",
         date: recentDate.toISOString(),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Old",
         date: oldDate.toISOString(),
         bodyText: "test",
@@ -248,12 +248,12 @@ describe("search", () => {
     });
 
     it("parses before: operator with ISO date", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Old message",
         date: "2024-01-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Recent message",
         date: "2024-12-01T00:00:00Z",
         bodyText: "test",
@@ -265,19 +265,19 @@ describe("search", () => {
     });
 
     it("parses multiple operators together", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Match",
         fromAddress: "alice@example.com",
         date: "2024-06-15T00:00:00Z",
         bodyText: "contract discussion",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "No match - wrong sender",
         fromAddress: "bob@example.com",
         date: "2024-06-15T00:00:00Z",
         bodyText: "contract discussion",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "No match - too old",
         fromAddress: "alice@example.com",
         date: "2024-01-15T00:00:00Z",
@@ -292,9 +292,9 @@ describe("search", () => {
     });
 
     it("normalizes OR/AND to uppercase", async () => {
-      insertTestMessage(db, { subject: "Invoice", bodyText: "invoice content" });
-      insertTestMessage(db, { subject: "Receipt", bodyText: "receipt content" });
-      insertTestMessage(db, { subject: "Other", bodyText: "other content" });
+      await insertTestMessage(db, { subject: "Invoice", bodyText: "invoice content" });
+      await insertTestMessage(db, { subject: "Receipt", bodyText: "receipt content" });
+      await insertTestMessage(db, { subject: "Other", bodyText: "other content" });
 
       // Should work with lowercase 'or' (gets normalized)
       const results = await search(db, { query: "invoice or receipt" });
@@ -302,12 +302,12 @@ describe("search", () => {
     });
 
   it("handles to: operator", async () => {
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "To Bob",
       toAddresses: JSON.stringify(["bob@example.com"]),
       bodyText: "test",
     });
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       subject: "To Alice",
       toAddresses: JSON.stringify(["alice@example.com"]),
       bodyText: "test",
@@ -320,17 +320,17 @@ describe("search", () => {
 
   describe("OR/AND filter logic", () => {
     it("handles OR between filters (from:marcio OR to:marcio)", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Marcio",
         fromAddress: "marcio@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "To Marcio",
         toAddresses: JSON.stringify(["marcio@example.com"]),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Unrelated",
         fromAddress: "other@example.com",
         toAddresses: JSON.stringify(["other@example.com"]),
@@ -344,22 +344,22 @@ describe("search", () => {
     });
 
     it("handles OR with three filters (from:alice OR to:bob OR subject:meeting)", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Alice",
         fromAddress: "alice@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "To Bob",
         toAddresses: JSON.stringify(["bob@example.com"]),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Meeting notes",
         fromAddress: "other@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Unrelated",
         fromAddress: "other@example.com",
         bodyText: "test",
@@ -372,19 +372,19 @@ describe("search", () => {
     });
 
     it("handles AND between filters (from:alice AND to:bob)", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Match",
         fromAddress: "alice@example.com",
         toAddresses: JSON.stringify(["bob@example.com"]),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "No match - wrong to",
         fromAddress: "alice@example.com",
         toAddresses: JSON.stringify(["charlie@example.com"]),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "No match - wrong from",
         fromAddress: "charlie@example.com",
         toAddresses: JSON.stringify(["bob@example.com"]),
@@ -397,19 +397,19 @@ describe("search", () => {
     });
 
     it("handles OR with date filters (from:alice OR after:2024-06-01)", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Alice",
         fromAddress: "alice@example.com",
         date: "2024-01-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Recent",
         fromAddress: "other@example.com",
         date: "2024-12-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Old",
         fromAddress: "other@example.com",
         date: "2024-01-01T00:00:00Z",
@@ -423,15 +423,15 @@ describe("search", () => {
     });
 
     it("handles subject filter with text query (subject:invoice receipt)", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Invoice #123",
         bodyText: "receipt",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Payment confirmation",
         bodyText: "receipt attached",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Invoice #456",
         bodyText: "no receipt",
       });
@@ -444,21 +444,21 @@ describe("search", () => {
     });
 
     it("handles mixed OR/AND in complex query", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Match 1",
         fromAddress: "alice@example.com",
         toAddresses: JSON.stringify(["bob@example.com"]),
         date: "2024-12-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Match 2",
         fromAddress: "charlie@example.com",
         toAddresses: JSON.stringify(["bob@example.com"]),
         date: "2024-12-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "No match - old date",
         fromAddress: "alice@example.com",
         toAddresses: JSON.stringify(["bob@example.com"]),
@@ -474,12 +474,12 @@ describe("search", () => {
     });
 
     it("handles OR with quoted subject values", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Meeting notes",
         fromAddress: "alice@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Other",
         bodyText: "test",
       });
@@ -491,11 +491,11 @@ describe("search", () => {
     });
 
     it("handles single filter with OR text (should not use filter OR logic)", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Invoice",
         bodyText: "invoice OR receipt",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Receipt",
         bodyText: "invoice OR receipt",
       });
@@ -507,12 +507,12 @@ describe("search", () => {
     });
 
     it("handles empty query with OR between filters", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Alice",
         fromAddress: "alice@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "To Bob",
         toAddresses: JSON.stringify(["bob@example.com"]),
         bodyText: "test",
@@ -523,12 +523,12 @@ describe("search", () => {
     });
 
     it("handles case-insensitive OR/AND", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Alice",
         fromAddress: "alice@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "To Bob",
         toAddresses: JSON.stringify(["bob@example.com"]),
         bodyText: "test",
@@ -542,12 +542,12 @@ describe("search", () => {
     });
 
     it("handles OR with partial matches in addresses", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Marcio",
         fromAddress: "marcio.silva@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "To Marcio",
         toAddresses: JSON.stringify(["marcio@company.com"]),
         bodyText: "test",
@@ -559,19 +559,19 @@ describe("search", () => {
     });
 
     it("handles AND with date range filters", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Match",
         fromAddress: "alice@example.com",
         date: "2024-06-15T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "No match - wrong date",
         fromAddress: "alice@example.com",
         date: "2024-01-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "No match - wrong sender",
         fromAddress: "bob@example.com",
         date: "2024-06-15T00:00:00Z",
@@ -584,19 +584,19 @@ describe("search", () => {
     });
 
     it("handles OR with before date filter", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Old from Alice",
         fromAddress: "alice@example.com",
         date: "2024-01-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Recent from Alice",
         fromAddress: "alice@example.com",
         date: "2024-12-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Old other",
         fromAddress: "other@example.com",
         date: "2024-01-01T00:00:00Z",
@@ -613,22 +613,22 @@ describe("search", () => {
     });
 
     it("handles multiple ORs with mixed filter types", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Alice",
         fromAddress: "alice@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Meeting notes",
         fromAddress: "other@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "To Bob",
         toAddresses: JSON.stringify(["bob@example.com"]),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Recent",
         fromAddress: "other@example.com",
         date: "2024-12-01T00:00:00Z",
@@ -641,18 +641,18 @@ describe("search", () => {
     });
 
     it("handles OR with CC addresses", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Alice",
         fromAddress: "alice@example.com",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "CC to Bob",
         fromAddress: "other@example.com",
         ccAddresses: JSON.stringify(["bob@example.com"]),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Unrelated",
         fromAddress: "other@example.com",
         bodyText: "test",
@@ -665,19 +665,19 @@ describe("search", () => {
     });
 
     it("handles AND with multiple date filters", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Match",
         fromAddress: "alice@example.com",
         date: "2024-06-15T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Too old",
         fromAddress: "alice@example.com",
         date: "2024-01-01T00:00:00Z",
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Too new",
         fromAddress: "alice@example.com",
         date: "2024-12-01T00:00:00Z",
@@ -696,19 +696,19 @@ describe("search", () => {
       const oldDate = new Date();
       oldDate.setDate(oldDate.getDate() - 10);
 
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Recent from Alice",
         fromAddress: "alice@example.com",
         date: recentDate.toISOString(),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Old from Bob",
         fromAddress: "bob@example.com",
         date: oldDate.toISOString(),
         bodyText: "test",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Old from Alice",
         fromAddress: "alice@example.com",
         date: oldDate.toISOString(),
@@ -723,17 +723,17 @@ describe("search", () => {
     });
 
     it("handles filters with text query (not filter-only)", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Invoice from Alice",
         fromAddress: "alice@example.com",
         bodyText: "invoice content",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Receipt from Alice",
         fromAddress: "alice@example.com",
         bodyText: "receipt content",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Invoice from Bob",
         fromAddress: "bob@example.com",
         bodyText: "invoice content",
@@ -749,7 +749,7 @@ describe("search", () => {
     });
 
     it("handles empty result set with OR filters", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Unrelated",
         fromAddress: "other@example.com",
         bodyText: "test",

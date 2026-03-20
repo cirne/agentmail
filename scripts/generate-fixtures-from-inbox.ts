@@ -4,7 +4,7 @@
  * Anonymizes personal information while preserving email patterns.
  */
 
-import { getDb } from "~/db";
+import { closeDb, getDb } from "~/db";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stringify } from "yaml";
@@ -148,11 +148,11 @@ function calculateRelativeDate(dateStr: string): string {
   return `-${diffDays}d`;
 }
 
-function main() {
-  const db = getDb();
-  
-  // Sample ~500 messages, prioritizing recent and diverse senders
-  const messages = db.prepare(`
+async function main() {
+  const db = await getDb();
+
+  const messages = (await (
+    await db.prepare(`
     SELECT 
       message_id,
       subject,
@@ -166,7 +166,8 @@ function main() {
     FROM messages
     ORDER BY date DESC
     LIMIT 500
-  `).all() as MessageRow[];
+  `)
+  ).all()) as MessageRow[];
   
   console.log(`Found ${messages.length} messages`);
   
@@ -252,6 +253,11 @@ function main() {
   
   console.log(`\nGenerated ${fixtures.length} fixtures in realistic-inbox.yaml`);
   console.log(`Output: ${join(outputDir, "realistic-inbox.yaml")}`);
+
+  await closeDb();
 }
 
-main();
+main().catch((err) => {
+  console.error(err);
+  process.exit(1);
+});

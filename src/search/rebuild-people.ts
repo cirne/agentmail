@@ -4,18 +4,13 @@ import { extractSignatureData } from "./signature";
 
 /**
  * Rebuild the people table from messages.
- * Clusters identities, extracts signatures, and upserts into people table.
  */
-export function rebuildPeople(db: SqliteDatabase): void {
-  // Clear existing people table
-  db.exec("DELETE FROM people");
+export async function rebuildPeople(db: SqliteDatabase): Promise<void> {
+  await db.exec("DELETE FROM people");
 
-  // Cluster identities
-  const clusters = clusterIdentities(db);
+  const clusters = await clusterIdentities(db);
 
-  // For each cluster, extract signature data and upsert into people table
   for (const [, cluster] of clusters.entries()) {
-    // Determine primary address (most used)
     let primaryAddress = cluster.addresses[0];
     let maxUsage = 0;
     for (const identity of cluster.identities) {
@@ -26,14 +21,10 @@ export function rebuildPeople(db: SqliteDatabase): void {
       }
     }
 
-    // Get canonical name (most common display name, or first one)
     const displayNameArray = Array.from(cluster.displayNames);
     const canonicalName = displayNameArray.length > 0 ? displayNameArray[0] : null;
-
-    // Get all display names for aka field
     const aka = displayNameArray.filter((name) => name !== canonicalName);
 
-    // Aggregate counts
     let totalSent = 0;
     let totalReceived = 0;
     let totalMentioned = 0;
@@ -48,7 +39,6 @@ export function rebuildPeople(db: SqliteDatabase): void {
       }
     }
 
-    // Extract signature data from most recent email per address
     let phone: string | null = null;
     let title: string | null = null;
     let company: string | null = null;
@@ -56,8 +46,8 @@ export function rebuildPeople(db: SqliteDatabase): void {
     const altEmails: string[] = [];
 
     for (const address of cluster.addresses) {
-      const recentMessage = db
-        .prepare(
+      const recentMessage = (await (
+        await db.prepare(
           /* sql */ `
         SELECT body_text, date
         FROM messages
@@ -66,7 +56,7 @@ export function rebuildPeople(db: SqliteDatabase): void {
         LIMIT 1
       `
         )
-        .get(address.toLowerCase()) as { body_text: string; date: string } | null;
+      ).get(address.toLowerCase())) as { body_text: string; date: string } | null;
 
       if (recentMessage) {
         const sigData = extractSignatureData(recentMessage.body_text, address);
@@ -84,9 +74,9 @@ export function rebuildPeople(db: SqliteDatabase): void {
       }
     }
 
-    // Upsert into people table
-    db.prepare(
-      /* sql */ `
+    await (
+      await db.prepare(
+        /* sql */ `
       INSERT INTO people (
         canonical_name, aka, primary_address, addresses,
         phone, title, company, urls,
@@ -94,6 +84,7 @@ export function rebuildPeople(db: SqliteDatabase): void {
         last_contact, is_noreply, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))
     `
+      )
     ).run(
       canonicalName,
       JSON.stringify(aka),
@@ -107,7 +98,7 @@ export function rebuildPeople(db: SqliteDatabase): void {
       totalReceived,
       totalMentioned,
       lastContact,
-      cluster.isNoreply ? 1 : 0,
+      cluster.isNoreply ? 1 : 0
     );
   }
 }

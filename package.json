@@ -3,6 +3,7 @@
   "version": "0.1.0-alpha.20260307.194325",
   "description": "Agent-first email system — sync, index, and search email for AI agents",
   "scripts": {
+    "postinstall": "node scripts/rebuild-better-sqlite.mjs",
     "dev": "tsx src/index.ts",
     "zmail": "tsx src/index.ts --",
     "sync": "tsx src/sync/index.ts",

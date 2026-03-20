@@ -16,15 +16,18 @@ function streamToText(stream: NodeJS.ReadableStream | null): Promise<string> {
 
 /**
  * BUG-009: Wizard Crash on Non-Interactive Stdin
- * 
+ *
  * When wizard runs with non-TTY stdin, it should:
  * 1. Detect non-TTY mode
  * 2. Exit with code 1 (not crash)
  * 3. Print a clear error message (not a stack trace)
- * 
+ *
  * This test reproduces the bug and serves as the exit criteria for the fix.
+ *
+ * @inquirer/prompts (via util.styleText) requires Node 20+; package engines match.
  */
-describe("BUG-009: Wizard with non-interactive stdin", () => {
+const nodeMajor = Number(process.versions.node.split(".")[0]);
+describe.skipIf(nodeMajor < 20)("BUG-009: Wizard with non-interactive stdin", () => {
   const originalZmailHome = process.env.ZMAIL_HOME;
   const testHome = join(tmpdir(), "zmail-wizard-test-" + Date.now());
   

@@ -23,14 +23,14 @@ function ensureUniqueFilename(dir: string, baseFilename: string): string {
   const sanitized = sanitizeFilename(baseFilename);
   let candidate = sanitized;
   let counter = 1;
-  
+
   while (existsSync(join(dir, candidate))) {
     const ext = candidate.includes(".") ? candidate.substring(candidate.lastIndexOf(".")) : "";
     const nameWithoutExt = ext ? candidate.substring(0, candidate.lastIndexOf(".")) : candidate;
     candidate = `${nameWithoutExt}_${counter}${ext}`;
     counter++;
   }
-  
+
   return candidate;
 }
 
@@ -58,42 +58,29 @@ function getMimeType(ext: string): string {
 
 /**
  * Insert a message and its associated thread row into the database.
- * 
- * Note: Currently, thread_id is set to message_id (single-message threads).
- * This is a temporary implementation until proper conversation threading is implemented.
- * 
- * @param db Database instance
- * @param parsed Parsed message data
- * @param mailbox Mailbox/folder name
- * @param uid UID from IMAP (or 0 for rebuild from EML)
- * @param labels JSON string of labels array (or "[]" for rebuild)
- * @param rawPath Relative path to raw email file in maildir
  */
-export function persistMessage(
+export async function persistMessage(
   db: SqliteDatabase,
   parsed: ParsedMessage,
   mailbox: string,
   uid: number,
   labels: string,
   rawPath: string
-): void {
-  // Currently, thread_id = message_id (single-message threads)
-  // TODO: Implement proper conversation threading based on In-Reply-To/References headers
+): Promise<void> {
   const threadId = parsed.messageId;
 
-  // Check labels for noise categories (Gmail native + Superhuman AI)
-  // Excludes: Gmail "Updates" (transactional), Superhuman "Respond"/"Meeting" (actionable)
   let labelIsNoise = false;
   try {
     const labelsArray = JSON.parse(labels) as string[];
     if (Array.isArray(labelsArray)) {
-      labelIsNoise = labelsArray.some(label => {
+      labelIsNoise = labelsArray.some((label) => {
         const lower = label.toLowerCase();
-        // Gmail native categories
-        if (["promotions", "\\promotions", "social", "\\social",
-             "forums", "\\forums", "spam", "\\spam",
-             "junk", "\\junk", "bulk"].includes(lower)) return true;
-        // Superhuman AI categories (noise subset)
+        if (
+          ["promotions", "\\promotions", "social", "\\social", "forums", "\\forums", "spam", "\\spam", "junk", "\\junk", "bulk"].includes(
+            lower
+          )
+        )
+          return true;
         if (lower.startsWith("[superhuman]/ai/")) {
           const category = lower.slice("[superhuman]/ai/".length);
           return ["marketing", "news", "social", "pitch"].includes(category);
@@ -102,18 +89,18 @@ export function persistMessage(
       });
     }
   } catch {
-    // Invalid JSON or not an array - ignore, use header-based detection only
+    // ignore
   }
 
-  // Final noise flag: header-based OR label-based
   const isNoise = parsed.isNoise || labelIsNoise ? 1 : 0;
 
-  // Insert message
-  db.prepare(
-    `INSERT INTO messages (
+  await (
+    await db.prepare(
+      `INSERT INTO messages (
       message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name,
       to_addresses, cc_addresses, subject, date, body_text, raw_path
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    )
   ).run(
     parsed.messageId,
     threadId,
@@ -128,33 +115,26 @@ export function persistMessage(
     parsed.subject,
     parsed.date,
     parsed.bodyText,
-    rawPath,
+    rawPath
   );
 
-  // Insert/update thread
-  // Note: participant_count and message_count are both 1 for single-message threads
-  // This will need to be updated when proper threading is implemented
-  db.prepare(
-    `INSERT OR REPLACE INTO threads (thread_id, subject, participant_count, message_count, last_message_at)
+  await (
+    await db.prepare(
+      `INSERT OR REPLACE INTO threads (thread_id, subject, participant_count, message_count, last_message_at)
      VALUES (?, ?, 1, 1, ?)`
+    )
   ).run(threadId, parsed.subject, parsed.date);
 }
 
 /**
  * Persist attachments from parsed message data (sync path).
- * Writes attachment files to disk and inserts records into database.
- * 
- * @param db Database instance
- * @param messageId Message ID
- * @param attachments Array of parsed attachments
- * @param maildirPath Base maildir path (defaults to config.maildirPath)
  */
-export function persistAttachmentsFromParsed(
+export async function persistAttachmentsFromParsed(
   db: SqliteDatabase,
   messageId: string,
   attachments: Array<{ filename: string; content: Buffer; mimeType: string; size: number }>,
   maildirPath?: string
-): void {
+): Promise<void> {
   if (attachments.length === 0) return;
 
   const basePath = maildirPath ?? config.maildirPath;
@@ -167,26 +147,23 @@ export function persistAttachmentsFromParsed(
     writeFileSync(attachmentPath, att.content, "binary");
 
     const storedPath = join("attachments", messageId, uniqueFilename);
-    db.prepare(
-      `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
+    await (
+      await db.prepare(
+        `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
        VALUES (?, ?, ?, ?, ?, NULL)`
+      )
     ).run(messageId, att.filename, att.mimeType, att.size, storedPath);
   }
 }
 
 /**
  * Persist attachments from existing files on disk (rebuild path).
- * Reads attachment files from disk and inserts records into database.
- * 
- * @param db Database instance
- * @param messageId Message ID
- * @param attachmentsBasePath Base path to attachments directory
  */
-export function persistAttachmentsFromDisk(
+export async function persistAttachmentsFromDisk(
   db: SqliteDatabase,
   messageId: string,
   attachmentsBasePath: string
-): void {
+): Promise<void> {
   const attachmentDir = join(attachmentsBasePath, messageId);
   try {
     const attachmentFiles = readdirSync(attachmentDir, { withFileTypes: true }).filter((f) => f.isFile());
@@ -195,16 +172,17 @@ export function persistAttachmentsFromDisk(
       const stats = statSync(attPath);
       const storedPath = join("attachments", messageId, attFile.name);
 
-      // Try to infer MIME type from extension (best effort)
       const ext = attFile.name.split(".").pop()?.toLowerCase() || "";
       const mimeType = getMimeType(ext);
 
-      db.prepare(
-        `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
+      await (
+        await db.prepare(
+          `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
          VALUES (?, ?, ?, ?, ?, NULL)`
+        )
       ).run(messageId, attFile.name, mimeType, stats.size, storedPath);
     }
   } catch {
-    // Attachment directory doesn't exist or can't be read — skip (attachments optional)
+    // Attachment directory doesn't exist or can't be read — skip
   }
 }

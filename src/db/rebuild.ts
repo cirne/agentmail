@@ -29,16 +29,12 @@ function extractUidFromFilename(filename: string): number | null {
 
 /**
  * Re-index all messages from maildir/cur/ into the database.
- * Assumes DB is fresh (just created with new schema).
- * Returns count of successfully parsed messages.
- * Uses the global logger (should be configured to file logger during rebuild).
  */
 export async function reindexFromMaildir(): Promise<{ parsed: number; failed: number }> {
-  const db = getDb();
+  const db = await getDb();
   const maildirCurPath = join(config.maildirPath, "cur");
   const attachmentsBasePath = join(config.maildirPath, "attachments");
 
-  // Determine folder/mailbox (same as sync)
   const mailbox = config.sync.mailbox || getSyncMailbox(config.imap.host);
 
   if (!existsSync(config.maildirPath)) {
@@ -72,8 +68,7 @@ export async function reindexFromMaildir(): Promise<{ parsed: number; failed: nu
       const raw = readFileSync(filePath);
       const parsedMsg = await parseRawMessage(raw);
 
-      // Check for duplicate (shouldn't happen in fresh DB, but be safe)
-      const existing = db.prepare("SELECT 1 FROM messages WHERE message_id = ?").get(parsedMsg.messageId);
+      const existing = await (await db.prepare("SELECT 1 FROM messages WHERE message_id = ?")).get(parsedMsg.messageId);
       if (existing) {
         logger.debug("Skipping duplicate message", { messageId: parsedMsg.messageId });
         continue;
@@ -81,19 +76,15 @@ export async function reindexFromMaildir(): Promise<{ parsed: number; failed: nu
 
       const relPath = join("cur", filename);
 
-      // Read sidecar metadata (labels, etc.) if available
       const meta = readMessageMeta(filePath);
       const labelsJson = meta.labels?.length ? JSON.stringify(meta.labels) : "[]";
 
-      // Persist message and thread using shared helper
-      persistMessage(db, parsedMsg, mailbox, uid, labelsJson, relPath);
+      await persistMessage(db, parsedMsg, mailbox, uid, labelsJson, relPath);
 
-      // Persist attachments: prefer parsed attachments (from EML), fallback to disk (if already synced)
       if (parsedMsg.attachments.length > 0) {
-        persistAttachmentsFromParsed(db, parsedMsg.messageId, parsedMsg.attachments);
+        await persistAttachmentsFromParsed(db, parsedMsg.messageId, parsedMsg.attachments);
       } else {
-        // Fallback: check if attachments were already written to disk from a previous sync
-        persistAttachmentsFromDisk(db, parsedMsg.messageId, attachmentsBasePath);
+        await persistAttachmentsFromDisk(db, parsedMsg.messageId, attachmentsBasePath);
       }
 
       parsed++;
@@ -108,13 +99,14 @@ export async function reindexFromMaildir(): Promise<{ parsed: number; failed: nu
     }
   }
 
-  // Update sync_summary totals
-  db.prepare(
-    `UPDATE sync_summary SET
+  await (
+    await db.prepare(
+      `UPDATE sync_summary SET
       earliest_synced_date = COALESCE(?, earliest_synced_date),
       latest_synced_date = COALESCE(?, latest_synced_date),
       total_messages = (SELECT COUNT(*) FROM messages)
      WHERE id = 1`
+    )
   ).run(earliestDate, latestDate);
 
   logger.info("Reindex complete", { parsed, failed, mailbox });

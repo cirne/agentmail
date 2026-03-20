@@ -261,15 +261,14 @@ export async function extractAndCache(
   const outputExt = getOutputExtension(mimeType, filename);
   const convertedPath = rawPath + outputExt; // For reference only, not written yet
 
-  const db = getDb();
+  const db = await getDb();
   const useCache = config.attachments.cacheExtractedText && !skipCache;
   if (skipCache) {
-    db.prepare("UPDATE attachments SET extracted_text = NULL WHERE id = ?").run(attachmentId);
+    await (await db.prepare("UPDATE attachments SET extracted_text = NULL WHERE id = ?")).run(attachmentId);
   } else if (useCache) {
-    // Use cached extracted text only when config enables it
-    const existing = db.prepare("SELECT extracted_text FROM attachments WHERE id = ?").get(attachmentId) as
-      | { extracted_text: string | null }
-      | undefined;
+    const existing = (await (await db.prepare("SELECT extracted_text FROM attachments WHERE id = ?")).get(
+      attachmentId
+    )) as { extracted_text: string | null } | undefined;
     if (existing && existing.extracted_text) {
       return { text: existing.extracted_text, convertedPath };
     }
@@ -282,7 +281,7 @@ export async function extractAndCache(
     const sizeMB = (existsSync(rawPath) ? readFileSync(rawPath).length : 0) / (1024 * 1024);
     const stubText = `[Binary attachment: ${filename}, ${sizeMB.toFixed(2)} MB — no text extraction available]`;
     // Update DB with stub
-    db.prepare("UPDATE attachments SET extracted_text = ? WHERE id = ?").run(stubText, attachmentId);
+    await (await db.prepare("UPDATE attachments SET extracted_text = ? WHERE id = ?")).run(stubText, attachmentId);
     return { text: stubText, convertedPath };
   }
 
@@ -291,7 +290,7 @@ export async function extractAndCache(
   const extracted = await extractor.extract(rawBuffer, filename);
 
   // Update DB (but don't write sibling file yet - pending accuracy validation)
-  db.prepare("UPDATE attachments SET extracted_text = ? WHERE id = ?").run(extracted.text, attachmentId);
+  await (await db.prepare("UPDATE attachments SET extracted_text = ? WHERE id = ?")).run(extracted.text, attachmentId);
 
   return { text: extracted.text, convertedPath };
 }

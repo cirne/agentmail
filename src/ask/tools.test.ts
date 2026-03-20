@@ -6,13 +6,13 @@ import { executeNanoTool } from "./tools";
 describe("executeNanoTool", () => {
   let db: SqliteDatabase;
 
-  beforeEach(() => {
-    db = createTestDb();
+  beforeEach(async () => {
+    db = await createTestDb();
   });
 
   describe("search tool", () => {
     it("returns metadata-only results without bodyPreview", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Test invoice",
         bodyText: "This is a test invoice body with lots of content",
         fromAddress: "billing@example.com",
@@ -33,8 +33,8 @@ describe("executeNanoTool", () => {
     });
 
     it("includes rank for relevance filtering", async () => {
-      insertTestMessage(db, { subject: "Invoice 1", bodyText: "invoice content" });
-      insertTestMessage(db, { subject: "Invoice 2", bodyText: "invoice content" });
+      await insertTestMessage(db, { subject: "Invoice 1", bodyText: "invoice content" });
+      await insertTestMessage(db, { subject: "Invoice 2", bodyText: "invoice content" });
 
       const result = await executeNanoTool(db, "search", {
         query: "invoice",
@@ -52,7 +52,7 @@ describe("executeNanoTool", () => {
       const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
       const isoDate = thirtyDaysAgo.toISOString().slice(0, 10);
 
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Recent email",
         date: isoDate,
         bodyText: "content",
@@ -70,7 +70,7 @@ describe("executeNanoTool", () => {
     });
 
     it("leaves ISO dates unchanged", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "Dated email",
         date: "2026-01-15T00:00:00Z",
         bodyText: "content",
@@ -102,7 +102,7 @@ describe("executeNanoTool", () => {
     it("adds hint when totalMatched > limit", async () => {
       // Create more messages than limit
       for (let i = 0; i < 15; i++) {
-        insertTestMessage(db, {
+        await insertTestMessage(db, {
           subject: `Invoice ${i}`,
           bodyText: "invoice content",
         });
@@ -124,7 +124,7 @@ describe("executeNanoTool", () => {
     it("detects low diversity and adds hint", async () => {
       // Create many messages from same sender
       for (let i = 0; i < 10; i++) {
-        insertTestMessage(db, {
+        await insertTestMessage(db, {
           subject: `Message ${i}`,
           fromAddress: "same@example.com",
           bodyText: "content",
@@ -151,7 +151,7 @@ describe("executeNanoTool", () => {
       // Create diverse results
       const senders = ["alice@example.com", "bob@example.com", "charlie@example.com"];
       for (let i = 0; i < 25; i++) {
-        insertTestMessage(db, {
+        await insertTestMessage(db, {
           subject: `Message ${i}`,
           fromAddress: senders[i % senders.length],
           bodyText: "content",
@@ -175,7 +175,7 @@ describe("executeNanoTool", () => {
 
     it("respects limit parameter", async () => {
       for (let i = 0; i < 10; i++) {
-        insertTestMessage(db, {
+        await insertTestMessage(db, {
           subject: `Test ${i}`,
           bodyText: "test content",
         });
@@ -191,12 +191,12 @@ describe("executeNanoTool", () => {
     });
 
     it("filters by fromAddress", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Alice",
         fromAddress: "alice@example.com",
         bodyText: "content",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         subject: "From Bob",
         fromAddress: "bob@example.com",
         bodyText: "content",
@@ -217,13 +217,13 @@ describe("executeNanoTool", () => {
 
     it("includes threads when includeThreads is true", async () => {
       const threadId = "<thread-123>";
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         messageId: "<msg1@example.com>",
         threadId,
         subject: "Thread subject",
         bodyText: "content",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         messageId: "<msg2@example.com>",
         threadId,
         subject: "Thread subject",
@@ -247,14 +247,14 @@ describe("executeNanoTool", () => {
   describe("get_thread_headers tool", () => {
     it("returns thread headers", async () => {
       const threadId = "<thread-123>";
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         messageId: "<msg1@example.com>",
         threadId,
         subject: "Thread subject",
         fromAddress: "alice@example.com",
         date: "2026-01-01T10:00:00Z",
       });
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         messageId: "<msg2@example.com>",
         threadId,
         subject: "Thread subject",
@@ -287,7 +287,7 @@ describe("executeNanoTool", () => {
 
     it("normalizes thread ID", async () => {
       const threadId = "thread-123"; // Without angle brackets
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         messageId: "<msg1@example.com>",
         threadId: `<${threadId}>`,
         subject: "Test",

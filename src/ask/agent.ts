@@ -94,9 +94,9 @@ async function assembleContext(
     const messageIdsToFetch = messageIds.slice(0, maxMessages);
     verboseLog(`[context assembler] fetching ${messageIdsToFetch.length} messages by ID\n`);
     const placeholders = messageIdsToFetch.map(() => "?").join(",");
-    const messages = db
-      .prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
-      .all(...messageIdsToFetch) as any[];
+    const messages = (await (
+      await db.prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
+    ).all(...messageIdsToFetch)) as any[];
 
     verboseLog(`[context assembler] found ${messages.length} messages in DB\n`);
     for (const msg of messages) {
@@ -113,9 +113,18 @@ async function assembleContext(
       const shouldProcessAttachments = specificAttachmentIds !== null || shouldIncludeAttachments(question);
       
       if (shouldProcessAttachments) {
-        const attachments = db
-          .prepare(`SELECT id, filename, mime_type, size, stored_path, extracted_text FROM attachments WHERE message_id = ? ORDER BY filename`)
-          .all(msg.message_id) as Array<{ id: number; filename: string; mime_type: string; size: number; stored_path: string; extracted_text: string | null }>;
+        const attachments = (await (
+          await db.prepare(
+            `SELECT id, filename, mime_type, size, stored_path, extracted_text FROM attachments WHERE message_id = ? ORDER BY filename`
+          )
+        ).all(msg.message_id)) as Array<{
+          id: number;
+          filename: string;
+          mime_type: string;
+          size: number;
+          stored_path: string;
+          extracted_text: string | null;
+        }>;
         
         if (attachments.length > 0) {
           const attachmentParts: string[] = [];

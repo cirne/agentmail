@@ -75,7 +75,7 @@ interface EvalFixture {
  * Loads all *.yaml files from tests/ask/ directory and merges their messages.
  * Resolves relative dates and handles attachment insertion.
  */
-export function loadEvalFixtures(db: SqliteDatabase): void {
+export async function loadEvalFixtures(db: SqliteDatabase): Promise<void> {
   // Load all YAML files from tests/ask/ directory
   const fixturesDir = join(process.cwd(), "tests/ask");
   const yamlFiles = readdirSync(fixturesDir)
@@ -109,7 +109,7 @@ export function loadEvalFixtures(db: SqliteDatabase): void {
     messageCounter++;
     
     // Insert message using test helper
-    insertTestMessage(db, {
+    await insertTestMessage(db, {
       messageId,
       subject: msg.subject,
       fromAddress: msg.fromAddress,
@@ -137,9 +137,7 @@ export function loadEvalFixtures(db: SqliteDatabase): void {
       }
       
       values.push(messageId);
-      db.prepare(
-        `UPDATE messages SET ${updates.join(", ")} WHERE message_id = ?`
-      ).run(...values);
+      await (await db.prepare(`UPDATE messages SET ${updates.join(", ")} WHERE message_id = ?`)).run(...values);
     }
 
     // Insert attachments if present
@@ -164,15 +162,17 @@ export function loadEvalFixtures(db: SqliteDatabase): void {
         }
 
         // Insert attachment row
-        db.prepare(
-          `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
+        await (
+          await db.prepare(
+            `INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
            VALUES (?, ?, ?, ?, ?, NULL)`
+          )
         ).run(
           messageId,
           att.filename,
           att.mimeType,
           content.length,
-          `tests/fixtures/${att.filename}`, // Stored path (not used in tests, but required by schema)
+          `tests/fixtures/${att.filename}`
         );
       }
     }

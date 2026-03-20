@@ -123,7 +123,7 @@ Both modes hit the same SQLite index. The binary is the same artifact.
 | Layer | Phase 1 + 2 | Phase 3 (hosted SaaS, if ever) |
 |---|---|---|
 | Raw email files | Maildir on persistent volume | S3 / DO Spaces |
-| Structured metadata + FTS | SQLite via `better-sqlite3` | Postgres |
+| Structured metadata + FTS | File-backed SQLite via `better-sqlite3` (async app-level facade; ADR-023) | Postgres |
 | Semantic / vector search | (deferred) LanceDB on volume | LanceDB → S3 |
 
 **SQLite schema (Phase 1):**
@@ -159,7 +159,7 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 **Rationale:**
 - Node.js is ubiquitous; no separate runtime (Bun) required. Aligns with OpenClaw/Claude Code (`npm i -g`).
-- **better-sqlite3** for SQLite — stable, no binary bundling issues (e.g. PDF extraction in compiled binary; see BUG-001).
+- **better-sqlite3** for SQLite — synchronous native binding, **true file-backed** SQLite (suitable for very large `.db` files; RSS bounded by OS cache, not file size). Packaged with **`postinstall` → `npm rebuild better-sqlite3`** so the addon matches the installing Node’s `NODE_MODULE_VERSION` (ADR-023).
 - `tsx` gives first-class TypeScript in development without a build step.
 - Strong ecosystem for IMAP (`imapflow`) and MCP SDK.
 
@@ -518,6 +518,22 @@ The override flag is `--text` (not `--table`) because several text-format comman
 Agents today parse the text output of `status` without difficulty. Text stays the default. `--json` is added as an opt-in for automated status checks (e.g. "is sync done?" polling).
 
 **Rationale:** zmail is agent-first (ADR-005). The primary consumers are agents (Claude Code, Cursor, etc.) running CLI commands as subprocesses. Agents need structured output for search results and lists they'll iterate or pass downstream — JSON is correct there. For content retrieval (`read`, `thread`, `attachment read`) and progress reporting (`sync`, `refresh`, `status`), text is not a barrier to agent use and avoids JSON encoding overhead on large content.
+
+---
+
+### ADR-023: SQLite Access — File-Backed Native + Async Facade + Install-Time Rebuild
+
+**Decision:** Keep **file-backed** SQLite using **`better-sqlite3`** (native addon). Do **not** use an in-process model that loads the entire database file into JS/WASM heap for production (e.g. sql.js `readFile` → `Database(uint8)` / `export()` persistence), which would make RSS scale with DB size — unacceptable for very large mailstores.
+
+**Application API:** Expose a narrow **`SqliteDatabase`** interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by a small adapter around `better-sqlite3`. All CLI, sync, search, MCP, and ask code paths **`await`** DB operations so the surface is consistently async even though the underlying driver is synchronous.
+
+**Packaging / ABI:** `package.json` **`postinstall`** runs **`npm rebuild better-sqlite3`** for the **current** Node when `node_modules` is present. That aligns the prebuilt or freshly compiled `.node` with the runtime’s **`NODE_MODULE_VERSION`**, reducing `ERR_DLOPEN_FAILED` after **`npm install -g`** when install-time Node ≠ runtime Node. Documented fallback: run **`npm rebuild better-sqlite3`** with the same `node` that runs `zmail`.
+
+**Schema changes:** Unchanged philosophy (ADR-021): bump **`SCHEMA_VERSION`**, delete stale DB files, **rebuild from maildir** — no row-level migration from old DB files when the driver or schema changes.
+
+**Deferred:** WASM SQLite with a custom file VFS for Node remains an alternative if native rebuild stops being sufficient; FTS5 and file-backed behavior would need to be re-validated before switching.
+
+**See also:** [OPP-024](opportunities/archive/OPP-024-sqlite-node-abi-mitigation.md) — opportunity log for the ABI / global-install mitigation.
 
 ---
 

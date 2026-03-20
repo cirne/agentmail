@@ -55,7 +55,7 @@ function readRawEmail(rawPath: string): Buffer | null {
  *
  * @param message Message row from database
  * @param raw If true, include raw EML content instead of parsed markdown
- * @param db Optional database instance (defaults to getDb() for production use)
+ * @param db Optional database instance (defaults to `await getDb()` when omitted)
  * @returns Shaped message object ready for formatting or JSON output
  */
 export async function formatMessageForOutput(
@@ -63,13 +63,13 @@ export async function formatMessageForOutput(
   raw: boolean,
   db?: SqliteDatabase
 ): Promise<Record<string, unknown> & ShapedContent> {
-  const database = db ?? getDb();
-  const attachments = database
-    .prepare(
+  const database = db ?? (await getDb());
+  const attachments = (await (
+    await database.prepare(
       `SELECT id, filename, mime_type, size, stored_path, extracted_text
        FROM attachments WHERE message_id = ? ORDER BY filename`
     )
-    .all(message.message_id) as Array<{
+  ).all(message.message_id)) as Array<{
     id: number;
     filename: string;
     mime_type: string;

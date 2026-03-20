@@ -87,7 +87,7 @@ export function createMcpServer() {
       includeNoise: z.boolean().optional().describe("When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false."),
     },
     async ({ query, limit, offset, fromAddress, afterDate, beforeDate, includeThreads, includeNoise }) => {
-      const db = getDb();
+      const db = await getDb();
       const result = await searchWithMeta(db, {
         query,
         limit,
@@ -115,14 +115,14 @@ export function createMcpServer() {
       messageId: z.string().describe("Message ID (from search_mail results) to list attachments for"),
     },
     async ({ messageId }) => {
-      const db = getDb();
+      const db = await getDb();
       const normalizedId = normalizeMessageId(messageId);
-      const attachments = db
-        .prepare(
+      const attachments = (await (
+        await db.prepare(
           `SELECT id, filename, mime_type, size, stored_path, extracted_text
            FROM attachments WHERE message_id = ? ORDER BY filename`
         )
-        .all(normalizedId) as Array<{
+      ).all(normalizedId)) as Array<{
         id: number;
         filename: string;
         mime_type: string;
@@ -159,10 +159,10 @@ export function createMcpServer() {
       attachmentId: z.number().describe("Attachment ID (from list_attachments results) to read and extract"),
     },
     async ({ attachmentId }) => {
-      const db = getDb();
-      const attachment = db
-        .prepare("SELECT id, message_id, filename, mime_type, size, stored_path FROM attachments WHERE id = ?")
-        .get(attachmentId) as
+      const db = await getDb();
+      const attachment = (await (
+        await db.prepare("SELECT id, message_id, filename, mime_type, size, stored_path FROM attachments WHERE id = ?")
+      ).get(attachmentId)) as
         | {
             id: number;
             message_id: string;
@@ -222,13 +222,13 @@ export function createMcpServer() {
       maxBodyChars: z.number().optional().describe("When detail is 'full': max body chars (default 2000). Same as get_messages. Ignored for 'summary' or 'raw'."),
     },
     async ({ messageId, raw = false, detail, maxBodyChars = DEFAULT_MAX_BODY_CHARS }) => {
-      const db = getDb();
+      const db = await getDb();
       const { formatMessageForOutput } = await import("~/messages/presenter");
 
       const normalizedId = normalizeMessageId(messageId);
-      const message = db
-        .prepare("SELECT * FROM messages WHERE message_id = ?")
-        .get(normalizedId) as any | undefined;
+      const message = (await (await db.prepare("SELECT * FROM messages WHERE message_id = ?")).get(normalizedId)) as
+        | any
+        | undefined;
 
       if (!message) {
         return {
@@ -260,7 +260,7 @@ export function createMcpServer() {
       maxBodyChars: z.number().optional().describe("When detail is 'full': max body chars per message (default 2000). Use 300-500 for quick confirmation; 4000+ for full email. Ignored when detail is 'summary' or 'raw'."),
     },
     async ({ messageIds, detail, raw = false, maxBodyChars = DEFAULT_MAX_BODY_CHARS }) => {
-      const db = getDb();
+      const db = await getDb();
       const { formatMessageForOutput } = await import("~/messages/presenter");
       const useRaw = raw || detail === "raw";
 
@@ -268,9 +268,9 @@ export function createMcpServer() {
       const normalizedIds = cappedIds.map((id) => normalizeMessageId(id));
 
       const placeholders = normalizedIds.map(() => "?").join(",");
-      const messages = db
-        .prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
-        .all(...normalizedIds) as any[];
+      const messages = (await (
+        await db.prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
+      ).all(...normalizedIds)) as any[];
 
       if (messages.length === 0) {
         return {
@@ -299,13 +299,13 @@ export function createMcpServer() {
       raw: z.boolean().optional().describe("If true, return raw EML format for each message instead of parsed/formatted content (default: false)"),
     },
     async ({ threadId, raw = false }) => {
-      const db = getDb();
+      const db = await getDb();
       const { formatMessageForOutput } = await import("~/messages/presenter");
-      
+
       const normalizedThreadId = normalizeMessageId(threadId);
-      const messages = db
-        .prepare("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
-        .all(normalizedThreadId) as any[];
+      const messages = (await (
+        await db.prepare("SELECT * FROM messages WHERE thread_id = ? ORDER BY date ASC")
+      ).all(normalizedThreadId)) as any[];
       
       if (messages.length === 0) {
         return {
@@ -344,7 +344,7 @@ export function createMcpServer() {
       enrich: z.boolean().optional().describe("Use LLM (GPT-4.1 nano) to guess names from email addresses for better accuracy. Requires ZMAIL_OPENAI_API_KEY to be set. Adds ~1-2s latency (default: false)"),
     },
     async ({ query, limit, minSent, minReceived, includeNoreply, enrich }) => {
-      const db = getDb();
+      const db = await getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
       const result = await who(db, {
         query,
@@ -372,7 +372,7 @@ export function createMcpServer() {
     "Get sync and indexing status. Returns current state of sync (running/idle, last sync time, message count), indexing progress, search readiness (FTS count), date range of synced messages, and freshness (time since latest mail and last sync, human + ISO 8601 duration).",
     {},
     async () => {
-      const status = getStatus();
+      const status = await getStatus();
       const latestMailAgo = formatTimeAgo(status.dateRange?.latest ?? null);
       const lastSyncAgo = status.sync.isRunning ? null : formatTimeAgo(status.sync.lastSyncAt);
       const output = {
@@ -398,19 +398,19 @@ export function createMcpServer() {
     "Get database statistics. Returns total message count, date range, top senders (top 10), and messages by folder breakdown.",
     {},
     async () => {
-      const db = getDb();
-      const total = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
-      const dateRange = db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages").get() as
-        | { earliest: string | null; latest: string | null }
-        | undefined;
-      const topSenders = db
-        .prepare(
+      const db = await getDb();
+      const total = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
+      const dateRange = (await (
+        await db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages")
+      ).get()) as { earliest: string | null; latest: string | null } | undefined;
+      const topSenders = (await (
+        await db.prepare(
           "SELECT from_address, COUNT(*) as count FROM messages GROUP BY from_address ORDER BY count DESC LIMIT 10"
         )
-        .all() as Array<{ from_address: string; count: number }>;
-      const folderBreakdown = db
-        .prepare("SELECT folder, COUNT(*) as count FROM messages GROUP BY folder ORDER BY count DESC")
-        .all() as Array<{ folder: string; count: number }>;
+      ).all()) as Array<{ from_address: string; count: number }>;
+      const folderBreakdown = (await (
+        await db.prepare("SELECT folder, COUNT(*) as count FROM messages GROUP BY folder ORDER BY count DESC")
+      ).all()) as Array<{ folder: string; count: number }>;
 
       const result = {
         totalMessages: total.count,

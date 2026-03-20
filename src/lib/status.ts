@@ -103,8 +103,9 @@ export interface ImapServerComparison {
 /**
  * Get current sync and search status from the database.
  */
-export function getStatus(db: SqliteDatabase = getDb()): StatusData {
-  const syncStatus = db.prepare("SELECT * FROM sync_summary WHERE id = 1").get() as {
+export async function getStatus(db?: SqliteDatabase): Promise<StatusData> {
+  const d = db ?? (await getDb());
+  const syncStatus = (await (await d.prepare("SELECT * FROM sync_summary WHERE id = 1")).get()) as {
     earliest_synced_date: string | null;
     latest_synced_date: string | null;
     target_start_date: string | null;
@@ -114,9 +115,9 @@ export function getStatus(db: SqliteDatabase = getDb()): StatusData {
     is_running: number;
   } | undefined;
 
-  const messagesCount = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+  const messagesCount = (await (await d.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
 
-  const dateRange = db.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages").get() as {
+  const dateRange = (await (await d.prepare("SELECT MIN(date) as earliest, MAX(date) as latest FROM messages")).get()) as {
     earliest: string | null;
     latest: string | null;
   };
@@ -159,9 +160,8 @@ export function getStatus(db: SqliteDatabase = getDb()): StatusData {
 
 /**
  * Get IMAP server comparison status (optional, requires IMAP connection).
- * Returns null if IMAP is not configured or connection fails.
  */
-export async function getImapServerStatus(db: SqliteDatabase = getDb()): Promise<ImapServerComparison | null> {
+export async function getImapServerStatus(db?: SqliteDatabase): Promise<ImapServerComparison | null> {
   try {
     const imap = requireImapConfig();
     if (!imap.user || !imap.password) {
@@ -186,19 +186,20 @@ export async function getImapServerStatus(db: SqliteDatabase = getDb()): Promise
       const serverUidNext = statusResult.uidNext ? Number(statusResult.uidNext) : undefined;
       const serverUidValidity = statusResult.uidValidity ? Number(statusResult.uidValidity) : undefined;
 
-      // Get local sync state
-      const syncState = db.prepare("SELECT uidvalidity, last_uid FROM sync_state WHERE folder = ?").get(mailbox) as
-        | { uidvalidity: number | bigint; last_uid: number | bigint }
-        | undefined;
+      const d = db ?? (await getDb());
+      const syncState = (await (await d.prepare("SELECT uidvalidity, last_uid FROM sync_state WHERE folder = ?")).get(
+        mailbox
+      )) as { uidvalidity: number | bigint; last_uid: number | bigint } | undefined;
 
-      const status = getStatus(db);
+      const status = await getStatus(d);
       const localMessages = status.search.ftsReady;
       const localLastUid = syncState ? Number(syncState.last_uid) : undefined;
       const localUidValidity = syncState ? Number(syncState.uidvalidity) : undefined;
 
       let missing: number | null = null;
       let missingUidRange: { start: number; end: number } | null = null;
-      const uidValidityMismatch = serverUidValidity !== undefined && localUidValidity !== undefined && serverUidValidity !== localUidValidity;
+      const uidValidityMismatch =
+        serverUidValidity !== undefined && localUidValidity !== undefined && serverUidValidity !== localUidValidity;
 
       if (serverUidNext && localLastUid && !uidValidityMismatch) {
         missing = serverUidNext - localLastUid - 1;
@@ -210,7 +211,6 @@ export async function getImapServerStatus(db: SqliteDatabase = getDb()): Promise
         }
       }
 
-      // Calculate coverage
       let coverage: { daysAgo: number; yearsAgo: string; earliestDate: string } | null = null;
       if (status.dateRange?.earliest) {
         const earliestDate = new Date(status.dateRange.earliest);
@@ -248,7 +248,6 @@ export async function getImapServerStatus(db: SqliteDatabase = getDb()): Promise
       return null;
     }
   } catch (err) {
-    // IMAP not configured or connection failed
     return null;
   }
 }

@@ -127,17 +127,16 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     fileLogger.info("Sync starting", { user: imap.user, fromDate });
 
     // Pre-check: if sync is already running, skip connect entirely
-    const db = getDb();
-    
+    const db = await getDb();
+
     // Store target start date and capture current earliest date for progress tracking
-    // This ensures we only count NEW emails synced in this run, not pre-existing ones
-    const currentEarliest = db.prepare("SELECT earliest_synced_date FROM sync_summary WHERE id = 1").get() as
+    const currentEarliest = (await (await db.prepare("SELECT earliest_synced_date FROM sync_summary WHERE id = 1")).get()) as
       | { earliest_synced_date: string | null }
       | undefined;
-    db.prepare(
-      "UPDATE sync_summary SET target_start_date = ?, sync_start_earliest_date = ? WHERE id = 1"
+    await (
+      await db.prepare("UPDATE sync_summary SET target_start_date = ?, sync_start_earliest_date = ? WHERE id = 1")
     ).run(fromDate, currentEarliest?.earliest_synced_date ?? null);
-    const syncRunningCheck = db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1").get() as
+    const syncRunningCheck = (await (await db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1")).get()) as
       | { is_running: number; owner_pid: number | null }
       | undefined;
     const isRunning = syncRunningCheck?.is_running === 1;
@@ -186,7 +185,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     const lockStartMs = Date.now() - startTime;
     
     // Acquire lock with PID-based ownership
-    const lockResult = acquireLock(db, "sync_summary", process.pid);
+    const lockResult = await acquireLock(db, "sync_summary", process.pid);
     const lockDoneMs = Date.now() - startTime;
     phaseMs("lock_acquired");
     
@@ -234,7 +233,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       error: String(err),
       errorMessage: err instanceof Error ? err.message : String(err),
     });
-      releaseLock(db, "sync_summary", process.pid);
+      await releaseLock(db, "sync_summary", process.pid);
       fileLogger.close();
       restoreLogger();
       throw err; // Re-throw so outer catch handles it
@@ -259,9 +258,9 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     
     // Step 2: STATUS check before SELECT
     // Read sync_state first to check if we can early-exit
-    const stateRow = db.prepare("SELECT uidvalidity, last_uid FROM sync_state WHERE folder = ?").get(mailbox) as
-      | { uidvalidity: number | bigint; last_uid: number | bigint }
-      | undefined;
+    const stateRow = (await (await db.prepare("SELECT uidvalidity, last_uid FROM sync_state WHERE folder = ?")).get(
+      mailbox
+    )) as { uidvalidity: number | bigint; last_uid: number | bigint } | undefined;
     const state = stateRow ? {
       uidvalidity: Number(stateRow.uidvalidity),
       last_uid: Number(stateRow.last_uid),
@@ -313,8 +312,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         // Skip early exit when force is set so user can force a full fetch when they know new mail arrived.
         if (direction === 'forward' && !options?.force && state && statusUidNextNum && statusUidValidityNum === state.uidvalidity) {
           if (statusUidNextNum - 1 <= state.last_uid) {
-            db.exec("UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1");
-            releaseLock(db, "sync_summary", process.pid);
+            await db.exec("UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1");
+            await releaseLock(db, "sync_summary", process.pid);
             const durationMs = Date.now() - startTime;
             phaseMs("runSync_exit_early");
             fileLogger.info("Early exit: no new messages", { elapsedMs: durationMs });
@@ -388,9 +387,9 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
 
         if (direction === 'backward') {
           // Find the oldest message we've already synced
-          const oldestSynced = db.prepare("SELECT MIN(date) as oldest_date FROM messages WHERE folder = ?").get(mailbox) as
-            | { oldest_date: string | null }
-            | undefined;
+          const oldestSynced = (await (
+            await db.prepare("SELECT MIN(date) as oldest_date FROM messages WHERE folder = ?")
+          ).get(mailbox)) as { oldest_date: string | null } | undefined;
           
           if (oldestSynced?.oldest_date) {
             const oldestDate = new Date(oldestSynced.oldest_date);
@@ -464,7 +463,9 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         if (isExpandingRangeBackward) {
           // Expanding range: search already includes requested date. We need backfill (low UIDs) and possibly new (uid > last_uid).
           // Filter to UIDs not already in DB (last_uid filter would drop all backfill).
-          const existingUids = db.prepare("SELECT uid FROM messages WHERE folder = ?").all(mailbox) as { uid: number }[];
+          const existingUids = (await (
+            await db.prepare("SELECT uid FROM messages WHERE folder = ?")
+          ).all(mailbox)) as { uid: number }[];
           const existingSet = new Set(existingUids.map((r) => r.uid));
           const beforeFilter = uids.length;
           uids = uids.filter((uid) => !existingSet.has(uid));
@@ -481,9 +482,9 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           if (allUidsAreSynced) {
             // All UIDs from this search are already synced - we've completed this day
             // Search for messages before the oldest synced date instead
-            const oldestSynced = db.prepare("SELECT MIN(date) as oldest_date FROM messages WHERE folder = ?").get(mailbox) as
-              | { oldest_date: string | null }
-              | undefined;
+            const oldestSynced = (await (
+              await db.prepare("SELECT MIN(date) as oldest_date FROM messages WHERE folder = ?")
+            ).get(mailbox)) as { oldest_date: string | null } | undefined;
             
             if (oldestSynced?.oldest_date) {
               const oldestDate = new Date(oldestSynced.oldest_date);
@@ -539,8 +540,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       uids.sort((a, b) => b - a); // Highest UID = most recent
 
       if (uids.length === 0) {
-        db.exec("UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1");
-        releaseLock(db, "sync_summary", process.pid);
+        await db.exec("UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1");
+        await releaseLock(db, "sync_summary", process.pid);
         const durationMs = Date.now() - startTime;
         phaseMs("runSync_exit");
         const result: SyncResult = {
@@ -624,7 +625,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
 
         const { result: existing, durationMs: duplicateCheckDuration } = await timer(
           "duplicate_check",
-          async () => db.prepare("SELECT 1 FROM messages WHERE message_id = ?").get(parsed.messageId)
+          async () => (await (await db.prepare("SELECT 1 FROM messages WHERE message_id = ?")).get(parsed.messageId))
         );
         
         if (existing) {
@@ -661,10 +662,9 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         }
         
         // Persist message and thread using shared helper
-        persistMessage(db, parsed, mailbox, uid, labelsJson, relPath);
+        await persistMessage(db, parsed, mailbox, uid, labelsJson, relPath);
 
-        // Persist attachments using shared helper
-        persistAttachmentsFromParsed(db, parsed.messageId, parsed.attachments);
+        await persistAttachmentsFromParsed(db, parsed.messageId, parsed.attachments);
 
         // synced++ moved earlier (before logging)
         if (!earliestDate || parsed.date < earliestDate) earliestDate = parsed.date;
@@ -769,8 +769,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           await timer(
             "batch_checkpoint",
             async () => {
-              db.prepare(
-                "INSERT OR REPLACE INTO sync_state (folder, uidvalidity, last_uid) VALUES (?, ?, ?)"
+              await (
+                await db.prepare("INSERT OR REPLACE INTO sync_state (folder, uidvalidity, last_uid) VALUES (?, ?, ?)")
               ).run(mailbox, uidvalidity, checkpointUid);
             }
           );
@@ -780,15 +780,17 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       
       phaseMs("all_batches_complete");
 
-      db.prepare(
-        `UPDATE sync_summary SET
+      await (
+        await db.prepare(
+          `UPDATE sync_summary SET
           earliest_synced_date = COALESCE(?, earliest_synced_date),
           latest_synced_date = COALESCE(?, latest_synced_date),
           total_messages = (SELECT COUNT(*) FROM messages),
           last_sync_at = datetime('now')
          WHERE id = 1`
+        )
       ).run(earliestDate, latestDate);
-      releaseLock(db, "sync_summary", process.pid);
+      await releaseLock(db, "sync_summary", process.pid);
 
       const durationMs = Date.now() - startTime;
       const durationSec = durationMs / 1000;
@@ -823,7 +825,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       lock.release();
     }
     } catch (err) {
-      releaseLock(db, "sync_summary", process.pid);
+      await releaseLock(db, "sync_summary", process.pid);
       fileLogger.error("Sync failed", { error: String(err) });
       fileLogger.close();
       restoreLogger(); // Restore original logger even on error

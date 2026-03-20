@@ -67,8 +67,8 @@ vi.mock("~/messages/lean-shape", () => ({
 describe("runAsk", () => {
   let db: SqliteDatabase;
 
-  beforeEach(() => {
-    db = createTestDb();
+  beforeEach(async () => {
+    db = await createTestDb();
     mockCreate.mockClear();
   });
 
@@ -79,7 +79,7 @@ describe("runAsk", () => {
   describe("date handling", () => {
     // TODO: Update tests for new two-phase architecture (investigation + context assembly)
     it.skip("applies default 30d filter when no dates specified", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         messageId: "<test-msg@example.com>",
         subject: "Recent email",
         date: new Date().toISOString(),
@@ -140,7 +140,7 @@ describe("runAsk", () => {
 
     // TODO: Update tests for new two-phase architecture (investigation + context assembly)
     it.skip("removes date filter when query says 'any'", async () => {
-      insertTestMessage(db, {
+      await insertTestMessage(db, {
         messageId: "<old-msg@example.com>",
         subject: "Old email",
         date: "2025-01-01T00:00:00Z",
@@ -270,7 +270,7 @@ describe("runAsk", () => {
       // Create enough messages to trigger hasEnoughContext
       const senders = ["alice@example.com", "bob@example.com", "charlie@example.com"];
       for (let i = 0; i < 25; i++) {
-        insertTestMessage(db, {
+        await insertTestMessage(db, {
           messageId: `<msg-${i}@example.com>`,
           subject: `Message ${i}`,
           fromAddress: senders[i % senders.length],
@@ -563,7 +563,7 @@ describe("runAsk", () => {
     it.skip("sorts results by rank", async () => {
       // Create messages with different relevance
       for (let i = 0; i < 10; i++) {
-        insertTestMessage(db, {
+        await insertTestMessage(db, {
           messageId: `<msg-${i}@example.com>`,
           subject: `Test ${i}`,
           bodyText: "test content",

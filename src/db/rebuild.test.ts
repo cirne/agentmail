@@ -10,11 +10,11 @@ describe("reindexFromMaildir", () => {
   let testTempDir: string;
   let originalEnv: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     testTempDir = mkdtempSync(join(tmpdir(), "zmail-rebuild-test-"));
     originalEnv = process.env.ZMAIL_HOME;
     process.env.ZMAIL_HOME = testTempDir;
-    closeDb(); // Close any existing DB connection
+    await closeDb();
 
     // Create maildir structure
     mkdirSync(join(testTempDir, "data", "maildir", "cur"), { recursive: true });
@@ -25,8 +25,8 @@ describe("reindexFromMaildir", () => {
     writeFileSync(join(testTempDir, "config.json"), JSON.stringify({ imap: { host: "imap.gmail.com" } }));
   });
 
-  afterEach(() => {
-    closeDb();
+  afterEach(async () => {
+    await closeDb();
     if (originalEnv !== undefined) {
       process.env.ZMAIL_HOME = originalEnv;
     } else {
@@ -67,8 +67,8 @@ Hello, this is test message 2.`
     expect(result.parsed).toBe(2);
     expect(result.failed).toBe(0);
 
-    const db = getDb();
-    const messages = db.prepare("SELECT * FROM messages ORDER BY uid").all() as Array<{
+    const db = await getDb();
+    const messages = (await (await db.prepare("SELECT * FROM messages ORDER BY uid")).all()) as Array<{
       message_id: string;
       subject: string;
       from_address: string;
@@ -104,10 +104,10 @@ Your invoice is ready.`
 
     await reindexFromMaildir();
 
-    const db = getDb();
-    const ftsResults = db
-      .prepare("SELECT message_id FROM messages_fts WHERE messages_fts MATCH 'Invoice'")
-      .all() as Array<{ message_id: string }>;
+    const db = await getDb();
+    const ftsResults = (await (
+      await db.prepare("SELECT message_id FROM messages_fts WHERE messages_fts MATCH 'Invoice'")
+    ).all()) as Array<{ message_id: string }>;
 
     expect(ftsResults.length).toBe(1);
     expect(ftsResults[0].message_id).toBe("<invoice@example.com>");
@@ -146,8 +146,8 @@ Invalid message.`
     expect(result.parsed).toBe(1);
     expect(result.failed).toBe(1);
 
-    const db = getDb();
-    const messages = db.prepare("SELECT COUNT(*) as count FROM messages").get() as { count: number };
+    const db = await getDb();
+    const messages = (await (await db.prepare("SELECT COUNT(*) as count FROM messages")).get()) as { count: number };
     expect(messages.count).toBe(1);
   });
 
@@ -212,15 +212,21 @@ No sidecar file for this one.`
     const result = await reindexFromMaildir();
     expect(result.parsed).toBe(3);
 
-    const db = getDb();
-    const promo = db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?").get("<promo@example.com>") as any;
+    const db = await getDb();
+    const promo = (await (
+      await db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?")
+    ).get("<promo@example.com>")) as any;
     expect(promo.is_noise).toBe(1);
     expect(JSON.parse(promo.labels)).toContain("Promotions");
 
-    const normal = db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?").get("<normal@example.com>") as any;
+    const normal = (await (
+      await db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?")
+    ).get("<normal@example.com>")) as any;
     expect(normal.is_noise).toBe(0);
 
-    const noSidecar = db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?").get("<nosidecar@example.com>") as any;
+    const noSidecar = (await (
+      await db.prepare("SELECT is_noise, labels FROM messages WHERE message_id = ?")
+    ).get("<nosidecar@example.com>")) as any;
     expect(noSidecar.is_noise).toBe(0);
     expect(JSON.parse(noSidecar.labels)).toEqual([]);
   });
@@ -272,14 +278,18 @@ Please review.`
 
     await reindexFromMaildir();
 
-    const db = getDb();
-    const marketing = db.prepare("SELECT is_noise FROM messages WHERE message_id = ?").get("<marketing@example.com>") as any;
+    const db = await getDb();
+    const marketing = (await (
+      await db.prepare("SELECT is_noise FROM messages WHERE message_id = ?")
+    ).get("<marketing@example.com>")) as any;
     expect(marketing.is_noise).toBe(1);
 
-    const news = db.prepare("SELECT is_noise FROM messages WHERE message_id = ?").get("<news@example.com>") as any;
+    const news = (await (await db.prepare("SELECT is_noise FROM messages WHERE message_id = ?")).get("<news@example.com>")) as any;
     expect(news.is_noise).toBe(1);
 
-    const respond = db.prepare("SELECT is_noise FROM messages WHERE message_id = ?").get("<respond@example.com>") as any;
+    const respond = (await (
+      await db.prepare("SELECT is_noise FROM messages WHERE message_id = ?")
+    ).get("<respond@example.com>")) as any;
     expect(respond.is_noise).toBe(0);
   });
 });

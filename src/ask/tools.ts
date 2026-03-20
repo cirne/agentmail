@@ -223,15 +223,15 @@ async function executeSearchTool(
 /**
  * Execute get_thread_headers tool.
  */
-function executeGetThreadHeadersTool(
+async function executeGetThreadHeadersTool(
   db: SqliteDatabase,
   args: Record<string, unknown>
-): string {
+): Promise<string> {
   const threadId = args.threadId as string;
   const normalizedThreadId = normalizeMessageId(threadId);
 
-  const rows = db
-    .prepare(
+  const rows = (await (
+    await db.prepare(
       /* sql */ `
       SELECT message_id AS messageId, from_address AS fromAddress, from_name AS fromName,
              subject, date
@@ -240,7 +240,7 @@ function executeGetThreadHeadersTool(
       ORDER BY date ASC
     `
     )
-    .all(normalizedThreadId) as Array<{
+  ).all(normalizedThreadId)) as Array<{
     messageId: string;
     fromAddress: string;
     fromName: string | null;
@@ -270,7 +270,9 @@ async function executeGetMessageTool(
   const maxBodyChars = (args.maxBodyChars as number | undefined) ?? DEFAULT_MAX_BODY_CHARS;
   const raw = (args.raw as boolean | undefined) ?? false;
 
-  const message = db.prepare("SELECT * FROM messages WHERE message_id = ?").get(messageId) as any | undefined;
+  const message = (await (await db.prepare("SELECT * FROM messages WHERE message_id = ?")).get(messageId)) as
+    | any
+    | undefined;
   
   if (!message) {
     return JSON.stringify({ error: `Message ${messageId} not found` });
@@ -296,7 +298,7 @@ export async function executeNanoTool(
       case "search":
         return await executeSearchTool(db, args);
       case "get_thread_headers":
-        return executeGetThreadHeadersTool(db, args);
+        return await executeGetThreadHeadersTool(db, args);
       case "get_message":
         return await executeGetMessageTool(db, args);
       default:

@@ -4,7 +4,7 @@ import { createTestDb, insertTestMessage } from "~/db/test-helpers";
 import { who } from "./who";
 
 /** Insert a message with full control over from/to/cc for who() tests. */
-function insertMessage(
+async function insertMessage(
   db: SqliteDatabase,
   opts: {
     messageId: string;
@@ -15,7 +15,7 @@ function insertMessage(
     subject?: string;
     date?: string;
   }
-) {
+): Promise<void> {
   const messageId = opts.messageId;
   const threadId = "thread-1";
   const to = JSON.stringify(opts.toAddresses ?? []);
@@ -23,18 +23,20 @@ function insertMessage(
   const subject = opts.subject ?? "Test";
   const date = opts.date ?? new Date().toISOString();
 
-  db.prepare(
-    `INSERT INTO messages
+  await (
+    await db.prepare(
+      `INSERT INTO messages
        (message_id, thread_id, folder, uid, from_address, from_name, to_addresses, cc_addresses, subject, body_text, date, raw_path)
      VALUES (?, ?, '[Gmail]/All Mail', 1, ?, ?, ?, ?, ?, '', ?, 'maildir/test.eml')`
+    )
   ).run(messageId, threadId, opts.fromAddress, opts.fromName ?? null, to, cc, subject, date);
 }
 
 describe("who", () => {
   let db: SqliteDatabase;
 
-  beforeEach(() => {
-    db = createTestDb();
+  beforeEach(async () => {
+    db = await createTestDb();
   });
 
   // Helper to query (dynamic queries work directly from messages, no rebuild needed)
@@ -43,19 +45,19 @@ describe("who", () => {
   }
 
   it("returns empty people when no messages match", async () => {
-    insertTestMessage(db, { fromAddress: "alice@example.com", subject: "Hi" });
+    await insertTestMessage(db, { fromAddress: "alice@example.com", subject: "Hi" });
     const result = await queryWho("nonexistent");
     expect(result.query).toBe("nonexistent");
     expect(result.people).toEqual([]);
   });
 
   it("matches identity by from_address", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@a>",
       fromAddress: "tom@example.com",
       fromName: "Tom Smith",
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<2@a>",
       fromAddress: "tom@example.com",
       fromName: "Tom Smith",
@@ -73,7 +75,7 @@ describe("who", () => {
   });
 
   it("matches identity by from_name", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@b>",
       fromAddress: "geoff@company.com",
       fromName: "Geoff Cirne",
@@ -88,7 +90,7 @@ describe("who", () => {
   });
 
   it("matches identity appearing only in to_addresses", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@c>",
       fromAddress: "sender@example.com",
       toAddresses: ["recipient@example.com", "other@example.com"],
@@ -108,13 +110,13 @@ describe("who", () => {
   });
 
   it("matches identity appearing only in cc_addresses", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@d>",
       fromAddress: "sender@example.com",
       toAddresses: [],
       ccAddresses: ["ccperson@example.com"],
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<2@d>",
       fromAddress: "other@example.com",
       toAddresses: [],
@@ -129,12 +131,12 @@ describe("who", () => {
   });
 
   it("deduplicates by address and uses sender display name when available", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@e>",
       fromAddress: "alice@example.com",
       fromName: "Alice",
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<2@e>",
       fromAddress: "bob@example.com",
       toAddresses: ["alice@example.com"],
@@ -152,16 +154,16 @@ describe("who", () => {
   });
 
   it("orders by sent_count DESC then received_count DESC", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@f>",
       fromAddress: "low@example.com",
       toAddresses: ["high@example.com"],
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<2@f>",
       fromAddress: "high@example.com",
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<3@f>",
       fromAddress: "high@example.com",
     });
@@ -177,15 +179,15 @@ describe("who", () => {
   });
 
   it("respects limit option", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@g>",
       fromAddress: "one@example.com",
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<2@g>",
       fromAddress: "two@example.com",
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<3@g>",
       fromAddress: "three@example.com",
     });
@@ -195,15 +197,15 @@ describe("who", () => {
   });
 
   it("respects minSent and minReceived options", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@h>",
       fromAddress: "sender@example.com",
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<2@h>",
       fromAddress: "sender@example.com",
     });
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<3@h>",
       fromAddress: "other@example.com",
       toAddresses: ["recipient@example.com"],
@@ -216,7 +218,7 @@ describe("who", () => {
   });
 
   it("returns stable query in result", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@i>",
       fromAddress: "alice@example.com",
     });
@@ -226,7 +228,7 @@ describe("who", () => {
   });
 
   it("matching is case-insensitive", async () => {
-    insertMessage(db, {
+    await insertMessage(db, {
       messageId: "<1@j>",
       fromAddress: "Tom.Big@Example.COM",
       fromName: "Tom Big",
@@ -243,21 +245,21 @@ describe("who", () => {
 
     it("counts sent as emails owner sent to person, received as from person to owner, mentioned as person in to/cc but not sender", async () => {
       // I send to Tim and Donna
-      insertMessage(db, {
+      await insertMessage(db, {
         messageId: "<1@owner>",
         fromAddress: me,
         toAddresses: ["tim@example.com", "donna@example.com"],
         ccAddresses: [],
       });
       // Donna sends to me and Tim
-      insertMessage(db, {
+      await insertMessage(db, {
         messageId: "<2@owner>",
         fromAddress: "donna@example.com",
         toAddresses: [me, "tim@example.com"],
         ccAddresses: [],
       });
       // Tim sends to me
-      insertMessage(db, {
+      await insertMessage(db, {
         messageId: "<3@owner>",
         fromAddress: "tim@example.com",
         toAddresses: [me],
@@ -282,7 +284,7 @@ describe("who", () => {
 
   describe("hint for --enrich flag", () => {
     it("includes hint when enrich is not used and results exist", async () => {
-      insertMessage(db, {
+      await insertMessage(db, {
         messageId: "<1@hint>",
         fromAddress: "alice@example.com",
         fromName: "Alice",
@@ -296,7 +298,7 @@ describe("who", () => {
     });
 
     it("does not include hint when enrich is used", async () => {
-      insertMessage(db, {
+      await insertMessage(db, {
         messageId: "<1@hint-enrich>",
         fromAddress: "bob@example.com",
         fromName: "Bob",
