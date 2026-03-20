@@ -24,6 +24,8 @@ export interface SyncOptions {
   direction?: 'forward' | 'backward';
   /** When true, skip STATUS early exit and always run SEARCH + fetch (for refresh when user knows new mail arrived). */
   force?: boolean;
+  /** When true, print short progress lines to stderr (e.g. `zmail refresh` JSON mode keeps stdout clean). */
+  progressStderr?: boolean;
 }
 
 export interface SyncResult {
@@ -93,6 +95,10 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
   const restoreLogger = setLogger(fileLogger);
   
   try {
+    const logProgress = (msg: string): void => {
+      if (options?.progressStderr) console.error(`zmail: ${msg}`);
+    };
+
     // Write run separator as the VERY FIRST thing (before any checks, config, etc.)
     // This ensures even early exits (lock contention, config errors) are clearly delineated
     fileLogger.writeSeparator(process.pid);
@@ -143,6 +149,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     
     if (isRunning) {
       fileLogger.info("Sync already running, exiting", { ownerPid: syncRunningCheck.owner_pid });
+      logProgress("Another sync is already in progress; skipped.");
       const durationMs = Date.now() - startTime;
       phaseMs("runSync_exit_early");
       fileLogger.close();
@@ -176,6 +183,8 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       // NOTE: do not set socketTimeout — causes a segfault in Bun v1.1.38 on TLS sockets.
       // Use JS-level Promise.race timeout around fetchAll instead (see below).
     });
+
+    logProgress(`Connecting to ${imap.host}…`);
     
     phaseMs("connect_called");
     const connectStartMs = Date.now() - startTime;
@@ -191,6 +200,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     
     if (!lockResult.acquired) {
       fileLogger.info("Sync already running, exiting");
+      logProgress("Could not acquire sync lock (another sync is running); skipped.");
       const durationMs = Date.now() - startTime;
       phaseMs("runSync_exit_early");
       fileLogger.close();
@@ -209,6 +219,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       // Partial work is safe: sync_state.last_uid is correct,
       // and message dedup prevents re-inserts
       fileLogger.info("Recovered from crashed sync, resuming from last checkpoint");
+      logProgress("Resuming from last checkpoint after a previous interrupted sync…");
     }
     
     // Wait for connect to complete
@@ -224,6 +235,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       lockDoneMs,
       overlapMs: Math.max(0, connectDoneMs - lockDoneMs),
     });
+    logProgress("Connected.");
   } catch (err) {
     // Explicitly catch and log connection/auth errors before they reach outer catch
     fileLogger.error("IMAP connection failed", { 
@@ -269,6 +281,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       // Call STATUS before acquiring mailbox lock
       let statusResult: Awaited<ReturnType<typeof client.status>> | null = null;
       try {
+      logProgress("Checking mailbox for new mail…");
       const { result, durationMs: statusRoundTripMs } = await timer(
         "STATUS",
         () => client.status(mailbox, { messages: true, uidNext: true, uidValidity: true })
@@ -317,6 +330,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
             const durationMs = Date.now() - startTime;
             phaseMs("runSync_exit_early");
             fileLogger.info("Early exit: no new messages", { elapsedMs: durationMs });
+          logProgress("No new mail (server reports nothing after last sync).");
           const result: SyncResult = {
             synced: 0,
             messagesFetched: 0,
@@ -348,12 +362,14 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       
       // Use EXAMINE (read-only) instead of SELECT since we never modify messages
       // EXAMINE is faster for Gmail's All Mail folder as it doesn't need to materialize write locks
+      logProgress(`Opening mailbox: ${mailbox}…`);
       const { result: lock, durationMs: examineMs } = await timer(
         "EXAMINE",
         () => client.getMailboxLock(mailbox, { readOnly: true })
       );
       phaseMs("examine_resolved");
       fileLogger.info("Mailbox opened (EXAMINE)", { examineMs });
+      logProgress("Mailbox open; searching for messages to sync…");
       try {
         const mailboxObj = client.mailbox;
       const uidvalidity = mailboxObj && typeof mailboxObj === "object" ? Number(mailboxObj.uidValidity ?? 0) : 0;
@@ -540,6 +556,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       uids.sort((a, b) => b - a); // Highest UID = most recent
 
       if (uids.length === 0) {
+        logProgress("No messages to download for this run.");
         await db.exec("UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1");
         await releaseLock(db, "sync_summary", process.pid);
         const durationMs = Date.now() - startTime;
@@ -582,6 +599,13 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       // Use fetchAll() for backward sync - guarantees no gaps/duplicates with explicit UID arrays
       // Pipelining (fetch() async generator) had issues with sequence set parsing causing duplicate fetches
       const usePipelining = false; // Disabled: fetchAll() is simpler and more reliable
+
+      const totalBatches = Math.ceil(uids.length / batchSize);
+      if (totalBatches > 1) {
+        logProgress(`Downloading ${uids.length} message(s) in ${totalBatches} batches…`);
+      } else {
+        logProgress(`Downloading ${uids.length} message(s)…`);
+      }
       
       // Helper function to process a single message (declared before loop so it can be used in both branches)
       const processMessage = async (msg: any): Promise<{ isDuplicate: boolean; isNew: boolean; messageId?: string }> => {
@@ -676,11 +700,14 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       for (let i = 0; i < uids.length; i += batchSize) {
         const batch = uids.slice(i, i + batchSize);
         const batchNum = Math.floor(i / batchSize) + 1;
-        const totalBatches = Math.ceil(uids.length / batchSize);
         
         let batchDuplicates = 0;
         let batchNew = 0;
         let batchMessagesProcessed = 0;
+
+        if (totalBatches > 1) {
+          logProgress(`Fetching batch ${batchNum}/${totalBatches} (${batch.length} message(s))…`);
+        }
         
         if (usePipelining) {
           // Pipeline: use async generator to process messages as they arrive
@@ -779,6 +806,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       }
       
       phaseMs("all_batches_complete");
+      logProgress("Updating local index…");
 
       await (
         await db.prepare(

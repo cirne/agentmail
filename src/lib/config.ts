@@ -25,6 +25,11 @@ interface ConfigJson {
   attachments?: {
     cacheExtractedText?: boolean;
   };
+  /** Defaults for `zmail inbox` (LLM scan). */
+  inbox?: {
+    /** Rolling window when CLI does not pass a window (default in code: 24h). */
+    defaultWindow?: string;
+  };
 }
 
 interface ConfigEnv {
@@ -97,6 +102,9 @@ export function loadConfig(options?: { home?: string; env?: NodeJS.ProcessEnv })
   attachments: {
     cacheExtractedText: boolean;
   };
+  inbox: {
+    defaultWindow: string;
+  };
   openai: {
     apiKey: string;
   };
@@ -139,6 +147,9 @@ export function loadConfig(options?: { home?: string; env?: NodeJS.ProcessEnv })
     attachments: {
       cacheExtractedText: configJson.attachments?.cacheExtractedText ?? false,
     },
+    inbox: {
+      defaultWindow: configJson.inbox?.defaultWindow ?? "24h",
+    },
     get openai() {
       return { apiKey: getOpenAIKey() };
     },
@@ -176,6 +187,9 @@ export const config = {
   },
   get attachments() {
     return loadConfig().attachments;
+  },
+  get inbox() {
+    return loadConfig().inbox;
   },
   get openai() {
     return loadConfig().openai;

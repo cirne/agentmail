@@ -15,6 +15,7 @@ Usage:
   zmail wizard [--no-validate]   Interactive setup (prompts for credentials)
   zmail sync [--since <spec>] [--foreground]     Initial sync: fill gaps going backward (runs in background by default; use --foreground to wait)
   zmail refresh                    Refresh: fetch new messages since last sync (frequent updates)
+  zmail inbox [<window>] [--since ...] [--refresh] [--text]   LLM scan of a time window; JSON envelope matches refresh (needs OpenAI key)
   zmail rebuild-index              Wipe SQLite and reindex from local maildir (same as schema bump; dev/test)
   zmail ask "<question>" [--verbose]   Answer a natural-language question (zmail orchestrates search/read; needs OpenAI key: ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY)
   zmail search <query> [flags]    Search email (FTS5 full-text search)
@@ -27,8 +28,9 @@ Usage:
   zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
   zmail mcp                       Start MCP server (stdio)
 
-Ask vs search / read / thread / who / attachment:
+Ask vs search / read / thread / who / attachment / inbox:
   ask — Use for one-shot natural-language questions and let zmail retrieve and summarize (fast path for agents; requires ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY).
+  inbox — Fast metadata+LLM pass over recent mail; same JSON shape as refresh for agents (notable messages in newMail; requires OpenAI key).
   search, read, thread, who, attachment — Use for structured JSON, exact filters or IDs, scripts, UI drill-down, raw/EML, or debugging. No API key for core use (optional: e.g. who --enrich).
   Full tradeoffs and hybrid patterns: docs/ASK.md
 

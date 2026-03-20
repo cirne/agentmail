@@ -219,6 +219,28 @@ describe("config", () => {
       expect(loaded.imap.port).toBe(993);
       expect(loaded.sync.defaultSince).toBe("1y");
       expect(loaded.sync.excludeLabels).toEqual(["trash", "spam"]);
+      expect(loaded.inbox.defaultWindow).toBe("24h");
+    });
+
+    it("loads inbox.defaultWindow from config.json", async () => {
+      mkdirSync(spawnHome, { recursive: true });
+      writeFileSync(
+        join(spawnHome, "config.json"),
+        JSON.stringify({ imap: { user: "u@x.com" }, inbox: { defaultWindow: "7d" } })
+      );
+
+      const proc = spawn("npx", ["tsx", join(import.meta.dirname, "config-test-helper.ts")], {
+        cwd: join(import.meta.dirname, "..", ".."),
+        env: { ...process.env, ZMAIL_HOME: spawnHome },
+        stdio: ["pipe", "pipe", "pipe"],
+      });
+
+      const stdout = await streamToText(proc.stdout);
+      const exitCode = await new Promise<number | null>((resolve) => proc.on("close", resolve));
+
+      expect(exitCode).toBe(0);
+      const loaded = JSON.parse(stdout);
+      expect(loaded.inbox.defaultWindow).toBe("7d");
     });
   });
 });

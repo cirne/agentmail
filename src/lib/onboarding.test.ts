@@ -15,7 +15,7 @@ describe("onboarding", () => {
       expect(CLI_USAGE).toContain("zmail setup");
     });
 
-    it("includes sync, search, who, status, stats, rebuild-index, mcp, ask", () => {
+    it("includes sync, search, who, status, stats, rebuild-index, mcp, ask, inbox", () => {
       expect(CLI_USAGE).toContain("zmail sync");
       expect(CLI_USAGE).toContain("zmail rebuild-index");
       expect(CLI_USAGE).toContain("zmail search");
@@ -24,6 +24,7 @@ describe("onboarding", () => {
       expect(CLI_USAGE).toContain("zmail stats");
       expect(CLI_USAGE).toContain("zmail mcp");
       expect(CLI_USAGE).toContain("zmail ask");
+      expect(CLI_USAGE).toContain("zmail inbox");
     });
 
     it("documents ask vs primitives and points to ASK.md", () => {

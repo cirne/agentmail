@@ -202,6 +202,22 @@ describe("CLI output formats (ADR-022)", () => {
     });
   });
 
+  describe("inbox command", () => {
+    it("inbox --help prints usage", async () => {
+      const { stderr, exitCode } = await runZmail(["inbox", "--help"], baseEnv());
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("zmail inbox");
+      expect(stderr).toContain("--refresh");
+    });
+
+    it("inbox without API key exits before LLM", async () => {
+      const env = { ...baseEnv(), ZMAIL_OPENAI_API_KEY: "", OPENAI_API_KEY: "" };
+      const { stderr, exitCode } = await runZmail(["inbox"], env);
+      expect(exitCode).toBe(1);
+      expect(stderr).toContain("zmail inbox requires an LLM API key");
+    });
+  });
+
   describe("help text consistency", () => {
     it("search --help mentions --text flag", async () => {
       const { stderr, exitCode } = await runZmail(["search", "--help"], baseEnv());

@@ -22,6 +22,9 @@ const output = {
     mailbox: config.sync.mailbox,
     excludeLabels: config.sync.excludeLabels,
   },
+  inbox: {
+    defaultWindow: config.inbox.defaultWindow,
+  },
   openaiKeySet,
 };
 console.log(JSON.stringify(output));

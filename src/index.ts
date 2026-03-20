@@ -73,6 +73,7 @@ if (!command) {
   console.log("");
   console.log("  zmail sync               Start syncing email (background; waits until data flows)");
   console.log("  zmail refresh            Fetch new email since last sync (fast, foreground)");
+  console.log("  zmail inbox              LLM scan of recent mail (notable messages; needs OpenAI key)");
   console.log("  zmail rebuild-index      Rebuild local SQLite index from maildir (dev/test)");
   console.log("  zmail search <query>    Search email — FTS5 full-text search");
   console.log("  zmail who <query>        Find people by name or address");
@@ -88,10 +89,7 @@ if (!command) {
     process.exit(1);
   }
   try {
-    // Ensure schema is up to date before any command that uses the DB
-    const { ensureSchemaUpToDate } = await import("~/db");
-    await ensureSchemaUpToDate();
-
+    // Schema + stale-version rebuild: handled in ~/cli main() for every subcommand.
     await import("~/cli");
   } catch (err) {
     handleMissingConfig(err);

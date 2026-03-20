@@ -17,6 +17,9 @@ import { getStatus, getImapServerStatus, formatTimeAgo } from "~/lib/status";
 import { spawn } from "child_process";
 import { ImapFlow } from "imapflow";
 import { isProcessAlive } from "~/lib/process-lock";
+import { emptySyncResult, printRefreshStyleOutput } from "~/cli/refresh-output";
+import { parseInboxWindowToIsoCutoff } from "~/inbox/parse-window";
+import { runInboxScan } from "~/inbox/scan";
 
 /**
  * Check sync log for errors from the most recent sync run.
@@ -660,6 +663,34 @@ function getUnknownCommandHint(unknownCommand: string): string {
 
 const STATUS_LABEL_WIDTH = 13;
 
+function parseInboxCliArgs(args: string[]): {
+  windowSpec?: string;
+  refresh: boolean;
+  force: boolean;
+  includeNoise: boolean;
+  text: boolean;
+} {
+  const refresh = args.includes("--refresh");
+  const force = args.includes("--force");
+  const includeNoise = args.includes("--include-noise");
+  const text = args.includes("--text");
+  const sinceIdx = args.indexOf("--since");
+  let windowSpec: string | undefined;
+  if (sinceIdx >= 0) {
+    const v = args[sinceIdx + 1];
+    if (v && !v.startsWith("-")) windowSpec = v;
+  }
+  if (!windowSpec) {
+    for (const a of args) {
+      if (!a.startsWith("-") && /^\d+[dhmwy]?$/i.test(a)) {
+        windowSpec = a;
+        break;
+      }
+    }
+  }
+  return { windowSpec, refresh, force, includeNoise, text };
+}
+
 /**
  * Print sync and indexing status (reusable for status command and early exits)
  */
@@ -742,8 +773,11 @@ async function printStatus(db?: SqliteDatabase): Promise<void> {
 }
 
 async function main() {
-  // Schema check is now handled in src/index.ts before importing CLI
-  // This ensures all commands (including sync via npm run sync) check schema version
+  // Single choke point: schema version vs code → rebuild from maildir when stale.
+  // Runs for every CLI subcommand (search, read, ask, sync, mcp, …) even if a future
+  // entrypoint imports ~/cli without going through src/index.ts first.
+  const { ensureSchemaUpToDate } = await import("~/db");
+  await ensureSchemaUpToDate();
 
   switch (command) {
     case "sync": {
@@ -1271,8 +1305,9 @@ async function main() {
       const force = args.includes("--force");
       const includeNoise = args.includes("--include-noise");
       const forceText = args.includes("--text");
-      const syncOptions: { direction: 'forward'; force?: boolean } = {
+      const syncOptions: { direction: 'forward'; force?: boolean; progressStderr?: boolean } = {
         direction: 'forward',
+        progressStderr: true,
       };
       if (force) syncOptions.force = true;
 
@@ -1314,46 +1349,91 @@ async function main() {
         }));
       }
 
-      const output: Record<string, unknown> = {
-        synced: syncResult.synced,
-        messagesFetched: syncResult.messagesFetched,
-        bytesDownloaded: syncResult.bytesDownloaded,
-        durationMs: syncResult.durationMs,
-        bandwidthBytesPerSec: syncResult.bandwidthBytesPerSec,
-        messagesPerMinute: syncResult.messagesPerMinute,
-        newMail,
-      };
-      if (syncResult.earlyExit) output.earlyExit = true;
+      printRefreshStyleOutput(syncResult, newMail, {
+        forceText,
+        previewTitle: "New mail:",
+      });
+      break;
+    }
 
-      if (forceText) {
-        const sec = (syncResult.durationMs / 1000).toFixed(2);
-        const mb = (syncResult.bytesDownloaded / (1024 * 1024)).toFixed(2);
-        const kbps = (syncResult.bandwidthBytesPerSec / 1024).toFixed(1);
-        console.log("");
-        if (syncResult.earlyExit) console.log("No new messages (skipped fetch).");
-        console.log("Refresh metrics:");
-        console.log(`  messages:  ${syncResult.synced} new, ${syncResult.messagesFetched} fetched`);
-        console.log(`  downloaded: ${mb} MB (${syncResult.bytesDownloaded} bytes)`);
-        console.log(`  bandwidth: ${kbps} KB/s`);
-        console.log(`  throughput: ${Math.round(syncResult.messagesPerMinute)} msg/min`);
-        console.log(`  duration:  ${sec}s`);
-        if (newMail.length > 0) {
-          console.log("");
-          console.log("New mail:");
-          console.log("  DATE        FROM                 SUBJECT                          SNIPPET");
-          console.log("  " + "-".repeat(80));
-          for (const r of newMail) {
-            const date = r.date.slice(0, 10);
-            const from = (r.fromName ? `${r.fromName} ` : "") + `<${r.fromAddress}>`;
-            const fromShort = from.length > 20 ? from.slice(0, 17) + "..." : from.padEnd(20);
-            const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
-            const snippetShort = r.snippet.length > 30 ? r.snippet.slice(0, 27) + "..." : r.snippet;
-            console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}`);
-          }
-        }
-      } else {
-        console.log(JSON.stringify(output, null, 2));
+    case "inbox": {
+      // Scan indexed mail in a time window; LLM surfaces notable messages. Same JSON envelope as refresh.
+      if (args.includes("--help") || args.includes("-h")) {
+        console.error("Usage: zmail inbox [<window>] [--since <window>] [--refresh] [--force] [--include-noise] [--text]");
+        console.error("");
+        console.error("  window / --since   Rolling window: 24h, 3d, 1w, etc., or YYYY-MM-DD (default: config inbox.defaultWindow or 24h)");
+        console.error("  --refresh            Run forward sync first (same as zmail refresh)");
+        console.error("  --force              With --refresh: skip STATUS early exit");
+        console.error("  --include-noise      Include is_noise messages in candidates");
+        console.error("  --text               Human-readable output (default: JSON)");
+        console.error("");
+        console.error("Requires ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY.");
+        process.exit(1);
       }
+
+      const { windowSpec, refresh: doRefresh, force, includeNoise, text: forceText } = parseInboxCliArgs(args);
+
+      try {
+        config.openai.apiKey;
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("ZMAIL_OPENAI_API_KEY")) {
+          console.error("zmail inbox requires an LLM API key.");
+          console.error("Set ZMAIL_OPENAI_API_KEY or run 'zmail setup' with --openai-key.");
+          process.exit(1);
+        }
+        throw error;
+      }
+
+      let syncResult = emptySyncResult();
+      if (doRefresh) {
+        const syncOptions: { direction: "forward"; force?: boolean; progressStderr?: boolean } = {
+          direction: "forward",
+          progressStderr: true,
+        };
+        if (force) syncOptions.force = true;
+        syncResult = await runSync(syncOptions);
+      }
+
+      const db = await getDb();
+      const spec = windowSpec ?? config.inbox.defaultWindow;
+      let cutoffIso: string;
+      try {
+        cutoffIso = parseInboxWindowToIsoCutoff(spec);
+      } catch (e) {
+        console.error(e instanceof Error ? e.message : String(e));
+        process.exit(1);
+      }
+
+      let newMail: Array<{
+        messageId: string;
+        date: string;
+        fromAddress: string;
+        fromName: string | null;
+        subject: string;
+        snippet: string;
+        note?: string;
+      }>;
+      let candidatesScanned = 0;
+      let llmDurationMs = 0;
+      try {
+        const scanResult = await runInboxScan(db, {
+          cutoffIso,
+          includeNoise,
+        });
+        newMail = scanResult.newMail;
+        candidatesScanned = scanResult.candidatesScanned;
+        llmDurationMs = scanResult.llmDurationMs;
+      } catch (err) {
+        console.error(`zmail inbox: ${err instanceof Error ? err.message : String(err)}`);
+        process.exit(1);
+      }
+
+      printRefreshStyleOutput(syncResult, newMail, {
+        forceText,
+        previewTitle: "Inbox:",
+        extras: { candidatesScanned, llmDurationMs },
+        omitRefreshMetrics: !doRefresh,
+      });
       break;
     }
 

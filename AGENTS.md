@@ -27,6 +27,7 @@ Node.js 20+, TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native
 ```
 src/
   cli/          entrypoint and subcommands
+  inbox/        LLM notable-mail scan (`zmail inbox`)
   sync/         IMAP sync engine
   db/           SQLite schema, queries
   search/       FTS5 full-text search
@@ -93,6 +94,7 @@ zmail who <query> [--limit n] [--enrich] [--text]
 zmail read <message_id> [--raw]
 zmail thread <thread_id> [--json] [--raw]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
+zmail inbox [<window>] [--since <window>] [--refresh] [--force] [--include-noise] [--text]  # LLM notable-mail scan; JSON like refresh (requires OpenAI key)
 zmail status [--json]
 zmail stats [--json]
 zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)
@@ -178,7 +180,7 @@ Search results include attachment metadata (count and file types) in JSON output
 
 zmail stores configuration in `~/.zmail/` (or `$ZMAIL_HOME` if set):
 
-- `~/.zmail/config.json` — non-secret settings (IMAP host/port/user, sync settings, optional `attachments.cacheExtractedText`)
+- `~/.zmail/config.json` — non-secret settings (IMAP host/port/user, sync settings, optional `attachments.cacheExtractedText`, optional `inbox.defaultWindow` for `zmail inbox` when no window is passed — default `24h`)
 - `~/.zmail/.env` — secrets (ZMAIL_IMAP_PASSWORD, ZMAIL_OPENAI_API_KEY)
 
 Attachment extracted-text cache is **off by default** (each read re-extracts). To use cached extraction on repeat reads, set `"attachments": { "cacheExtractedText": true }` in config.json.
