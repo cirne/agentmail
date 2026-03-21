@@ -134,7 +134,8 @@ export async function reindexFromMaildir(): Promise<{ parsed: number; failed: nu
         `UPDATE sync_summary SET
       earliest_synced_date = COALESCE(?, earliest_synced_date),
       latest_synced_date = COALESCE(?, latest_synced_date),
-      total_messages = (SELECT COUNT(*) FROM messages)
+      total_messages = (SELECT COUNT(*) FROM messages),
+      last_sync_at = datetime('now')
      WHERE id = 1`
       )
     ).run(earliestDate, latestDate);

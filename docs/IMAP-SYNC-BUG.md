@@ -93,16 +93,7 @@ parsed = await Promise.race([
 
 The original `fetchAll` timeout used an uncancelled `setTimeout`. When `fetchAll` won the race, the timer kept running and fired a stale `reject()` creating an unhandled rejection. Fixed by clearing the timer:
 
-```typescript
-let fetchTimeoutId: ReturnType<typeof setTimeout> | undefined;
-const messages = await Promise.race([
-  client.fetchAll(...),
-  new Promise<never>((_, reject) => {
-    fetchTimeoutId = setTimeout(() => reject(new Error("fetchAll timed out")), 30_000);
-  }),
-]);
-clearTimeout(fetchTimeoutId);
-```
+Implemented in `src/sync/fetch-all-with-retries.ts` (calls `fetchAll` via `Promise.race` with `clearTimeout` on success). Per-batch wall time scales with batch size (see `src/sync/fetch-all-timeout.ts`: floor 60s, +300ms per UID, cap 300s) with one retry at 1.5× the base limit when the error message matches `fetchAll timed out`.
 
 ---
 
@@ -136,4 +127,4 @@ No hangs, no spurious WARN, clean exit.
 
 5. **Per-message 5s parse timeout** — stuck parser skips the message with a WARN, never blocks the sync loop.
 
-6. **`fetchAll` stale timer fixed** — `clearTimeout` after `fetchAll` resolves; timeout increased to 30s.
+6. **`fetchAll` stale timer fixed** — `clearTimeout` after `fetchAll` resolves; per-batch timeout scales with batch size (plus limited retry); see `fetch-all-timeout.ts` / `fetch-all-with-retries.ts`.

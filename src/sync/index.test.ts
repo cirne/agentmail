@@ -43,14 +43,13 @@ describe("runSync logic", () => {
     });
 
     it("should handle forward sync when no checkpoint exists", async () => {
-      // No sync_state row - should fall back to date-based search
-      // better-sqlite3 .get() returns undefined when no row (not null)
+      // No sync_state row - runSync uses MAX(uid) from messages when present (rebuild-index case),
+      // else date-based SINCE search. This test only asserts the DB has no checkpoint row.
       const state = (await (
         await db.prepare("SELECT last_uid FROM sync_state WHERE folder = ?")
       ).get(mailbox)) as { last_uid: number } | undefined;
 
       expect(state).toBeUndefined();
-      // Without checkpoint, forward sync should use date-based search
     });
   });
 

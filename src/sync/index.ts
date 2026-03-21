@@ -11,6 +11,8 @@ import { createFileLogger, SYNC_LOG_PATH, setLogger, type FileLogger } from "~/l
 import { withTimer } from "~/lib/timer";
 import { persistMessage, persistAttachmentsFromParsed } from "~/db/message-persistence";
 import { writeMessageMeta } from "~/lib/message-meta";
+import { computeFetchAllTimeoutMs, FETCH_ALL_TIMEOUT_EXTRA_ATTEMPTS, isFetchAllTimeoutMessage } from "./fetch-all-timeout";
+import { fetchAllWithTimeoutAndRetries } from "./fetch-all-with-retries";
 
 /** Mailbox to sync: All Mail for Gmail (per ADR-011), INBOX for others. */
 function getSyncMailbox(host: string): string {
@@ -181,7 +183,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       logger: false, // Keep sync output minimal; our logger reports start/complete/count
       connectionTimeout: 10000, // 10s to establish connection
       // NOTE: do not set socketTimeout — causes a segfault in Bun v1.1.38 on TLS sockets.
-      // Use JS-level Promise.race timeout around fetchAll instead (see below).
+      // Use JS-level Promise.race timeout around fetchAll instead (batch-scaled; see fetch-all-timeout.ts).
     });
 
     logProgress(`Connecting to ${imap.host}…`);
@@ -380,7 +382,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
       
       const direction = options?.direction ?? 'forward';
       let searchQuery: { since?: Date; uid?: string; before?: Date };
-      let uids: number[];
+      let uids: number[] = [];
       /** True when user requested a wider range than we have (backfill older UIDs, not just uid > last_uid). */
       let isExpandingRangeBackward = false;
 
@@ -396,6 +398,38 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         uids = Array.isArray(searchResult) ? searchResult : [];
         fileLogger.info("Forward sync (new messages)", { folder: mailbox, newUids: uids.length, lastUid: state.last_uid });
       } else {
+        // Forward refresh without a usable checkpoint (e.g. sync_state wiped by rebuild-index): SINCE defaultSince
+        // would match tens of thousands of UIDs. If local index has messages for this folder and UIDVALIDITY
+        // still matches (or we never had a row), use MAX(uid)+1:* like a normal incremental refresh.
+        let forwardRecoveredWithDbMaxUid = false;
+        if (direction === 'forward') {
+          const localMaxRow = (await (
+            await db.prepare("SELECT MAX(uid) AS max_uid FROM messages WHERE folder = ?")
+          ).get(mailbox)) as { max_uid: number | bigint | null } | undefined;
+          const localMax =
+            localMaxRow?.max_uid != null ? Number(localMaxRow.max_uid) : 0;
+          const uidValidityKnown = uidvalidity > 0;
+          const checkpointUsableOrAbsent = !state || state.uidvalidity === uidvalidity;
+          if (localMax > 0 && uidValidityKnown && checkpointUsableOrAbsent) {
+            searchQuery = { uid: `${localMax + 1}:*` };
+            const { result: searchResult } = await timer(
+              "search",
+              () => client.search(searchQuery, { uid: true })
+            );
+            phaseMs("search_resolved");
+            uids = Array.isArray(searchResult) ? searchResult : [];
+            forwardRecoveredWithDbMaxUid = true;
+            fileLogger.info("Forward sync (checkpoint missing or zero; using MAX(uid) from local index)", {
+              folder: mailbox,
+              localMax,
+              newUids: uids.length,
+              hadSyncStateRow: !!state,
+              storedLastUid: state?.last_uid,
+            });
+          }
+        }
+
+        if (!forwardRecoveredWithDbMaxUid) {
         // Backward sync (continue syncing) or initial sync: use date-based search
         // For backward sync, resume from the oldest already-synced message to avoid re-checking everything
         let effectiveSinceDate = sinceDate;
@@ -471,6 +505,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           });
         } else {
           fileLogger.info("Messages to sync", { folder: mailbox, count: uids.length, since: fromDate });
+        }
         }
       }
       
@@ -748,18 +783,17 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
             batch: `${batchNum}/${totalBatches}`,
             uids: batch.length,
             uidRange: `${batch[0]}..${batch[batch.length - 1]}`,
+            firstAttemptTimeoutMs: computeFetchAllTimeoutMs(batch.length),
+            maxAttempts: 1 + FETCH_ALL_TIMEOUT_EXTRA_ATTEMPTS,
           });
           const fetchStart = Date.now();
-          let fetchTimeoutId: ReturnType<typeof setTimeout> | undefined;
-          const messages = await Promise.race([
-            client.fetchAll(batch, { envelope: true, source: true, labels: true }, { uid: true }),
-            new Promise<never>((_, reject) => {
-              fetchTimeoutId = setTimeout(() => {
-                reject(new Error(`fetchAll timed out after 30s (batch ${batchNum}/${totalBatches}, ${batch.length} UIDs)`));
-              }, 30_000);
-            }),
-          ]);
-          clearTimeout(fetchTimeoutId);
+          const messages = await fetchAllWithTimeoutAndRetries(
+            client,
+            batch,
+            batchNum,
+            totalBatches,
+            fileLogger
+          );
           const fetchDuration = Date.now() - fetchStart;
           fileLogger.info("fetchAll done", {
             batch: `${batchNum}/${totalBatches}`,
@@ -854,7 +888,22 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     }
     } catch (err) {
       await releaseLock(db, "sync_summary", process.pid);
-      fileLogger.error("Sync failed", { error: String(err) });
+      const errStr = String(err);
+      const errMsg = err instanceof Error ? err.message : errStr;
+      fileLogger.error("Sync failed", { error: errStr });
+      if (isFetchAllTimeoutMessage(errMsg)) {
+        fileLogger.warn("IMAP fetch timeout — sync run aborted (not a successful completion)", {
+          outcome: "aborted",
+          reason: "fetchAll exceeded per-batch time limit (retries exhausted if logged above)",
+          statusUiNote:
+            "`zmail status` last sync time is from the previous successful run, not this failed attempt",
+          resume: "Re-run zmail sync to continue; earlier completed batches in this run are already checkpointed",
+        });
+        logProgress(
+          "Sync stopped: IMAP fetch timed out (details in sync log). Re-run zmail sync to continue."
+        );
+      }
+      fileLogger.info("Sync run finished", { outcome: "error", success: false });
       fileLogger.close();
       restoreLogger(); // Restore original logger even on error
       throw err;

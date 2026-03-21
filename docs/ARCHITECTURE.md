@@ -460,13 +460,13 @@ This replaces timestamp-based staleness detection. PID checks are instantaneous 
 - Agents and remote clients can poll status at any time without depending on stdout.
 - Stdout progress lines are emitted periodically for environments that stream output.
 
-**Ingestion from IMAP:** `zmail sync` and `zmail refresh` are the entry points for fetching mail — one command, one process (no separate backfill tool). **Local index rebuild:** `zmail rebuild-index` wipes SQLite and reindexes from `maildir/cur/` using the same path as a schema version bump (dev/test; no IMAP).
+**Ingestion from IMAP:** `zmail sync` and `zmail refresh` are the entry points for fetching mail — one command, one process (no separate backfill tool). **Local index rebuild:** `zmail rebuild-index` wipes SQLite and reindexes from `maildir/cur/` using the same path as a schema version bump (dev/test; no IMAP). Before delete, `sync_state` is read from the old DB and written back after reindex with `last_uid` at least `MAX(uid)` per folder in the rebuilt index so forward sync can resume from UID range instead of a huge date-based search.
 
 ---
 
 ### ADR-021: Schema Drift Handling — Auto-Rebuild from Maildir
 
-**Decision:** On CLI startup, the app checks `user_version` against the current schema version. If the DB has an older version, the app automatically rebuilds the index from the local maildir cache: deletes the DB (plus any `-shm`/`-wal` WAL files), creates a fresh DB, and re-indexes all `.eml` files from `maildir/cur/`. No manual resync from IMAP is required.
+**Decision:** On CLI startup, the app checks `user_version` against the current schema version. If the DB has an older version, the app automatically rebuilds the index from the local maildir cache: reads `sync_state` from the old DB for restore, deletes the DB (plus any `-shm`/`-wal` WAL files), creates a fresh DB, re-indexes all `.eml` files from `maildir/cur/`, then restores `sync_state` (merging with per-folder `MAX(uid)` from the new index). The same path applies to `zmail rebuild-index`. No manual resync from IMAP is required for the index itself.
 
 **Rationale:** This project intentionally avoids in-app migrations for existing DBs. `CREATE TABLE IF NOT EXISTS` keeps fresh bootstraps simple but does not mutate older tables. The raw maildir is the durable artifact (ADR-002); rebuilding from it is faster than re-syncing from IMAP and avoids credential/network dependency during schema upgrades.
 

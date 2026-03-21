@@ -139,6 +139,11 @@ Hello, this is test message 2.`
     expect(messages[1].subject).toBe("Test Message 2");
     expect(messages[1].from_address).toBe("bob@example.com");
     expect(messages[1].body_text).toContain("test message 2");
+
+    const summary = (await (await db.prepare("SELECT last_sync_at FROM sync_summary WHERE id = 1")).get()) as {
+      last_sync_at: string | null;
+    };
+    expect(summary.last_sync_at).toBeTruthy();
   });
 
   it("creates FTS index entries", async () => {
@@ -239,6 +244,40 @@ Body.`
       message_id: string;
     }[];
     expect(rows).toEqual([{ message_id: "<only@example.com>" }]);
+  });
+
+  it("rebuildLocalIndexFromMaildirForced preserves sync_state and merges last_uid with maildir MAX(uid)", async () => {
+    const maildirCur = join(testTempDir, "data", "maildir", "cur");
+    const mailbox = "[Gmail]/All Mail";
+
+    const eml = Buffer.from(
+      `Message-ID: <preserved@example.com>
+From: a@example.com
+To: user@example.com
+Subject: Preserved checkpoint
+Date: Mon, 1 Jan 2024 12:00:00 +0000
+Content-Type: text/plain
+
+Body.`
+    );
+    writeFileSync(join(maildirCur, "500_preserved@example.com.eml"), eml);
+
+    const dbBefore = await getDb();
+    await (
+      await dbBefore.prepare(
+        "INSERT OR REPLACE INTO sync_state (folder, uidvalidity, last_uid) VALUES (?, ?, ?)"
+      )
+    ).run(mailbox, 4242, 600);
+
+    await rebuildLocalIndexFromMaildirForced();
+
+    const db = await getDb();
+    const st = (await (
+      await db.prepare("SELECT uidvalidity, last_uid FROM sync_state WHERE folder = ?")
+    ).get(mailbox)) as { uidvalidity: number; last_uid: number };
+
+    expect(st.uidvalidity).toBe(4242);
+    expect(st.last_uid).toBe(600);
   });
 
   it("handles missing maildir/cur/ directory", async () => {

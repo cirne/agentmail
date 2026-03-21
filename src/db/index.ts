@@ -17,6 +17,37 @@ function openRawDatabase(path: string): InstanceType<typeof Database> {
   return new Database(path);
 }
 
+/** Rows read from sync_state before wiping the DB (rebuild / schema bump). */
+type PreservedSyncStateRow = { folder: string; uidvalidity: number; last_uid: number };
+
+function readSyncStateForPreserve(dbPath: string): PreservedSyncStateRow[] {
+  if (!existsSync(dbPath)) return [];
+  const raw = openRawDatabase(dbPath);
+  try {
+    const rows = raw.prepare("SELECT folder, uidvalidity, last_uid FROM sync_state").all() as PreservedSyncStateRow[];
+    return Array.isArray(rows) ? rows : [];
+  } catch {
+    return [];
+  } finally {
+    raw.close();
+  }
+}
+
+async function restorePreservedSyncState(db: SqliteDatabase, preserved: PreservedSyncStateRow[]): Promise<void> {
+  if (preserved.length === 0) return;
+  const upsert = await db.prepare(
+    "INSERT OR REPLACE INTO sync_state (folder, uidvalidity, last_uid) VALUES (?, ?, ?)"
+  );
+  for (const row of preserved) {
+    const maxRow = (await (await db.prepare("SELECT MAX(uid) AS m FROM messages WHERE folder = ?")).get(
+      row.folder
+    )) as { m: number | bigint | null } | undefined;
+    const maxFromIndex = maxRow?.m != null ? Number(maxRow.m) : 0;
+    const lastUid = Math.max(row.last_uid, maxFromIndex);
+    await upsert.run(row.folder, row.uidvalidity, lastUid);
+  }
+}
+
 /**
  * Check if the database schema version matches the current code version.
  * Returns true if schema needs to be rebuilt (version mismatch or DB doesn't exist).
@@ -72,6 +103,7 @@ export async function closeDb(): Promise<void> {
 async function runRebuildIndexFromMaildir(stderrIntro: string): Promise<void> {
   process.stderr.write(stderrIntro);
   await closeDb();
+  const preservedSyncState = readSyncStateForPreserve(config.dbPath);
   rmSync(config.dbPath, { force: true });
   rmSync(`${config.dbPath}-shm`, { force: true });
   rmSync(`${config.dbPath}-wal`, { force: true });
@@ -85,6 +117,11 @@ async function runRebuildIndexFromMaildir(stderrIntro: string): Promise<void> {
   try {
     fileLogger.info("Schema rebuild starting");
     const result = await reindexFromMaildir();
+    if (preservedSyncState.length > 0) {
+      const db = await getDb();
+      await restorePreservedSyncState(db, preservedSyncState);
+      fileLogger.info("Restored sync_state after rebuild", { folders: preservedSyncState.length });
+    }
     fileLogger.info("Schema rebuild complete", { parsed: result.parsed });
     process.stderr.write(`Rebuild complete (${result.parsed} messages re-indexed).\n`);
   } finally {
