@@ -1,6 +1,6 @@
 {
   "name": "@cirne/zmail",
-  "version": "0.1.0-alpha.20260320.191124",
+  "version": "0.1.0-alpha.20260324.184216",
   "description": "Agent-first email system — sync, index, and search email for AI agents",
   "scripts": {
     "postinstall": "node scripts/rebuild-better-sqlite.mjs",
