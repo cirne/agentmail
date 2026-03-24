@@ -40,7 +40,7 @@ Search emails using FTS5 full-text search. The tool **always** returns a JSON **
 - `threads` — optional, when `includeThreads: true`
 - `timings` — optional search timings
 
-**Slim vs full:** With `resultFormat: "auto"` (default), if there are **more than 50** results, each element of `results` is **slim**: `messageId`, `subject`, `fromName` (if present), `date`, `attachments` (integer count when greater than zero). Otherwise each element is **full**: `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, index }` when present). Use `resultFormat: "full"` to force full rows for large result sets, or `resultFormat: "slim"` to force slim rows for small sets.
+**Slim vs full:** With `resultFormat: "auto"` (default), if there are **more than 50** results, each element of `results` is **slim**: `messageId`, `subject`, `fromName` (if present), `date`, `attachments` (integer count when greater than zero), `attachmentTypes` (deduplicated MIME subtype strings, e.g. `pdf`, when count > 0). Otherwise each element is **full**: `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, size, extracted, index }` when present — same 1-based `index` as `read_attachment`). Use `resultFormat: "full"` to force full rows for large result sets, or `resultFormat: "slim"` to force slim rows for small sets.
 
 **Parameters:**
 - `query` (string, optional): Full-text search query. Supports inline operators: `from:`, `to:`, `subject:`, `after:`, `before:`
@@ -53,7 +53,7 @@ Search emails using FTS5 full-text search. The tool **always** returns a JSON **
 - `includeNoise` (boolean, optional): When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false — noise messages are excluded by default.
 - `resultFormat` (string, optional): `"auto"` | `"full"` | `"slim"` — controls per-result shape (default: `auto`; see above).
 
-**Note:** CLI JSON search uses the same slim threshold and adds `--result-format`; it also adds `attachmentTypes` in full mode for quick scanning. Use `list_attachments` when you need full attachment rows (e.g. `size`, `stored_path`) without searching first.
+**Note:** CLI JSON search uses the same slim threshold and adds `--result-format`. Full rows inline the same attachment fields as `list_attachments` except `stored_path`. Use `list_attachments` when you need `stored_path` or are not coming from search.
 
 **Example:**
 ```json

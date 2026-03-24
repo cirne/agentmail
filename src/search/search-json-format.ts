@@ -1,4 +1,13 @@
-import type { SearchResult } from "~/lib/types";
+import type { SearchResult, SearchResultAttachment } from "~/lib/types";
+
+function mimeTypeToExtension(mimeType: string): string {
+  const parts = mimeType.split("/");
+  return parts.length > 1 ? parts[1]! : mimeType;
+}
+
+function distinctAttachmentTypeExtensions(attachments: SearchResultAttachment[]): string[] {
+  return [...new Set(attachments.map((a) => mimeTypeToExtension(a.mimeType)))];
+}
 
 /** Above this many results, JSON search defaults to slim rows (unless overridden). */
 export const SEARCH_AUTO_SLIM_THRESHOLD = 50;
@@ -24,7 +33,7 @@ export function resolveSearchJsonFormat(opts: {
 }
 
 /**
- * Slim search row for triage: messageId, subject, fromName?, date, attachments (count only).
+ * Slim search row for triage: messageId, subject, fromName?, date, attachments (count), attachmentTypes (MIME subtype strings).
  */
 export function searchResultToSlimJsonRow(r: SearchResult): Record<string, unknown> {
   const out: Record<string, unknown> = {
@@ -35,20 +44,24 @@ export function searchResultToSlimJsonRow(r: SearchResult): Record<string, unkno
   if (r.fromName != null && r.fromName !== "") {
     out.fromName = r.fromName;
   }
-  const attCount = r.attachments?.length ?? 0;
-  if (attCount > 0) {
-    out.attachments = attCount;
+  const atts = r.attachments ?? [];
+  if (atts.length > 0) {
+    out.attachments = atts.length;
+    const types = distinctAttachmentTypeExtensions(atts);
+    if (types.length > 0) {
+      out.attachmentTypes = types;
+    }
   }
   return out;
 }
 
-/** Slim row from CLI search row (attachment count from hydrate step). */
+/** Slim row from CLI search row (aggregates from attachmentList). */
 export function searchCliRowToSlimJsonRow(row: {
   messageId: string;
   subject: string;
   fromName: string | null;
   date: string;
-  attachments?: { count: number };
+  attachmentList: SearchResultAttachment[];
 }): Record<string, unknown> {
   const out: Record<string, unknown> = {
     messageId: row.messageId,
@@ -58,16 +71,20 @@ export function searchCliRowToSlimJsonRow(row: {
   if (row.fromName != null && row.fromName !== "") {
     out.fromName = row.fromName;
   }
-  const c = row.attachments?.count ?? 0;
-  if (c > 0) {
-    out.attachments = c;
+  const atts = row.attachmentList;
+  if (atts.length > 0) {
+    out.attachments = atts.length;
+    const types = distinctAttachmentTypeExtensions(atts);
+    if (types.length > 0) {
+      out.attachmentTypes = types;
+    }
   }
   return out;
 }
 
 export function searchSlimResultHint(): string {
   return (
-    "Large result set — slim format (messageId, subject, fromName, date, attachments count only). " +
-    "Use get_messages(messageIds) with detail: 'summary' or 'full' for bodyPreview, threadId, fromAddress, rank, and attachment types."
+    "Large result set — slim format (messageId, subject, fromName, date, attachment count + attachmentTypes). " +
+    "Use get_messages(messageIds) with detail: 'summary' or 'full' for bodyPreview, threadId, fromAddress, rank, and per-file attachment metadata."
   );
 }

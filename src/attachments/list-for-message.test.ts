@@ -25,11 +25,32 @@ describe("indexAttachmentsByMessageId", () => {
 
     const map = await indexAttachmentsByMessageId(db, [a, b]);
     expect(map.get(a)).toEqual([
-      { id: expect.any(Number), filename: "a.pdf", mimeType: "application/pdf", index: 1 },
-      { id: expect.any(Number), filename: "b.pdf", mimeType: "application/pdf", index: 2 },
+      {
+        id: expect.any(Number),
+        filename: "a.pdf",
+        mimeType: "application/pdf",
+        size: 0,
+        extracted: false,
+        index: 1,
+      },
+      {
+        id: expect.any(Number),
+        filename: "b.pdf",
+        mimeType: "application/pdf",
+        size: 0,
+        extracted: false,
+        index: 2,
+      },
     ]);
     expect(map.get(b)).toEqual([
-      { id: expect.any(Number), filename: "only.txt", mimeType: "text/plain", index: 1 },
+      {
+        id: expect.any(Number),
+        filename: "only.txt",
+        mimeType: "text/plain",
+        size: 0,
+        extracted: false,
+        index: 1,
+      },
     ]);
   });
 });

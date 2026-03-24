@@ -19,7 +19,7 @@ function sampleResult(over: Partial<SearchResult> = {}): SearchResult {
     rank: -1,
     bodyPreview: "long preview ".repeat(20),
     attachments: [
-      { id: 1, filename: "f.pdf", mimeType: "application/pdf", index: 1 },
+      { id: 1, filename: "f.pdf", mimeType: "application/pdf", size: 100, extracted: false, index: 1 },
     ],
     ...over,
   };
@@ -64,25 +64,32 @@ describe("search-json-format", () => {
       date: "2026-01-01T00:00:00.000Z",
       fromName: "X",
       attachments: 1,
+      attachmentTypes: ["pdf"],
     });
     expect(row).not.toHaveProperty("bodyPreview");
     expect(row).not.toHaveProperty("threadId");
   });
 
-  it("searchCliRowToSlimJsonRow uses attachment count", () => {
+  it("searchCliRowToSlimJsonRow uses attachment count and types", () => {
+    const three = [
+      { id: 1, filename: "a.pdf", mimeType: "application/pdf", size: 1, extracted: false, index: 1 },
+      { id: 2, filename: "b.pdf", mimeType: "application/pdf", size: 1, extracted: true, index: 2 },
+      { id: 3, filename: "c.txt", mimeType: "text/plain", size: 1, extracted: false, index: 3 },
+    ];
     expect(
       searchCliRowToSlimJsonRow({
         messageId: "<m>",
         subject: "S",
         fromName: null,
         date: "2026-01-02T00:00:00.000Z",
-        attachments: { count: 3 },
+        attachmentList: three,
       })
     ).toEqual({
       messageId: "<m>",
       subject: "S",
       date: "2026-01-02T00:00:00.000Z",
       attachments: 3,
+      attachmentTypes: ["pdf", "plain"],
     });
   });
 });

@@ -70,10 +70,20 @@ async function mergeAttachmentMetadata(
     db,
     results.map((r) => r.messageId)
   );
-  return results.map((r) => ({
-    ...r,
-    attachments: byMessage.get(r.messageId) ?? [],
-  }));
+  return results.map((r) => {
+    const list = byMessage.get(r.messageId) ?? [];
+    return {
+      ...r,
+      attachments: list.map((a) => ({
+        id: a.id,
+        filename: a.filename,
+        mimeType: a.mimeType,
+        size: a.size,
+        extracted: a.extracted,
+        index: a.index,
+      })),
+    };
+  });
 }
 
 /** Load full thread messages (for includeThreads). */

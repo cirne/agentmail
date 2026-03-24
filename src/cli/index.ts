@@ -427,20 +427,15 @@ function defaultFieldsForDetail(detail: SearchDetail): SearchField[] {
   return DEFAULT_HEADER_FIELDS;
 }
 
-interface AttachmentMetadata {
-  count: number;
-  types: string[];
-}
-
-/** CLI search row: aggregate attachment stats replace FTS `attachments` (per-file list) on output. */
+/** CLI search row: per-file attachment list from search merge (full JSON); slim/text use aggregates derived from it). */
 type CliSearchRow = Omit<SearchResult, "attachments"> & {
   body?: string;
-  attachments?: AttachmentMetadata;
+  attachmentList: NonNullable<SearchResult["attachments"]>;
 };
 
 function toCliSearchRow(r: SearchResult): CliSearchRow {
-  const { attachments: _ftsAttachments, ...rest } = r;
-  return rest;
+  const { attachments: attachmentList = [], ...rest } = r;
+  return { ...rest, attachmentList };
 }
 
 async function hydrateBodies(db: SqliteDatabase, results: CliSearchRow[]): Promise<CliSearchRow[]> {
@@ -459,35 +454,6 @@ async function hydrateBodies(db: SqliteDatabase, results: CliSearchRow[]): Promi
   }));
 }
 
-async function hydrateAttachmentMetadata(
-  db: SqliteDatabase,
-  results: SearchResult[]
-): Promise<Map<string, AttachmentMetadata>> {
-  if (results.length === 0) return new Map();
-  const ids = results.map((r) => r.messageId);
-  const placeholders = ids.map(() => "?").join(",");
-  const rows = (await (
-    await db.prepare(
-      `SELECT message_id, COUNT(*) as count, GROUP_CONCAT(DISTINCT mime_type) as types
-       FROM attachments WHERE message_id IN (${placeholders}) GROUP BY message_id`
-    )
-  ).all(...ids)) as Array<{ message_id: string; count: number; types: string | null }>;
-  
-  const metadataByMessageId = new Map<string, AttachmentMetadata>();
-  for (const row of rows) {
-    const types = row.types ? row.types.split(",").map(t => {
-      // Extract file extension from mime type (e.g., "application/pdf" -> "pdf")
-      const parts = t.split("/");
-      return parts.length > 1 ? parts[1] : t;
-    }) : [];
-    metadataByMessageId.set(row.message_id, {
-      count: row.count,
-      types: [...new Set(types)], // deduplicate
-    });
-  }
-  return metadataByMessageId;
-}
-
 function projectResult(row: CliSearchRow, detail: SearchDetail, fields?: SearchField[]): Record<string, unknown> {
   const selected = new Set<SearchField>(fields?.length ? fields : defaultFieldsForDetail(detail));
   // Preserve stable IDs for shortlist -> hydrate workflows.
@@ -496,20 +462,25 @@ function projectResult(row: CliSearchRow, detail: SearchDetail, fields?: SearchF
 
   const projected: Record<string, unknown> = {};
   for (const field of selected) {
+    if (field === "attachments") continue;
     const value = row[field];
     if (value !== undefined) {
       projected[field] = value;
     }
   }
-  
-  // Always include attachment metadata if available (not filtered by fields)
-  if (row.attachments && row.attachments.count > 0) {
-    projected.attachments = row.attachments.count;
-    if (row.attachments.types.length > 0) {
-      projected.attachmentTypes = row.attachments.types;
-    }
+
+  // Always include full attachment metadata when present (not filtered by --fields)
+  if (row.attachmentList.length > 0) {
+    projected.attachments = row.attachmentList.map((a) => ({
+      id: a.id,
+      filename: a.filename,
+      mimeType: a.mimeType,
+      size: a.size,
+      extracted: a.extracted,
+      index: a.index,
+    }));
   }
-  
+
   return projected;
 }
 
@@ -1045,12 +1016,6 @@ async function main() {
         results = await hydrateBodies(db, results);
       }
 
-      const attachmentMetadata = await hydrateAttachmentMetadata(db, run.results);
-      results = results.map((r) => ({
-        ...r,
-        attachments: attachmentMetadata.get(r.messageId),
-      }));
-
       if (shouldOutputJson) {
         const allowAutoSlim = effectiveDetail === "headers" && !parsed.fields?.length;
         const jsonFormat = resolveSearchJsonFormat({
@@ -1098,9 +1063,8 @@ async function main() {
           const fromShort = from.length > 20 ? from.slice(0, 17) + "..." : from.padEnd(20);
           const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
           const idShort = r.messageId.length > 34 ? r.messageId.slice(0, 31) + "..." : r.messageId;
-          const attachmentIndicator = r.attachments && r.attachments.count > 0 
-            ? ` 📎${r.attachments.count}` 
-            : "";
+          const attachmentIndicator =
+            r.attachmentList.length > 0 ? ` 📎${r.attachmentList.length}` : "";
           console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${idShort}${attachmentIndicator}`);
         }
       } else {
@@ -1113,9 +1077,8 @@ async function main() {
           const subjectShort = r.subject.length > 30 ? r.subject.slice(0, 27) + "..." : r.subject.padEnd(30);
           const snippetClean = r.snippet.replace(/<[^>]+>/g, "").trim();
           const snippetShort = snippetClean.length > 30 ? snippetClean.slice(0, 27) + "..." : snippetClean;
-          const attachmentIndicator = r.attachments && r.attachments.count > 0 
-            ? ` 📎${r.attachments.count}` 
-            : "";
+          const attachmentIndicator =
+            r.attachmentList.length > 0 ? ` 📎${r.attachmentList.length}` : "";
           console.log(`  ${date}  ${fromShort}  ${subjectShort}  ${snippetShort}${attachmentIndicator}`);
         }
       }

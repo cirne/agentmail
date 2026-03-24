@@ -20,6 +20,8 @@ export type AttachmentIndexedByFilename = {
   id: number;
   filename: string;
   mimeType: string;
+  size: number;
+  extracted: boolean;
   index: number;
 };
 
@@ -54,12 +56,20 @@ export async function indexAttachmentsByMessageId(
   const rows = (await (
     await db.prepare(
       /* sql */ `
-      SELECT message_id AS messageId, id, filename, mime_type AS mimeType
+      SELECT message_id AS messageId, id, filename, mime_type AS mimeType, size,
+             CASE WHEN extracted_text IS NOT NULL AND LENGTH(TRIM(extracted_text)) > 0 THEN 1 ELSE 0 END AS extracted
       FROM attachments
       WHERE message_id IN (${placeholders})
       ORDER BY message_id, filename`
     )
-  ).all(...messageIds)) as Array<{ messageId: string; id: number; filename: string; mimeType: string }>;
+  ).all(...messageIds)) as Array<{
+    messageId: string;
+    id: number;
+    filename: string;
+    mimeType: string;
+    size: number;
+    extracted: number;
+  }>;
 
   for (const row of rows) {
     const list = byMessage.get(row.messageId) ?? [];
@@ -67,6 +77,8 @@ export async function indexAttachmentsByMessageId(
       id: row.id,
       filename: row.filename,
       mimeType: row.mimeType,
+      size: row.size,
+      extracted: row.extracted === 1,
       index: list.length + 1,
     });
     byMessage.set(row.messageId, list);

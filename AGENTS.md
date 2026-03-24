@@ -176,7 +176,7 @@ See [`docs/MCP.md`](docs/MCP.md) for MCP server documentation and tool reference
 
 Search uses FTS5 full-text search for keyword matching.
 
-Search results include attachment metadata (count and file types) in JSON output, and visual indicators (📎) in formatted table output. For document-related queries (contract, invoice, receipt, etc.), hints suggest checking attachments with `zmail attachment list <message_id>`.
+Search JSON includes attachment info: **full** rows list per-file metadata (`id`, `filename`, `mimeType`, `size`, `extracted`, `index` — same 1-based index as `attachment read`); **slim** rows (large result sets with auto format) include a count plus `attachmentTypes` (MIME subtype strings). Text/table output shows 📎 with counts. For `stored_path` or when not searching first, use `zmail attachment list <message_id>`.
 
 ## Configuration
 

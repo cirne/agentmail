@@ -72,6 +72,9 @@ export interface SearchResultAttachment {
   id: number;
   filename: string;
   mimeType: string;
+  size: number;
+  /** True when extracted text is cached in the DB (read is faster). */
+  extracted: boolean;
   index: number; // 1-based for CLI/MCP read_attachment
 }
 
