@@ -226,6 +226,12 @@ describe("CLI output formats (ADR-022)", () => {
       expect(stderr).toContain("default: JSON");
     });
 
+    it("search --help mentions --result-format", async () => {
+      const { stderr, exitCode } = await runZmail(["search", "--help"], baseEnv());
+      expect(exitCode).toBe(0);
+      expect(stderr).toContain("--result-format");
+    });
+
     it("who --help mentions --text flag", async () => {
       const { stderr, exitCode } = await runZmail(["who", "--help"], baseEnv());
       expect(exitCode).toBe(0);

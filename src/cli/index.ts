@@ -1,4 +1,10 @@
 import { searchWithMeta } from "~/search";
+import {
+  resolveSearchJsonFormat,
+  searchCliRowToSlimJsonRow,
+  searchSlimResultHint,
+  type SearchResultFormatPreference,
+} from "~/search/search-json-format";
 import { who } from "~/search/who";
 import { runSync } from "~/sync";
 import { getDb } from "~/db";
@@ -110,8 +116,7 @@ const DEFAULT_HEADER_FIELDS: SearchField[] = [
   "bodyPreview",
   "attachments",
 ];
-const JSON_LIMIT_CAP = 100;
-const JSON_BYTE_CAP = 64 * 1024;
+const JSON_BYTE_CAP = 2 * 1024 * 1024;
 
 /** Normalize message_id/thread_id for DB lookup: stored format includes angle brackets; accept with or without. */
 function normalizeMessageId(id: string): string {
@@ -129,6 +134,8 @@ interface ParsedSearchArgs {
   limit?: number;
   detail: SearchDetail;
   fields?: SearchField[];
+  /** JSON row shape: auto (slim if many results), full, or slim. */
+  resultFormat?: SearchResultFormatPreference;
   forceText: boolean;
   idsOnly: boolean;
   timings: boolean;
@@ -145,8 +152,9 @@ function searchUsage() {
   console.error("  Example: zmail search \"after:7d subject:meeting\"");
   console.error("");
   console.error("Flags:");
-  console.error("  --limit <n>        max results (default: 50)");
+  console.error("  --limit <n>        max results (default: all matches)");
   console.error("  --detail <level>   headers | snippet | body (default: headers)");
+  console.error("  --result-format <m>  auto | full | slim — JSON row shape (default: auto; auto uses slim when >50 results)");
   console.error("  --fields <csv>     projection fields, e.g. messageId,subject,date");
   console.error("  --threads          return full threads for each match (conversation view)");
   console.error("  --ids-only         return only message IDs");
@@ -365,6 +373,14 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
       parsed.detail = detail;
       continue;
     }
+    if (arg === "--result-format") {
+      const mode = readValue(arg).toLowerCase();
+      if (mode !== "auto" && mode !== "full" && mode !== "slim") {
+        throw new Error(`Invalid --result-format: "${mode}". Use auto, full, or slim.`);
+      }
+      parsed.resultFormat = mode as SearchResultFormatPreference;
+      continue;
+    }
     if (arg === "--fields") {
       const fieldsRaw = readValue(arg);
       const fields = fieldsRaw
@@ -501,8 +517,12 @@ function getSearchHint(
   query: string,
   resultCount: number,
   totalMatched: number,
-  limit?: number
+  limit?: number,
+  slimJsonFormat?: boolean
 ): string | undefined {
+  if (slimJsonFormat) {
+    return searchSlimResultHint();
+  }
   const words = query.trim().split(/\s+/).filter(Boolean);
   const isSingleWord = words.length === 1;
   const isVagueWord = isSingleWord && ["important", "urgent", "meeting", "email", "message", "document", "file"].includes(words[0].toLowerCase());
@@ -522,13 +542,8 @@ function getSearchHint(
     return `Tip: Top result includes body preview. Use get_messages(messageIds) to batch-read; use detail: 'summary' for minimal tokens when scanning, or detail: 'full' with maxBodyChars as needed.`;
   }
 
-  // Truncated results hint (only show if we have more results than displayed)
-  if (totalMatched > resultCount && totalMatched > (limit ?? 50)) {
-    const hasOffset = false; // TODO: track offset if we add it to CLI args
-    if (hasOffset) {
-      return `Showing ${resultCount} of ${totalMatched} matches. Use --limit or --offset to see more.`;
-    }
-    return `Showing ${resultCount} of ${totalMatched} matches. Use --limit ${Math.min(totalMatched, (limit ?? 50) + 50)} to see more, or --offset ${resultCount} for next page.`;
+  if (totalMatched > resultCount && limit != null) {
+    return `Showing ${resultCount} of ${totalMatched} matches. Use --offset ${resultCount} for next page.`;
   }
 
   // Vague single-word query hint (common words that return too many results)
@@ -556,14 +571,24 @@ function serializeJsonPayload(
   totalMatched?: number,
   limit?: number,
   searchHint?: string,
-  threads?: unknown[]
+  threads?: unknown[],
+  envelope?: { wrap: boolean; resultFormat?: "slim" | "full" }
 ): string {
   const total = rows.length;
   const trueTotal = totalMatched ?? total; // Use provided totalMatched, fallback to rows.length
   const truncated = trueTotal > total;
-  // Use searchHint from searchWithMeta if provided, otherwise fall back to getSearchHint
-  const hint = searchHint ?? (query ? getSearchHint(query, resultCount ?? total, trueTotal, limit) : undefined);
-  const hasMeta = truncated || timings || hint || (threads && threads.length > 0);
+  const slimFormat = envelope?.resultFormat === "slim";
+  const hint =
+    slimFormat && !searchHint
+      ? searchSlimResultHint()
+      : searchHint ?? (query ? getSearchHint(query, resultCount ?? total, trueTotal, limit, slimFormat) : undefined);
+  const hasMeta =
+    Boolean(envelope?.wrap) ||
+    truncated ||
+    timings ||
+    hint ||
+    (threads && threads.length > 0) ||
+    envelope?.resultFormat !== undefined;
 
   for (let includeCount = total; includeCount >= 0; includeCount--) {
     const visible = rows.slice(0, includeCount);
@@ -574,6 +599,7 @@ function serializeJsonPayload(
           truncated,
           totalMatched: trueTotal,
           returned: visible.length,
+          ...(envelope?.resultFormat ? { format: envelope.resultFormat } : {}),
           ...(hint ? { hint } : {}),
           ...(timings ? { timings } : {}),
         }
@@ -591,6 +617,7 @@ function serializeJsonPayload(
       truncated: true,
       totalMatched: trueTotal,
       returned: 0,
+      ...(envelope?.resultFormat ? { format: envelope.resultFormat } : {}),
       ...(hint ? { hint } : {}),
       ...(timings ? { timings } : {}),
     },
@@ -993,13 +1020,7 @@ async function main() {
 
       const forceJsonForAdvancedFlags = parsed.idsOnly || parsed.timings || !!parsed.fields?.length;
       const shouldOutputJson = !parsed.forceText || forceJsonForAdvancedFlags;
-      let effectiveLimit = parsed.limit;
-      if (shouldOutputJson && effectiveLimit && effectiveLimit > JSON_LIMIT_CAP) {
-        console.error(
-          `--limit ${effectiveLimit} is too large for JSON mode; capping to ${JSON_LIMIT_CAP} for stable output.`
-        );
-        effectiveLimit = JSON_LIMIT_CAP;
-      }
+      const effectiveLimit = parsed.limit;
 
       const db = await getDb();
       const effectiveDetail = resolveDetail(parsed.detail, parsed.fields);
@@ -1031,9 +1052,17 @@ async function main() {
       }));
 
       if (shouldOutputJson) {
+        const allowAutoSlim = effectiveDetail === "headers" && !parsed.fields?.length;
+        const jsonFormat = resolveSearchJsonFormat({
+          resultCount: results.length,
+          preference: parsed.resultFormat ?? "auto",
+          allowAutoSlim,
+        });
         const rows = parsed.idsOnly
           ? results.map((r) => r.messageId)
-          : results.map((r) => projectResult(r, effectiveDetail, parsed.fields));
+          : jsonFormat === "slim"
+            ? results.map((r) => searchCliRowToSlimJsonRow(r))
+            : results.map((r) => projectResult(r, effectiveDetail, parsed.fields));
         const json = serializeJsonPayload(
           rows,
           parsed.timings ? run.timings : undefined,
@@ -1041,8 +1070,9 @@ async function main() {
           results.length,
           run.totalMatched ?? results.length,
           effectiveLimit,
-          parsed.query ? getSearchHint(parsed.query, results.length, run.totalMatched ?? results.length, effectiveLimit) : undefined,
-          parsed.threads && run.threads?.length ? run.threads : undefined
+          undefined,
+          parsed.threads && run.threads?.length ? run.threads : undefined,
+          parsed.idsOnly ? undefined : { wrap: true, resultFormat: jsonFormat }
         );
         console.log(json);
         break;

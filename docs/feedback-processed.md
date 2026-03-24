@@ -32,16 +32,18 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `bug-who-name-inference-noreply-garbage.md` | 2026-03-07 | Created bug | [BUG-015](bugs/archive/BUG-015-who-name-inference-noreply-garbage.md) |
 | `bakeoff-results.md` | 2026-03-07 | Created bug | [BUG-016](bugs/archive/BUG-016-bakeoff-incomplete-coverage-critical.md) — Archived 2026-03-10; domain→from scope → BUG-020 |
 | `bug-search-silent-truncation-and-fts-dot-syntax.md` | 2026-03-07 | Updated existing bug | [BUG-016](bugs/archive/BUG-016-bakeoff-incomplete-coverage-critical.md) — Post-fix retest; archived 2026-03-10 |
-| `bakeoff-001-rudy-funds.md` | 2026-03-07 | Created opportunity | [OPP-018](opportunities/OPP-018-reduce-agent-round-trips.md) — body preview + richer search output |
+| `bakeoff-001-rudy-funds.md` | 2026-03-07 | Created opportunity | [OPP-018](opportunities/archive/OPP-018-reduce-agent-round-trips.md) — body preview + richer search output |
 | `bakeoff-002-entrepreneur-meeting.md` | 2026-03-07 | Created bug | [BUG-017](bugs/BUG-017-semantic-recall-gap-intent-queries.md) — semantic recall gap for intent queries |
-| `bakeoff-003-news-headlines.md` | 2026-03-07 | Created opportunity | [OPP-018](opportunities/OPP-018-reduce-agent-round-trips.md) — newsletter detection + body preview |
-| `bakeoff-004-tech-news.md` | 2026-03-07 | Created opportunity | [OPP-018](opportunities/OPP-018-reduce-agent-round-trips.md) — primary source: batch get_message + richer search output |
+| `bakeoff-003-news-headlines.md` | 2026-03-07 | Created opportunity | [OPP-018](opportunities/archive/OPP-018-reduce-agent-round-trips.md) — newsletter detection + body preview |
+| `bakeoff-004-tech-news.md` | 2026-03-07 | Created opportunity | [OPP-018](opportunities/archive/OPP-018-reduce-agent-round-trips.md) — primary source: batch get_message + richer search output |
 | `bakeoff-005-entrepreneur-rematch.md` | 2026-03-07 | Created opportunity + bug, updated existing bug | [OPP-019](opportunities/OPP-019-fts-first-retire-semantic-default.md) (FTS-first); [BUG-018](bugs/BUG-018-who-timings-unknown-flag.md) (who --timings); [BUG-017](bugs/BUG-017-semantic-recall-gap-intent-queries.md) updated with resolution path |
 | `bakeoff-results.md` (updated v2) | 2026-03-07 | Index update noted | Bakeoff #5 added to index; strategic insight → OPP-019 |
 | `bug-read-prepare-error.md` | 2026-03-09 | Created bug | [BUG-021](bugs/BUG-021-read-prepare-error.md) — `read`/`get_messages` crash with prepare error |
 | `ux-ask-default-detail-level.md` | 2026-03-09 | Created opportunity | [OPP-022](opportunities/OPP-022-ask-synthesis-detail-level.md) — Mini synthesis too shallow for broad queries |
 | `ux-ask-inbox-includes-spam.md` | 2026-03-09 | Matched existing opportunity; partially fixed | [OPP-021](opportunities/OPP-021-ask-spam-promo-awareness.md) — Schema version bumped (4→5) to force re-index with noise classification |
 | `bug-attachments-missing-from-email.md` | 2026-03-09 | Created bug; fixed | [BUG-023](bugs/archive/BUG-023-attachments-missing-from-synced-email.md) — Attachment filter bug fixed (schema v8→9); recovered 14 attachments |
+| `feature-get-messages-token-efficiency.md` | 2026-03-24 | Matched existing opportunity; MCP `get_messages` result order aligned with `messageIds` | [OPP-018](opportunities/archive/OPP-018-reduce-agent-round-trips.md) — archived 2026-03-24; profiles + batch auto-summary shipped |
+| `feature-search-slim-results.md` | 2026-03-24 | Fixed in place | CLI + MCP search: auto slim JSON when more than 50 results; `format` + hint; `--result-format` / `resultFormat` — `src/search/search-json-format.ts` |
 
 ---
 

@@ -1,5 +1,13 @@
 # OPP-018: Reduce Agent Round-Trips — Richer Search Output + Batch Reads
 
+**Status:** Archived — phase 1 delivered (2026-03-24). Agent-confirmed.
+
+**Delivered:** Search `bodyPreview` + snippet + attachment metadata; JSON **slim rows** when more than 50 hits (CLI `--result-format`, MCP `search_mail` envelope + `resultFormat` + `format` / `hint`); MCP **`get_messages`** batch with `detail` / `maxBodyChars` / auto-summary for 6+ IDs; results ordered by requested `messageIds`. Code: `src/search/search-json-format.ts`, `src/mcp/get-messages-detail.ts`, `src/mcp/index.ts`, `src/cli/index.ts`.
+
+**Not shipped (optional follow-ups):** Newsletter detection + extra inline body for newsletters (original §5); `--detail body` structured JSON / top-N hydration (§4); optional snippet precompute at index time. Open a new opportunity if these are prioritized.
+
+---
+
 **Problem:** LLM thinking time is 91–99% of wall-clock in every bakeoff. zmail search itself is already fast (26–796ms). But each sequential tool call round costs 15–25s in LLM deliberation. The typical agent workflow is 3–4 rounds: search → read results → follow-up reads → synthesize. The #1 optimization is not faster search — it's fewer rounds.
 
 Concrete measurements from Bakeoff #4 (tech news, 2026-03-07):
@@ -23,6 +31,8 @@ Gmail won despite having more tool calls and slower individual calls, because it
 ### 1. Body preview in every search result (highest impact)
 
 Include a 200–300 character body snippet in every `search` / `search_mail` result by default — no extra flag, no extra call needed.
+
+**Large result sets (implemented):** When JSON search returns **more than 50** hits, each row is automatically **slim** (`messageId`, `subject`, `fromName`, `date`, attachment count) with envelope fields `format` and `hint`; use `get_messages` / `--result-format full` for full rows. See `src/search/search-json-format.ts`.
 
 For newsletter emails (TLDR, The Information, Kara Swisher, etc.), return more: 500–1000 chars or the entire first section. Agents almost always read newsletters in full, so returning a preview inline eliminates a `get_message` call per newsletter.
 
@@ -111,21 +121,23 @@ In Bakeoff #3 and #4, agents always read newsletters in full — the snippet jus
 
 ---
 
-## Open questions
+## Open questions (historical)
 
-- Snippet storage: precompute at index time (adds ~300 bytes per email to SQLite) vs runtime extraction (adds ~5ms per result row). Index-time is better for query latency but requires a schema change and re-index for existing data. See [AGENTS.md](../../AGENTS.md) no-migrations policy — manual ALTER TABLE is the path.
+- Snippet storage: precompute at index time (adds ~300 bytes per email to SQLite) vs runtime extraction (adds ~5ms per result row). Index-time is better for query latency but requires a schema change and re-index for existing data. See [AGENTS.md](../../../AGENTS.md) no-migrations policy — manual ALTER TABLE is the path.
 - Newsletter detection threshold: false positives (treating a long personal email as a newsletter) would bloat response size. Use the presence of `List-Unsubscribe` header + sender domain heuristics to minimize false positives.
 - MCP `get_messages` batch size cap: 20 is a reasonable starting point. Monitor token size of responses (20 full email bodies could exceed context).
 - Should body snippets be on by default in MCP, or require a flag? Given that MCP is for agent use (agents always benefit from more context), on by default is correct.
+- **Auto-slim by batch size (implemented):** MCP `get_messages`: when `detail` is omitted and more than 5 message IDs are requested, all results use the summary shape. Explicit `detail: "full"` forces full bodies. See `GET_MESSAGES_AUTO_SUMMARY_THRESHOLD` in `src/mcp/get-messages-detail.ts`.
+- **Feedback:** `../../../ztest/feedback/submitted/feature-get-messages-token-efficiency.md` — token profiles + batch auto-summary.
 
 ---
 
 ## References
 
-- Bakeoff analysis: `../ztest/feedback/submitted/bakeoff-004-tech-news.md` (primary source)
-- Supporting data: `../ztest/feedback/submitted/bakeoff-001-rudy-funds.md`, `bakeoff-003-news-headlines.md`
-- Related: [BUG-016](../bugs/BUG-016-bakeoff-incomplete-coverage-critical.md) — exhaustive search coverage
-- Related: [BUG-017](../bugs/BUG-017-semantic-recall-gap-intent-queries.md) — semantic recall gap
-- Related: [OPP-002](OPP-002-local-embeddings.md) — local embeddings (eliminates 500–800ms embedding round-trip)
+- Bakeoff analysis: `../../../ztest/feedback/submitted/bakeoff-004-tech-news.md` (primary source)
+- Supporting data: `../../../ztest/feedback/submitted/bakeoff-001-rudy-funds.md`, `bakeoff-003-news-headlines.md`
+- Related: [BUG-016](../../bugs/archive/BUG-016-bakeoff-incomplete-coverage-critical.md) — exhaustive search coverage
+- Related: [BUG-017](../../bugs/BUG-017-semantic-recall-gap-intent-queries.md) — semantic recall gap
+- Related: [OPP-002](../OPP-002-local-embeddings.md) — local embeddings (eliminates 500–800ms embedding round-trip)
 - MCP server: `src/mcp/index.ts`
 - CLI search: `src/cli/index.ts`

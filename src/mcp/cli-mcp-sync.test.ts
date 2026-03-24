@@ -26,6 +26,9 @@ const INTENDED_MCP_SEARCH_PARAMS: (keyof SearchOptions)[] = [
   "includeNoise",
 ];
 
+/** MCP search_mail only — not on SearchOptions / searchWithMeta. */
+const MCP_SEARCH_MAIL_ONLY_KEYS = ["resultFormat"] as const;
+
 const INTENDED_MCP_WHO_PARAMS: (keyof WhoOptions)[] = [
   "query",
   "limit",
@@ -37,7 +40,7 @@ const INTENDED_MCP_WHO_PARAMS: (keyof WhoOptions)[] = [
 
 describe("CLI/MCP sync", () => {
   it("MCP search_mail params match intended contract", () => {
-    const expected = [...INTENDED_MCP_SEARCH_PARAMS].sort();
+    const expected = [...INTENDED_MCP_SEARCH_PARAMS, ...MCP_SEARCH_MAIL_ONLY_KEYS].sort();
     const actual = [...MCP_SEARCH_MAIL_PARAM_KEYS].sort();
     expect(actual).toEqual(expected);
   });

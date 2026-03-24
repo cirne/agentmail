@@ -132,7 +132,7 @@ async function filterOnlySearch(
   db: SqliteDatabase,
   opts: SearchOptions
 ): Promise<{ results: SearchResult[]; totalCount: number }> {
-  const { limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
+  const { limit, offset = 0 } = opts;
   const filterClause = buildFilterClause(opts);
   const where = filterClause.conditions.length > 0 ? `WHERE ${buildWhereClause(filterClause)}` : "";
 
@@ -146,7 +146,8 @@ async function filterOnlySearch(
     )
   ).get(...filterClause.params)) as { count: number };
 
-  const params = [...filterClause.params, limit, offset];
+  const sqlLimit = limit ?? -1;
+  const params = [...filterClause.params, sqlLimit, offset];
   const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
   const rows = (await (
     await db.prepare(
@@ -308,7 +309,7 @@ async function ftsSearch(
   db: SqliteDatabase,
   opts: SearchOptions
 ): Promise<{ results: SearchResult[]; totalCount: number }> {
-  const { query, limit = 50, offset = 0 } = opts; // Increased default from 20 to 50
+  const { query, limit, offset = 0 } = opts;
   if (!query?.trim()) return { results: [], totalCount: 0 };
 
   // Convert space-separated words to OR query (Google-style search)
@@ -354,8 +355,8 @@ async function ftsSearch(
       )
     ).get(...countParams)) as { count: number };
 
-    // Then get results
-    const params = [escapedQuery, ...filterClause.params, limit + offset + 50];
+    const sqlLimit = limit != null ? limit + offset + 50 : -1;
+    const params = [escapedQuery, ...filterClause.params, sqlLimit];
 
     const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
     
@@ -398,8 +399,7 @@ async function ftsSearch(
       )
     ).all(...params)) as unknown as SearchResult[];
 
-    // Apply post-query filtering and limit/offset
-    const results = rows.slice(offset, offset + limit);
+    const results = limit != null ? rows.slice(offset, offset + limit) : rows.slice(offset);
     return { results, totalCount: totalCount.count };
   } catch (err: any) {
     // Catch FTS5 syntax errors and provide user-friendly message

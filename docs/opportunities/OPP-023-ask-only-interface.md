@@ -133,7 +133,7 @@ Before removing anything, add `ask` as an MCP tool so MCP consumers have the rep
 | **OPP-020** (answer engine) | This is the natural conclusion of OPP-020. OPP-020 said "make `ask` the primary interface." OPP-023 says "make it the only interface." |
 | **OPP-022** (ask detail level) | Must ship first. If `ask` is the only interface, it must handle every query well. |
 | **OPP-021** (noise awareness) | Applies to `ask` only after this change — no search primitive to separately filter. |
-| **OPP-018** (reduce round-trips) | Partially superseded. Richer search output was for agents orchestrating primitives. With `ask` as the only tool, the agent makes one call — no round-trips to optimize. Internal pipeline improvements (body preview, batch reads) still help `ask` internally. |
+| **OPP-018** (reduce round-trips) | **Archived** (phase 1 delivered). Partially superseded for external orchestration: [archive/OPP-018-reduce-agent-round-trips.md](archive/OPP-018-reduce-agent-round-trips.md). With `ask` as the only tool, the outer agent makes one call — internal pipeline improvements (body preview, batch reads, slim search) still help `ask` internally. |
 | **OPP-012, OPP-013, OPP-015** (who/contacts) | `who` as a primitive goes away. Contact features would be exposed through `ask` ("who is X?") or a future dedicated `contacts` command. |
 | **BUG-017** (semantic recall gap) | Resolved by FTS-first + `ask`'s internal agent loop. No primitive to mis-use. |
 | **BUG-018** (`who --timings`) | Eliminated — `who` command no longer exists. |
@@ -157,4 +157,4 @@ Before removing anything, add `ask` as an MCP tool so MCP consumers have the rep
 - Ask documentation: [docs/ASK.md](../ASK.md)
 - MCP current tools: [docs/MCP.md](../MCP.md)
 - Read bug (illustrates primitive maintenance cost): [BUG-021](../bugs/BUG-021-read-prepare-error.md)
-- Reduce round-trips (partially superseded): [OPP-018](OPP-018-reduce-agent-round-trips.md)
+- Reduce round-trips (archived; partially superseded for outer agent): [OPP-018](archive/OPP-018-reduce-agent-round-trips.md)

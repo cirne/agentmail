@@ -245,7 +245,7 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 
 | Item | Impact |
 |------|--------|
-| **OPP-018** (reduce round-trips) | Still valuable — richer search results help the answer engine's internal pipeline too. Complementary, not replaced. |
+| **OPP-018** (reduce round-trips) | **Archived** (phase 1 done). [archive/OPP-018-reduce-agent-round-trips.md](archive/OPP-018-reduce-agent-round-trips.md) — richer search + batch read still help the answer engine's internal pipeline. |
 | **OPP-019** (FTS-first) | Confirmed and reinforced. The answer engine uses FTS for retrieval. Semantic search deferred to Phase 3. |
 | **OPP-002** (local embeddings) | Deferred. If semantic is reintroduced, sqlite-vec + local model is the path, not the prior LanceDB approach. |
 | **BUG-016** (exhaustive search) | Still relevant — the answer engine's spending/receipt intents need exhaustive `from:` queries. Domain auto-routing fix benefits both architectures. |
@@ -255,7 +255,7 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 
 ## References
 
-- Bakeoff performance data: OPP-018, BUG-016 (same questions to be re-run for Phase 1 validation)
+- Bakeoff performance data: [OPP-018](archive/OPP-018-reduce-agent-round-trips.md) (archived), BUG-016 (same questions to be re-run for Phase 1 validation)
 - FTS-first decision: OPP-019
 - STRATEGY.md — competitive positioning
 - VISION.md — "just works in the agent" user promise

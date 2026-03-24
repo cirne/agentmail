@@ -100,7 +100,7 @@ For agent workflows, each extra round-trip adds latency (15-25s per outer LLM ro
 ## References
 
 - Ask pipeline: `src/ask/agent.ts` (mini system prompt at line ~569)
-- Answer engine architecture: [OPP-020](OPP-020-answer-engine-local-agent.md)
+- Answer engine architecture: [OPP-020](../OPP-020-answer-engine-local-agent.md)
 - Round-trip reduction: [OPP-018](OPP-018-reduce-agent-round-trips.md)
 - Read bug (blocks manual follow-up path): [BUG-021](../bugs/BUG-021-read-prepare-error.md)
 - Ask documentation: [docs/ASK.md](../ASK.md)

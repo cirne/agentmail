@@ -30,21 +30,30 @@ The server runs on stdio and communicates via JSON-RPC over stdin/stdout. It wil
 
 ### `search_mail`
 
-Search emails using FTS5 full-text search. Returns matching messages with **bodyPreview** (first ~300 chars of body) and **attachment metadata** inline so agents can avoid follow-up `get_message` / `list_attachments` calls. Use `includeThreads: true` to return full conversations per match and avoid `get_thread` round-trips.
+Search emails using FTS5 full-text search. The tool **always** returns a JSON **object** (not a bare array):
+
+- `results` — array of hits (shape depends on `format`)
+- `returned` — number of objects in `results`
+- `totalMatched` — total hits before any limit
+- `format` — `"slim"` or `"full"`
+- `hint` — present when `format` is `slim`; explains how to fetch full rows via `get_messages`
+- `threads` — optional, when `includeThreads: true`
+- `timings` — optional search timings
+
+**Slim vs full:** With `resultFormat: "auto"` (default), if there are **more than 50** results, each element of `results` is **slim**: `messageId`, `subject`, `fromName` (if present), `date`, `attachments` (integer count when greater than zero). Otherwise each element is **full**: `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, index }` when present). Use `resultFormat: "full"` to force full rows for large result sets, or `resultFormat: "slim"` to force slim rows for small sets.
 
 **Parameters:**
 - `query` (string, optional): Full-text search query. Supports inline operators: `from:`, `to:`, `subject:`, `after:`, `before:`
-- `limit` (number, optional): Maximum number of results (default: 50)
+- `limit` (number, optional): Maximum number of results (default: all matches)
 - `offset` (number, optional): Pagination offset (default: 0)
 - `fromAddress` (string, optional): Filter by sender email address
 - `afterDate` (string, optional): Filter messages after this date (ISO 8601 or relative like "7d", "30d")
 - `beforeDate` (string, optional): Filter messages before this date
 - `includeThreads` (boolean, optional): When true, also return full threads (all messages per matching thread) as a `threads` array (default: false)
 - `includeNoise` (boolean, optional): When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false — noise messages are excluded by default.
+- `resultFormat` (string, optional): `"auto"` | `"full"` | `"slim"` — controls per-result shape (default: `auto`; see above).
 
-**Returns:** JSON array of message objects with `messageId`, `threadId`, `fromAddress`, `fromName`, `subject`, `date`, `snippet`, `bodyPreview`, `attachments` (array of `{ id, filename, mimeType, index }` when present; **index** and ordering match `zmail attachment list`, i.e. sorted by filename). When `includeThreads: true`, response is an object `{ results, threads, totalMatched?, timings? }` with `threads` being an array of `{ threadId, subject, messages }` (each message has `messageId`, `fromAddress`, `fromName`, `subject`, `date`, `bodyPreview`).
-
-**Note:** CLI JSON search adds `attachmentTypes` (derived from the same attachment rows) for quick scanning; MCP returns the `attachments` array as above. Use `list_attachments` when you need full rows (e.g. `size`, `stored_path`) without searching first.
+**Note:** CLI JSON search uses the same slim threshold and adds `--result-format`; it also adds `attachmentTypes` in full mode for quick scanning. Use `list_attachments` when you need full attachment rows (e.g. `size`, `stored_path`) without searching first.
 
 **Example:**
 ```json
@@ -90,13 +99,15 @@ Retrieve a single message by message ID. **Returns the same JSON shape as one el
 
 ### `get_messages`
 
-Retrieve multiple messages by message IDs. Use **detail** to control payload size: `full` (default) = lean message with body up to maxBodyChars; `summary` = minimal fields + 200-char snippet for scanning; `raw` = original EML. Caps at 20 messages per call. Empty arrays and null/empty fields are omitted to save tokens.
+Retrieve multiple messages by message IDs. Use **detail** to control payload size: `full` = lean message with body up to maxBodyChars; `summary` = minimal fields + 200-char snippet for scanning; `raw` = original EML. Caps at 20 messages per call. Empty arrays and null/empty fields are omitted to save tokens.
+
+**Auto summary:** If **`detail` is omitted** and **`messageIds` contains more than 5 IDs** (after the 20-ID cap), every message is returned in **summary** form (same as `detail: "summary"`) to limit token use. Pass **`detail: "full"`** explicitly to force full bodies for large batches.
 
 **Parameters:**
 - `messageIds` (array of strings, required): Array of message IDs (from `search_mail` results) to retrieve
-- `detail` (string, optional): `"full"` = full lean message with body (default); `"summary"` = minimal fields + 200-char snippet; `"raw"` = original EML format
+- `detail` (string, optional): `"full"` = full lean message with body; `"summary"` = minimal fields + 200-char snippet; `"raw"` = original EML format. Omit to let the server choose: batches of 6+ IDs default to summary unless you pass `"full"`.
 - `raw` (boolean, optional): If true, same as `detail: "raw"`. Prefer `detail`.
-- `maxBodyChars` (number, optional): Max characters of body per message when `detail` is `"full"` (default: 2000). Ignored for `summary` or `raw`.
+- `maxBodyChars` (number, optional): Max characters of body per message when the effective detail is `"full"` (default: 2000). Ignored for `summary` or `raw`.
 
 **Response by detail level:**
 

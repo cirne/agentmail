@@ -91,7 +91,7 @@ npm run eval         # run eval suite (LLM-based evaluation tests, requires ZMAI
 
 ### CLI Commands
 
-zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--text]
+zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--text] [--result-format auto|full|slim] [--ids-only]
 zmail who <query> [--limit n] [--enrich] [--text]
 zmail read <message_id> [--raw]
 zmail thread <thread_id> [--json] [--raw]

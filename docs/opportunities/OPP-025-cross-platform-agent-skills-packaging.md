@@ -53,7 +53,7 @@ Skills and MCP solve different layers (instructions vs protocol). For **end-user
 | **Debugging** | `zmail status`, CLI-shaped logs | Server lifecycle, transport, tool sync |
 | **Contract** | [Agent Skills spec](https://agentskills.io/specification.md) | zmail MCP contract ([docs/MCP.md](../../docs/MCP.md)) |
 
-**Tradeoffs:** Subprocess CLI can mean more round-trips than batched MCP tools; mitigations include richer CLI output and `zmail ask` ([OPP-018](OPP-018-reduce-agent-round-trips.md)). We are **not** deleting MCP — we **reorder defaults** and reduce mandatory MCP surface.
+**Tradeoffs:** Subprocess CLI can mean more round-trips than batched MCP tools; mitigations include richer CLI output and `zmail ask` ([OPP-018](archive/OPP-018-reduce-agent-round-trips.md), archived). We are **not** deleting MCP — we **reorder defaults** and reduce mandatory MCP surface.
 
 ---
 
@@ -148,7 +148,7 @@ Per [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills):
 - **Spec vs vendor extensions:** Claude, OpenClaw, etc. may add frontmatter or parsing rules — mitigate with **spec-minimal** core; add **OpenClaw `metadata.openclaw`** only in a way that still validates or lives in a documented optional snippet.  
 - **OpenClaw parser constraints:** Single-line keys / single-line JSON `metadata` per [their docs](https://docs.openclaw.ai/tools/skills) — multi-line YAML maps may need adjustment for OpenClaw even if valid elsewhere.  
 - **Security:** Emphasize official paths (npm scope, repo); same `.env` hygiene as MCP.  
-- **Latency:** More CLI invocations vs MCP batching — see [OPP-018](OPP-018-reduce-agent-round-trips.md).
+- **Latency:** More CLI invocations vs MCP batching — see [OPP-018](archive/OPP-018-reduce-agent-round-trips.md).
 
 ---
 

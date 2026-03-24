@@ -135,7 +135,7 @@ What remains: SQLite FTS5 — zero external dependencies, single file, determini
 | **BUG-016** (exhaustive enumeration) | FTS-first makes the fix simpler and more natural: domain routing → `from:` filter → SQL exhaustive scan. No semantic interference, no hybrid merge bugs. |
 | **BUG-017** (semantic recall gap) | **Resolved** as a consequence of this change. The failure was semantic search; FTS + agent query decomposition is the fix. |
 | **OPP-002** (local embeddings) | **Superseded** if semantic is fully retired. If retained as opt-in, OPP-002 addresses the opt-in latency. |
-| **OPP-018** (reduce round-trips) | Still valid and orthogonal — body preview and batch get_message help regardless of search mode. |
+| **OPP-018** (reduce round-trips) | **Archived** (phase 1 delivered). Still relevant historically — [archive/OPP-018-reduce-agent-round-trips.md](archive/OPP-018-reduce-agent-round-trips.md). Richer search + batch read help regardless of search mode. |
 | **OPP-006** (attachment search) | FTS indexing of extracted attachment text is the right path — same argument applies, FTS on extracted text beats embeddings for agent-driven search. |
 | **Setup / onboarding** | `OPENAI_API_KEY` no longer required → one fewer setup step, no API key friction for new users. |
 

@@ -4,6 +4,12 @@ import { z } from "zod";
 import { join } from "path";
 import { getDb } from "~/db";
 import { searchWithMeta } from "~/search";
+import {
+  resolveSearchJsonFormat,
+  searchResultToSlimJsonRow,
+  searchSlimResultHint,
+  type SearchResultFormatPreference,
+} from "~/search/search-json-format";
 import { who } from "~/search/who";
 import { logger } from "~/lib/logger";
 import { extractAndCache } from "~/attachments";
@@ -16,6 +22,7 @@ import {
   shapeShapedToOutput,
   type ShapedMessageLike,
 } from "~/messages/lean-shape";
+import { resolveGetMessagesShapeDetail } from "./get-messages-detail";
 
 /**
  * Param keys for search_mail tool. Used by CLI/MCP sync test; keep in sync with the tool schema and SearchOptions.
@@ -29,6 +36,7 @@ export const MCP_SEARCH_MAIL_PARAM_KEYS: readonly string[] = [
   "beforeDate",
   "includeThreads",
   "includeNoise",
+  "resultFormat",
 ];
 
 /**
@@ -76,18 +84,24 @@ export function createMcpServer() {
 
   server.tool(
     "search_mail",
-    "Search emails using FTS5 full-text search. Returns matching messages with bodyPreview, attachment metadata, and optional full threads. Use includeThreads: true to get full conversations per match and avoid get_thread round-trips.",
+    "Search emails using FTS5 full-text search. Response object: results, returned, totalMatched, format (slim|full), optional hint, threads, timings. With resultFormat auto (default), more than 50 results use slim rows; use get_messages for bodyPreview. resultFormat full forces full rows.",
     {
       query: z.string().optional().describe("Full-text search query. Supports inline operators: from:, to:, subject:, after:, before:. Example: 'invoice from:alice@example.com after:30d'"),
-      limit: z.number().optional().describe("Maximum number of results to return (default: 50)"),
+      limit: z.number().optional().describe("Maximum number of results to return (default: all matches)"),
       offset: z.number().optional().describe("Pagination offset for skipping results (default: 0)"),
       fromAddress: z.string().optional().describe("Filter by sender email address (alternative to 'from:' in query)"),
       afterDate: z.string().optional().describe("Filter messages after this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
       beforeDate: z.string().optional().describe("Filter messages before this date. ISO 8601 format or relative (e.g., '7d', '30d', '2024-01-01')"),
       includeThreads: z.boolean().optional().describe("When true, also return full threads (all messages per matching thread) to avoid get_thread calls (default: false)"),
       includeNoise: z.boolean().optional().describe("When true, includes noise messages (promotional, social, forums, bulk, spam) in results (Gmail categories: Promotions, Social, Forums, Spam). Defaults to false."),
+      resultFormat: z
+        .enum(["auto", "full", "slim"])
+        .optional()
+        .describe(
+          "Row shape: auto (default) uses slim rows when more than 50 results; full = always bodyPreview + metadata; slim = always triage-only rows"
+        ),
     },
-    async ({ query, limit, offset, fromAddress, afterDate, beforeDate, includeThreads, includeNoise }) => {
+    async ({ query, limit, offset, fromAddress, afterDate, beforeDate, includeThreads, includeNoise, resultFormat }) => {
       const db = await getDb();
       const result = await searchWithMeta(db, {
         query,
@@ -100,9 +114,26 @@ export function createMcpServer() {
         includeNoise: includeNoise ?? false,
       });
 
-      const payload = result.threads?.length
-        ? { results: result.results, threads: result.threads, totalMatched: result.totalMatched, timings: result.timings }
-        : result.results;
+      const preference = (resultFormat ?? "auto") as SearchResultFormatPreference;
+      const fmt = resolveSearchJsonFormat({
+        resultCount: result.results.length,
+        preference,
+        allowAutoSlim: true,
+      });
+      const rows =
+        fmt === "slim"
+          ? result.results.map((r) => searchResultToSlimJsonRow(r))
+          : (result.results as unknown as Record<string, unknown>[]);
+
+      const payload: Record<string, unknown> = {
+        results: rows,
+        returned: rows.length,
+        totalMatched: result.totalMatched ?? rows.length,
+        format: fmt,
+        ...(fmt === "slim" ? { hint: searchSlimResultHint() } : {}),
+        ...(result.threads?.length ? { threads: result.threads } : {}),
+        ...(result.timings ? { timings: result.timings } : {}),
+      };
       return {
         content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
       };
@@ -241,12 +272,12 @@ export function createMcpServer() {
 
   server.tool(
     "get_messages",
-    "Batch-read multiple emails in one call (max 20). Token efficiency: use detail: 'summary' when scanning many messages (returns subject, from, to, date, 200-char snippet only — ~80% fewer tokens). Use detail: 'full' (default) when you need full bodies; set maxBodyChars (default 2000) to 300-500 for quick confirmation or 4000+ for full reads. Use detail: 'raw' for original EML.",
+    "Batch-read multiple emails in one call (max 20). If you omit detail and request more than 5 message IDs, all results are returned in summary form (subject, from, to, date, 200-char snippet) to save tokens. Pass detail: 'full' to force full bodies for any batch size. detail: 'summary' always uses the slim shape; detail: 'raw' / raw=true returns EML.",
     {
       messageIds: z.array(z.string()).describe("Array of message IDs (from search_mail results) to retrieve"),
-      detail: z.enum(["full", "summary", "raw"]).optional().describe("'summary' = minimal payload for scanning (subject, from, to, date, 200-char snippet); 'full' = full body up to maxBodyChars (default); 'raw' = EML. Prefer 'summary' when you need to scan 5+ messages with minimal tokens."),
+      detail: z.enum(["full", "summary", "raw"]).optional().describe("'summary' = minimal payload; 'full' = body up to maxBodyChars; 'raw' = EML. Omit detail: batches of 6+ IDs default to summary; use 'full' to override."),
       raw: z.boolean().optional().describe("If true, return raw EML (same as detail: 'raw'). Prefer detail: 'raw' instead."),
-      maxBodyChars: z.number().optional().describe("When detail is 'full': max body chars per message (default 2000). Use 300-500 for quick confirmation; 4000+ for full email. Ignored when detail is 'summary' or 'raw'."),
+      maxBodyChars: z.number().optional().describe("When effective detail is 'full': max body chars per message (default 2000). Ignored for summary or raw."),
     },
     async ({ messageIds, detail, raw = false, maxBodyChars = DEFAULT_MAX_BODY_CHARS }) => {
       const db = await getDb();
@@ -254,12 +285,15 @@ export function createMcpServer() {
       const useRaw = raw || detail === "raw";
 
       const cappedIds = messageIds.slice(0, 20);
+      const shapeDetail = resolveGetMessagesShapeDetail(cappedIds.length, detail, raw);
       const normalizedIds = cappedIds.map((id) => normalizeMessageId(id));
 
       const placeholders = normalizedIds.map(() => "?").join(",");
-      const messages = (await (
+      const rows = (await (
         await db.prepare(`SELECT * FROM messages WHERE message_id IN (${placeholders})`)
       ).all(...normalizedIds)) as any[];
+      const byMessageId = new Map(rows.map((m) => [m.message_id as string, m]));
+      const messages = normalizedIds.map((id) => byMessageId.get(id)).filter(Boolean) as any[];
 
       if (messages.length === 0) {
         return {
@@ -273,7 +307,7 @@ export function createMcpServer() {
       }
 
       const shaped = await Promise.all(messages.map((m) => formatMessageForOutput(m, useRaw, db)));
-      const out = shapeShapedToOutput(shaped, { useRaw, detail, maxBodyChars });
+      const out = shapeShapedToOutput(shaped, { useRaw, detail: shapeDetail, maxBodyChars });
       return {
         content: [{ type: "text", text: JSON.stringify(out, null, 2) }],
       };

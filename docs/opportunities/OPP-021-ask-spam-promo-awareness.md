@@ -96,4 +96,4 @@ MCP search tool (`src/mcp/`):
 - Schema: `src/db/schema.ts` (`messages.labels`)
 - Ask pipeline: `src/ask/agent.ts`, `src/ask/tools.ts`
 - Search: `src/search/index.ts`
-- OPP-018 (newsletter detection) mentions `List-Unsubscribe` for newsletter detection — can reuse or align signal definitions
+- [OPP-018](archive/OPP-018-reduce-agent-round-trips.md) (archived; newsletter detection was optional follow-up) mentions `List-Unsubscribe` for newsletter detection — can reuse or align signal definitions

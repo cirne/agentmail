@@ -207,6 +207,8 @@ export async function runWizard(options: { noValidate?: boolean; clean?: boolean
     });
     proc.unref();
     console.log("Sync started in background. Use 'zmail status' to check progress.");
+    console.log("\nTry a search while it syncs:");
+    console.log('  zmail search "purchase or invoices"');
   } else {
     console.log("Run `zmail sync --since 7d` to start initial sync, then `zmail refresh` for frequent updates.");
   }
