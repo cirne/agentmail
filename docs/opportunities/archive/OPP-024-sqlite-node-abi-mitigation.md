@@ -1,6 +1,6 @@
 # OPP-024: SQLite / Node ABI — Global Install Reliability
 
-**Status:** Implemented (archived 2026-03-20)
+**Status:** Implemented (archived 2026-03-20). **Superseded 2026-03-26:** zmail migrated to Node.js built-in **`node:sqlite`** (`DatabaseSync`, Node ≥ 22.5.0); `better-sqlite3` is no longer used. This file remains as historical context for the native-addon mitigation.
 
 ## Problem
 
@@ -14,7 +14,7 @@ when the addon was built or prebuilt for a different Node than the one running `
 ## Direction (implemented)
 
 1. **`package.json` `postinstall`** — runs `npm rebuild better-sqlite3` for the **current** Node when `node_modules` exists, so the addon matches the installing runtime in the common case.
-2. **Async `SqliteDatabase` facade** — narrow interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by `src/db/better-sqlite-adapter.ts` around `better-sqlite3`. Call sites use `await` consistently (CLI, sync, search, MCP, ask).
+2. **Async `SqliteDatabase` facade** — narrow interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by an adapter around the native driver (`better-sqlite-adapter.ts` at the time). Call sites use `await` consistently (CLI, sync, search, MCP, ask). Today: `src/db/node-sqlite-adapter.ts` around `node:sqlite`.
 3. **Documentation** — [ADR-023](../../ARCHITECTURE.md) in `docs/ARCHITECTURE.md`; install / fallback notes in [AGENTS.md](../../AGENTS.md).
 4. **Schema / data** — On schema or packaging changes that invalidate the DB: bump `SCHEMA_VERSION`, delete DB + WAL sidecars, **rebuild from maildir** (no row migration). Same as [ADR-021](../../ARCHITECTURE.md).
 
@@ -29,4 +29,4 @@ If load still fails: run **`npm rebuild better-sqlite3`** using the **same** `no
 
 ## See also
 
-- [ADR-023: SQLite access — file-backed native + async facade + install-time rebuild](../../ARCHITECTURE.md#adr-023-sqlite-access--file-backed-native--async-facade--install-time-rebuild)
+- [ADR-023: SQLite access](../../ARCHITECTURE.md#adr-023-sqlite-access--node-sqlite--async-facade) (updated title in ARCHITECTURE.md)

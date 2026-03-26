@@ -1,6 +1,6 @@
 # zmail — Agent Guide
 
-**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). Read-only today; send is in the vision ([VISION.md](docs/VISION.md)) but blocked on customer validation for core search/index/onboarding — we want to nail that first.
+**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 22.5+** (built-in `node:sqlite`); dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). Read-only today; send is in the vision ([VISION.md](docs/VISION.md)) but blocked on customer validation for core search/index/onboarding — we want to nail that first.
 
 **Quick install:**
 ```bash
@@ -20,9 +20,9 @@ npm install -g @cirne/zmail
 
 ## Tech stack
 
-Node.js 20+, TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native addon, OS page cache — not a whole-DB-in-RAM WASM/sql.js model), FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db`). Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
+Node.js 22.5+, TypeScript, **file-backed** SQLite via Node’s built-in **`node:sqlite`** (`DatabaseSync`; libsqlite ships with Node — no separate native addon package, no WASM). FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db`). Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
 
-**Native addon ABI:** `npm install` runs **`postinstall`** → `npm rebuild better-sqlite3` for the **current** Node, so the `.node` binary matches `NODE_MODULE_VERSION` (common pain point with `npm i -g` when prebuilds don’t match the runtime). If load still fails, run `npm rebuild better-sqlite3` using the same `node` that executes `zmail`. **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Runtime:** Use a **Node 22.5+** binary to run `zmail` (see `engines` in `package.json`). The SQLite module is still marked experimental in Node; behavior follows Node’s release notes. **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Project structure
 
@@ -77,7 +77,7 @@ See `.cursor/skills/process-feedback/SKILL.md` for the complete workflow. The `d
 ## Commands
 
 ```bash
-npm install          # runs postinstall: rebuild better-sqlite3 for current Node
+npm install
 npm run dev          # starts background sync (tsx src/index.ts)
 npm run zmail --     # CLI from repo (e.g. npm run zmail -- search "foo"); the -- passes args
 npm run sync         # initial sync (or: npm run zmail -- sync --since 7d)

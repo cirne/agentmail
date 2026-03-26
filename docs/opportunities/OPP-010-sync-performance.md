@@ -461,7 +461,7 @@ Based on the 60d sync analysis, we're using <1% of available bandwidth. To appro
 - **Throughput:** 6.53 msg/s vs 7.31 msg/s sequential
 
 **Root cause:** SQLite single-writer serialization
-- better-sqlite3 serializes writes even with concurrent operations
+- SQLite serializes writes on a single connection even with concurrent operations at the app level
 - Parallel parsing helps, but DB writes queue and serialize anyway
 - Promise.all() coordination overhead adds latency without benefit
 

@@ -1,9 +1,9 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { describe, it, expect, afterEach } from "vitest";
-import { wrapBetterSqlite3 } from "./better-sqlite-adapter";
+import { wrapNodeSqlite } from "./node-sqlite-adapter";
 
-describe("wrapBetterSqlite3", () => {
-  let raw: InstanceType<typeof Database> | undefined;
+describe("wrapNodeSqlite", () => {
+  let raw: DatabaseSync | undefined;
 
   afterEach(() => {
     try {
@@ -15,8 +15,8 @@ describe("wrapBetterSqlite3", () => {
   });
 
   it("exec, prepare, run, get, and all resolve via Promises", async () => {
-    raw = new Database(":memory:");
-    const db = wrapBetterSqlite3(raw);
+    raw = new DatabaseSync(":memory:");
+    const db = wrapNodeSqlite(raw);
 
     await db.exec("CREATE TABLE t (id INTEGER PRIMARY KEY, x TEXT)");
     const ins = await db.prepare("INSERT INTO t (x) VALUES (?)");
@@ -32,8 +32,8 @@ describe("wrapBetterSqlite3", () => {
   });
 
   it("close resolves", async () => {
-    raw = new Database(":memory:");
-    const db = wrapBetterSqlite3(raw);
+    raw = new DatabaseSync(":memory:");
+    const db = wrapNodeSqlite(raw);
     await db.close();
   });
 });

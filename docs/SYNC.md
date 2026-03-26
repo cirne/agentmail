@@ -153,7 +153,7 @@ This document describes how email sync works today, the optimizations that were 
 **Result:** 12% slower (80.14s vs 71.55s sequential).
 
 **Root cause:** SQLite single-writer serialization
-- better-sqlite3 serializes writes even with concurrent operations
+- SQLite serializes writes on a single connection even with concurrent operations at the app level
 - Parallel parsing helps, but DB writes queue and serialize anyway
 - `Promise.all()` coordination overhead adds latency without benefit
 

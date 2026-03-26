@@ -123,7 +123,7 @@ Both modes hit the same SQLite index. The binary is the same artifact.
 | Layer | Phase 1 + 2 | Phase 3 (hosted SaaS, if ever) |
 |---|---|---|
 | Raw email files | Maildir on persistent volume | S3 / DO Spaces |
-| Structured metadata + FTS | File-backed SQLite via `better-sqlite3` (async app-level facade; ADR-023) | Postgres |
+| Structured metadata + FTS | File-backed SQLite via Node `node:sqlite` (async app-level facade; ADR-023) | Postgres |
 | Semantic / vector search | (deferred) LanceDB on volume | LanceDB → S3 |
 
 **SQLite schema (Phase 1):**
@@ -155,11 +155,11 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 ### ADR-008: Language & Runtime — TypeScript + Node.js
 
-**Decision:** TypeScript on Node.js 20+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/archive/OPP-007-packaging-npm-homebrew.md)).
+**Decision:** TypeScript on Node.js 22.5+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/archive/OPP-007-packaging-npm-homebrew.md)).
 
 **Rationale:**
 - Node.js is ubiquitous; no separate runtime (Bun) required. Aligns with OpenClaw/Claude Code (`npm i -g`).
-- **better-sqlite3** for SQLite — synchronous native binding, **true file-backed** SQLite (suitable for very large `.db` files; RSS bounded by OS cache, not file size). Packaged with **`postinstall` → `npm rebuild better-sqlite3`** so the addon matches the installing Node’s `NODE_MODULE_VERSION` (ADR-023).
+- **node:sqlite** (`DatabaseSync`) for SQLite — SQLite linked into the Node binary, **true file-backed** databases (suitable for very large `.db` files; RSS bounded by OS cache, not JS heap). No npm package for the SQLite engine; no separate native addon rebuild step (ADR-023).
 - `tsx` gives first-class TypeScript in development without a build step.
 - Strong ecosystem for IMAP (`imapflow`) and MCP SDK.
 
@@ -523,21 +523,19 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ---
 
-### ADR-023: SQLite Access — File-Backed Native + Async Facade + Install-Time Rebuild
+### ADR-023: SQLite Access — Node `node:sqlite` + Async Facade
 
-**Decision:** Keep **file-backed** SQLite using **`better-sqlite3`** (native addon). Do **not** use an in-process model that loads the entire database file into JS/WASM heap for production (e.g. sql.js `readFile` → `Database(uint8)` / `export()` persistence), which would make RSS scale with DB size — unacceptable for very large mailstores.
+**Decision:** Use **file-backed** SQLite via Node.js built-in **`node:sqlite`** (`DatabaseSync`, added in Node 22.5+). SQLite is linked into the Node binary (not a separate npm native addon, not WebAssembly). Do **not** use an in-process model that loads the entire database file into the JS heap for persistence (e.g. naive sql.js `readFile` → `Database(uint8)` / `export()`), which would make RSS scale with DB size — unacceptable for very large mailstores.
 
-**Application API:** Expose a narrow **`SqliteDatabase`** interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by a small adapter around `better-sqlite3`. All CLI, sync, search, MCP, and ask code paths **`await`** DB operations so the surface is consistently async even though the underlying driver is synchronous.
+**Application API:** Expose a narrow **`SqliteDatabase`** interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by a small adapter around `DatabaseSync` (`src/db/node-sqlite-adapter.ts`). All CLI, sync, search, MCP, and ask code paths **`await`** DB operations so the surface is consistently async even though the underlying `node:sqlite` API is synchronous.
 
-**Packaging / ABI:** `package.json` **`postinstall`** runs **`npm rebuild better-sqlite3`** for the **current** Node when `node_modules` is present. That aligns the prebuilt or freshly compiled `.node` with the runtime’s **`NODE_MODULE_VERSION`**, reducing `ERR_DLOPEN_FAILED` after **`npm install -g`** when install-time Node ≠ runtime Node. Documented fallback: run **`npm rebuild better-sqlite3`** with the same `node` that runs `zmail`.
+**Runtime:** Require **Node.js ≥ 22.5.0** (`engines` in `package.json`). Users must run `zmail` with a Node version that includes `node:sqlite`. The module remains **experimental** in Node; track Node release notes for stability/API changes.
 
-**Global install vs `overrides`:** For **`npm install -g`**, npm’s install root is the global prefix, so **`overrides` in `@cirne/zmail/package.json` are not applied** to the dependency tree the way they are in a repo-root install. **`bundledDependencies`** (the **`exceljs`** stack) ships the maintainer’s resolved **`node_modules` subtrees** in the published tarball so global installs pick up the same pinned/override-resolved versions. Remaining install noise is mostly **`prebuild-install`** (from **`better-sqlite3`**) until that chain changes upstream.
+**Global install vs `overrides`:** For **`npm install -g`**, npm’s install root is the global prefix, so **`overrides` in `@cirne/zmail/package.json` are not applied** to the dependency tree the way they are in a repo-root install. **`bundledDependencies`** (the **`exceljs`** stack) ships the maintainer’s resolved **`node_modules` subtrees** in the published tarball so global installs pick up the same pinned/override-resolved versions.
 
 **Schema changes:** Unchanged philosophy (ADR-021): bump **`SCHEMA_VERSION`**, delete stale DB files, **rebuild from maildir** — no row-level migration from old DB files when the driver or schema changes.
 
-**Deferred:** WASM SQLite with a custom file VFS for Node remains an alternative if native rebuild stops being sufficient; FTS5 and file-backed behavior would need to be re-validated before switching.
-
-**See also:** [OPP-024](opportunities/archive/OPP-024-sqlite-node-abi-mitigation.md) — opportunity log for the ABI / global-install mitigation.
+**Historical note:** Earlier revisions used **`better-sqlite3`** (native addon + `postinstall` rebuild) and considered WASM + custom VFS; see archived [OPP-024](opportunities/archive/OPP-024-sqlite-node-abi-mitigation.md).
 
 ---
 

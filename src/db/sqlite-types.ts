@@ -1,6 +1,6 @@
 /**
- * Async SQLite facade — implemented by better-sqlite3 (file-backed) today.
- * Promises yield on microtasks; I/O remains OS-paged like native SQLite.
+ * Async SQLite facade — implemented by Node.js built-in `node:sqlite` (DatabaseSync).
+ * Promises yield on microtasks; I/O is synchronous SQLite via libsqlite linked in Node.
  */
 
 export interface SqliteRunResult {

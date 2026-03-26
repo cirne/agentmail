@@ -1,6 +1,6 @@
 # zmail Performance Metrics
 
-This document summarizes **observed performance** on the platform as of 2025–2026: query latencies, example commands, and response payloads. Data was collected from a live index (~2K messages, Node 20+, macOS) using `zmail search --timings` and `zmail who` (JSON includes `_timing.ms`).
+This document summarizes **observed performance** on the platform as of 2025–2026: query latencies, example commands, and response payloads. Data was collected from a live index (~2K messages, Node 22+, macOS) using `zmail search --timings` and `zmail who` (JSON includes `_timing.ms`).
 
 **Summary:** Keyword (FTS) and hybrid search consistently complete in **&lt;50ms** in-process. Semantic (hybrid) search adds an embedding API call when the query is not cached; that round-trip dominates total time (~200–400ms). `zmail who` is in-process only and typically **5–35ms**.
 

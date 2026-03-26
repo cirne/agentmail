@@ -1,16 +1,16 @@
-import Database from "better-sqlite3";
-import { wrapBetterSqlite3 } from "./better-sqlite-adapter";
+import { DatabaseSync } from "node:sqlite";
+import { wrapNodeSqlite } from "./node-sqlite-adapter";
 import type { SqliteDatabase } from "./sqlite-types";
 import { SCHEMA } from "./schema";
 
 /** Open a fresh in-memory SQLite database with the full schema applied. */
 export async function createTestDb(): Promise<SqliteDatabase> {
-  const raw = new Database(":memory:");
+  const raw = new DatabaseSync(":memory:");
   raw.exec("PRAGMA journal_mode = WAL");
   raw.exec("PRAGMA foreign_keys = ON");
   raw.exec(SCHEMA);
   raw.exec("INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0)");
-  return wrapBetterSqlite3(raw);
+  return wrapNodeSqlite(raw);
 }
 
 /** Insert a minimal message row for use in tests. Returns the message_id. */

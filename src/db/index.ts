@@ -1,4 +1,4 @@
-import Database from "better-sqlite3";
+import { DatabaseSync } from "node:sqlite";
 import { mkdirSync, rmSync } from "fs";
 import { dirname } from "path";
 import { existsSync } from "fs";
@@ -6,15 +6,15 @@ import { config } from "~/lib/config";
 import { logger, setLogger, createFileLogger } from "~/lib/logger";
 import { SCHEMA, SCHEMA_VERSION } from "./schema";
 import { reindexFromMaildir } from "./rebuild";
-import { wrapBetterSqlite3 } from "./better-sqlite-adapter";
+import { wrapNodeSqlite } from "./node-sqlite-adapter";
 import type { SqliteDatabase } from "./sqlite-types";
 
 export type { SqliteDatabase, SqliteStatement, SqliteRunResult } from "./sqlite-types";
 
 let _db: SqliteDatabase | null = null;
 
-function openRawDatabase(path: string): InstanceType<typeof Database> {
-  return new Database(path);
+function openRawDatabase(path: string): DatabaseSync {
+  return new DatabaseSync(path);
 }
 
 /** Rows read from sync_state before wiping the DB (rebuild / schema bump). */
@@ -83,7 +83,7 @@ export async function getDb(): Promise<SqliteDatabase> {
   raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   raw.exec("INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0)");
 
-  _db = wrapBetterSqlite3(raw);
+  _db = wrapNodeSqlite(raw);
 
   logger.debug("Database opened", { path: config.dbPath });
   return _db;

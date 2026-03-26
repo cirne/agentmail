@@ -55,7 +55,7 @@ Replacements are localized and well-understood:
 
 | Current (Bun)        | Replacement (Node)                          |
 |----------------------|---------------------------------------------|
-| `bun:sqlite`         | `better-sqlite3` (or `sql.js` if no native) |
+| `bun:sqlite`         | Node `node:sqlite` / `better-sqlite3` / `sql.js` (historical comparison) |
 | `Bun.serve` (web UI) | Node `http` / `createServer` or small lib   |
 | `Bun.spawn`          | `child_process.spawn`                      |
 
