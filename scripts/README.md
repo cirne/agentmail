@@ -8,10 +8,7 @@ This directory contains development and maintenance scripts for zmail.
 
 These scripts are part of the development workflow and should be kept:
 
-- **`install-cli.ts`** — Install wrapper script to run zmail from source
-  - Usage: `npm run install-cli`
-  - Documented in: `AGENTS.md`
-  - Purpose: Allows running `zmail` from any directory using source code
+- **`install-cli` (npm script in `package.json`)** — Not a file; runs `npm run build && npm install -g .` to install this package globally from the clone (same layout as `npm install -g @cirne/zmail`). See `AGENTS.md` and `.cursor/skills/install-local/SKILL.md`.
 
 - **`install-openclaw-skill.mjs`** — Copy `skills/zmail/` into OpenClaw’s skill directory on this machine
   - Usage: `npm run install-skill:openclaw` (optional: `OPENCLAW_ZMAIL_SKILL_DIR`, `--dry-run`)
@@ -54,7 +51,7 @@ These scripts generate or modify test fixtures. They're already been run (fixtur
 ### When to Keep a Script
 
 Keep scripts that:
-- Are part of the development workflow (`install-cli.ts`)
+- Are part of the development workflow (e.g. `install-cli` npm script)
 - Generate or modify fixtures that may need regeneration (`generate-fixtures-from-inbox.ts`, `add-realistic-names.ts`)
 - Are documented in `AGENTS.md` or other docs
 
@@ -70,7 +67,7 @@ Delete scripts that:
 - **`*-fixtures.ts`** — Fixture generation/modification scripts
 - **`rebuild-*.ts`** — Database rebuild scripts
 - **`check-*.ts`** — One-time verification scripts (often temporary)
-- **`install-*.ts`** — Installation/setup scripts
+- **`install-*.mjs` / npm scripts** — Installation helpers (see `package.json`)
 
 ## Adding New Scripts
 

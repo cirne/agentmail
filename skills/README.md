@@ -4,7 +4,7 @@ Directories here are **[Agent Skills](https://agentskills.io/specification.md)-s
 
 **Product skill name:** **`/zmail`** — the folder and frontmatter `name` are `zmail` (spec requirement); many hosts surface that as the **`/zmail`** slash command.
 
-**Not the same as** **`.cursor/skills/`** in this repository — internal dev skills only (`commit`, `db-dev`, `install-cli`, `process-feedback`).
+**Not the same as** **`.cursor/skills/`** in this repository — internal dev skills only (`commit`, `db-dev`, `install-local`, `process-feedback`).
 
 | Path | Audience |
 |------|-----------|

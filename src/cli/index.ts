@@ -29,6 +29,10 @@ import { emptySyncResult, printRefreshStyleOutput } from "~/cli/refresh-output";
 import type { RefreshPreviewRow } from "~/lib/refresh-preview";
 import { parseInboxWindowToIsoCutoff } from "~/inbox/parse-window";
 import { runInboxScan } from "~/inbox/scan";
+import {
+  isNodeNativeAddonAbiError,
+  printBetterSqliteAbiMismatchHint,
+} from "~/lib/native-sqlite-error";
 
 /**
  * Check sync log for errors from the most recent sync run.
@@ -1760,5 +1764,8 @@ async function main() {
 
 main().catch((err) => {
   logger.error(err instanceof Error ? err.message : String(err));
+  if (isNodeNativeAddonAbiError(err)) {
+    printBetterSqliteAbiMismatchHint(err);
+  }
   process.exit(1);
 });

@@ -1,3 +1,4 @@
+import "~/lib/ensure-better-sqlite-native";
 import Database from "better-sqlite3";
 import type { SqliteDatabase, SqliteRunResult, SqliteStatement } from "./sqlite-types";
 

@@ -1,3 +1,4 @@
+import "~/lib/ensure-better-sqlite-native";
 import Database from "better-sqlite3";
 import { describe, it, expect, afterEach } from "vitest";
 import { wrapBetterSqlite3 } from "./better-sqlite-adapter";

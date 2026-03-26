@@ -1,3 +1,4 @@
+import "~/lib/ensure-better-sqlite-native";
 import Database from "better-sqlite3";
 import { mkdirSync, rmSync } from "fs";
 import { dirname } from "path";
