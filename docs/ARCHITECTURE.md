@@ -155,7 +155,7 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 ### ADR-008: Language & Runtime — TypeScript + Node.js
 
-**Decision:** TypeScript on Node.js 22.5+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/archive/OPP-007-packaging-npm-homebrew.md)).
+**Decision:** TypeScript on Node.js 22.16+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/archive/OPP-007-packaging-npm-homebrew.md)).
 
 **Rationale:**
 - Node.js is ubiquitous; no separate runtime (Bun) required. Aligns with OpenClaw/Claude Code (`npm i -g`).
@@ -525,11 +525,15 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ### ADR-023: SQLite Access — Node `node:sqlite` + Async Facade
 
-**Decision:** Use **file-backed** SQLite via Node.js built-in **`node:sqlite`** (`DatabaseSync`, added in Node 22.5+). SQLite is linked into the Node binary (not a separate npm native addon, not WebAssembly). Do **not** use an in-process model that loads the entire database file into the JS heap for persistence (e.g. naive sql.js `readFile` → `Database(uint8)` / `export()`), which would make RSS scale with DB size — unacceptable for very large mailstores.
+**Merge policy (`main`):** The **`ExperimentalWarning`** emitted when using `node:sqlite` is a **merge blocker** for `main` until Node stabilizes the API or the project accepts the tradeoff. **`main` remains on `better-sqlite3`** and ABI mitigations until then. See **[OPP-027](opportunities/OPP-027-node-sqlite-main-merge-gate.md)**.
+
+**Decision:** Use **file-backed** SQLite via Node.js built-in **`node:sqlite`** (`DatabaseSync`, introduced in Node 22.5+). **Project requires Node ≥ 22.16.0** (`engines` in `package.json`): earlier Node 22.x builds ship SQLite **without** the **FTS5** extension (`no such module: fts5`), which zmail’s search index requires. SQLite is linked into the Node binary (not a separate npm native addon, not WebAssembly). Do **not** use an in-process model that loads the entire database file into the JS heap for persistence (e.g. naive sql.js `readFile` → `Database(uint8)` / `export()`), which would make RSS scale with DB size — unacceptable for very large mailstores.
 
 **Application API:** Expose a narrow **`SqliteDatabase`** interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by a small adapter around `DatabaseSync` (`src/db/node-sqlite-adapter.ts`). All CLI, sync, search, MCP, and ask code paths **`await`** DB operations so the surface is consistently async even though the underlying `node:sqlite` API is synchronous.
 
-**Runtime:** Require **Node.js ≥ 22.5.0** (`engines` in `package.json`). Users must run `zmail` with a Node version that includes `node:sqlite`. The module remains **experimental** in Node; track Node release notes for stability/API changes.
+**Runtime:** Require **Node.js ≥ 22.16.0** (`engines` in `package.json`). Users must run `zmail` with a Node version that includes `node:sqlite` **and** FTS5 in the bundled SQLite. The module remains **experimental** in Node; track Node release notes for stability/API changes.
+
+**Repo dev:** **`.npmrc`** **`engine-strict=true`** enforces **`package.json` `engines`** so local `npm install` fails fast when the active Node is too old.
 
 **Global install vs `overrides`:** For **`npm install -g`**, npm’s install root is the global prefix, so **`overrides` in `@cirne/zmail/package.json` are not applied** to the dependency tree the way they are in a repo-root install. **`bundledDependencies`** (the **`exceljs`** stack) ships the maintainer’s resolved **`node_modules` subtrees** in the published tarball so global installs pick up the same pinned/override-resolved versions.
 
@@ -541,4 +545,4 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ## Open Questions
 
-_(none — all major decisions resolved)_
+- **SQLite driver on `main`:** `node:sqlite` migration is **not merged** to `main` while the Node experimental warning is unacceptable for the CLI — see [OPP-027](opportunities/OPP-027-node-sqlite-main-merge-gate.md).

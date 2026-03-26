@@ -11,12 +11,14 @@ if (!existsSync(distIndex)) {
   process.exit(1);
 }
 
-const content = readFileSync(distIndex, "utf8");
+let content = readFileSync(distIndex, "utf8");
 
-// Add shebang if not present
-if (!content.startsWith("#!")) {
-  writeFileSync(distIndex, "#!/usr/bin/env node\n" + content);
-  console.log("✓ Added shebang to dist/index.js");
+// npm global bin invokes `node path/to/index.js` (shebang ignored); SQLite warning is suppressed in src/index.ts.
+const shebang = "#!/usr/bin/env node\n";
+if (content.startsWith("#!")) {
+  content = content.replace(/^#![^\n]*\n/, shebang);
 } else {
-  console.log("✓ dist/index.js already has shebang");
+  content = shebang + content;
 }
+writeFileSync(distIndex, content);
+console.log("✓ Set shebang on dist/index.js");

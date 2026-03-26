@@ -34,7 +34,7 @@ section "Package Configuration"
 check "package.json exists" [ -f "$REPO_ROOT/package.json" ]
 check "package name is @cirne/zmail" grep -q '"name": "@cirne/zmail"' "$REPO_ROOT/package.json"
 check "bin field configured" grep -q '"bin".*"zmail"' "$REPO_ROOT/package.json"
-check "Node.js 20+ required" grep -q '"engines".*"node".*">=20"' "$REPO_ROOT/package.json"
+check "Node.js 22.16+ required" grep -q '"node": ">=22.16.0"' "$REPO_ROOT/package.json"
 
 # Workflow checks
 section "GitHub Actions Workflow"

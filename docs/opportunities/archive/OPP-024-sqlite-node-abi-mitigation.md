@@ -1,6 +1,6 @@
 # OPP-024: SQLite / Node ABI — Global Install Reliability
 
-**Status:** Implemented (archived 2026-03-20). **Superseded 2026-03-26:** zmail migrated to Node.js built-in **`node:sqlite`** (`DatabaseSync`, Node ≥ 22.5.0); `better-sqlite3` is no longer used. This file remains as historical context for the native-addon mitigation.
+**Status:** Implemented (archived 2026-03-20). **2026-03-26 update:** `node:sqlite` was explored (ADR-023); **`main` does not merge that path** while Node’s `ExperimentalWarning` is unacceptable for the CLI — see **[OPP-027](../OPP-027-node-sqlite-main-merge-gate.md)**. **`main` continues to use `better-sqlite3`** and the mitigations below until that gate clears. This file remains the reference for native-addon ABI + `postinstall` rebuild guidance.
 
 ## Problem
 
@@ -14,7 +14,7 @@ when the addon was built or prebuilt for a different Node than the one running `
 ## Direction (implemented)
 
 1. **`package.json` `postinstall`** — runs `npm rebuild better-sqlite3` for the **current** Node when `node_modules` exists, so the addon matches the installing runtime in the common case.
-2. **Async `SqliteDatabase` facade** — narrow interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by an adapter around the native driver (`better-sqlite-adapter.ts` at the time). Call sites use `await` consistently (CLI, sync, search, MCP, ask). Today: `src/db/node-sqlite-adapter.ts` around `node:sqlite`.
+2. **Async `SqliteDatabase` facade** — narrow interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by an adapter around the native driver (`better-sqlite-adapter.ts` on `main`, or `node-sqlite-adapter.ts` on experimental `node:sqlite` branches). Call sites use `await` consistently (CLI, sync, search, MCP, ask).
 3. **Documentation** — [ADR-023](../../ARCHITECTURE.md) in `docs/ARCHITECTURE.md`; install / fallback notes in [AGENTS.md](../../AGENTS.md).
 4. **Schema / data** — On schema or packaging changes that invalidate the DB: bump `SCHEMA_VERSION`, delete DB + WAL sidecars, **rebuild from maildir** (no row migration). Same as [ADR-021](../../ARCHITECTURE.md).
 

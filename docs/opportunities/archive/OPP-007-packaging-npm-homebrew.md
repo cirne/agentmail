@@ -1,6 +1,6 @@
 # OPP-007: Packaging and Distribution — npm, Homebrew, Ditching the Binary
 
-**Status: Implemented.** Runtime is Node.js 20+; distributed via public npm as `@cirne/zmail`; dev uses `tsx`. See AGENTS.md and ARCHITECTURE.md ADR-008.
+**Status: Implemented.** Runtime is Node.js 22.16+ (`engines` in `package.json`); distributed via public npm as `@cirne/zmail`; dev uses `tsx`. See AGENTS.md and ARCHITECTURE.md ADR-008.
 
 **Package name:** `@cirne/zmail` (scoped). The unscoped name `zmail` is already taken on npm (old package, ~3 weekly downloads). Packages are published to public npm. Install via `npm i -g @cirne/zmail` (no authentication required).
 
@@ -125,7 +125,7 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 ```
 
 The script:
-- Checks for Node.js 20+ requirement
+- Checks for Node.js 22.16+ requirement (aligned with `package.json` `engines`)
 - Installs `@cirne/zmail` globally from npm (no authentication required)
 - Verifies installation and provides PATH guidance if needed
 

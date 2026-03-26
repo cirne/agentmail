@@ -8,10 +8,7 @@ This directory contains development and maintenance scripts for zmail.
 
 These scripts are part of the development workflow and should be kept:
 
-- **`install-cli.ts`** — Install wrapper script to run zmail from source
-  - Usage: `npm run install-cli`
-  - Documented in: `AGENTS.md`
-  - Purpose: Allows running `zmail` from any directory using source code
+- **`npm run install-cli`** (defined in `package.json`, not a file here) — `npm run build` then `npm install -g .` so the global `zmail` matches `dist/index.js`. Documented in [`AGENTS.md`](../AGENTS.md) and [`.cursor/skills/install-local/SKILL.md`](../.cursor/skills/install-local/SKILL.md).
 
 - **`install-openclaw-skill.mjs`** — Copy `skills/zmail/` into OpenClaw’s skill directory on this machine
   - Usage: `npm run install-skill:openclaw` (optional: `OPENCLAW_ZMAIL_SKILL_DIR`, `--dry-run`)
@@ -54,7 +51,7 @@ These scripts generate or modify test fixtures. They're already been run (fixtur
 ### When to Keep a Script
 
 Keep scripts that:
-- Are part of the development workflow (`install-cli.ts`)
+- Are part of the development workflow
 - Generate or modify fixtures that may need regeneration (`generate-fixtures-from-inbox.ts`, `add-realistic-names.ts`)
 - Are documented in `AGENTS.md` or other docs
 

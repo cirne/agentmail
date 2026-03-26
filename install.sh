@@ -32,17 +32,19 @@ warn() {
     echo -e "${YELLOW}⚠${NC} $1"
 }
 
-# Check for Node.js
+# Check for Node.js (package engines: >=22.16.0 — node:sqlite + FTS5 in bundled SQLite)
 check_node() {
     if ! command -v node &> /dev/null; then
-        error "Node.js is not installed. Please install Node.js 20+ first:\n  https://nodejs.org/"
+        error "Node.js is not installed. Please install Node.js 22.16+ first:\n  https://nodejs.org/"
     fi
     
-    NODE_VERSION=$(node -v | sed 's/v//')
+    NODE_VERSION=$(node -v | sed 's/^v//')
     NODE_MAJOR=$(echo "$NODE_VERSION" | cut -d. -f1)
-    
-    if [ "$NODE_MAJOR" -lt 20 ]; then
-        error "Node.js 20+ is required. You have Node.js $NODE_VERSION. Please upgrade:\n  https://nodejs.org/"
+    NODE_MINOR=$(echo "$NODE_VERSION" | cut -d. -f2)
+    NODE_MINOR=${NODE_MINOR:-0}
+
+    if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 16 ]; }; then
+        error "Node.js 22.16+ is required (built-in node:sqlite with FTS5). You have Node.js $NODE_VERSION. Please upgrade:\n  https://nodejs.org/"
     fi
     
     success "Node.js $NODE_VERSION detected"

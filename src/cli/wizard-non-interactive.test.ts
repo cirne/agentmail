@@ -24,7 +24,7 @@ function streamToText(stream: NodeJS.ReadableStream | null): Promise<string> {
  *
  * This test reproduces the bug and serves as the exit criteria for the fix.
  *
- * @inquirer/prompts (via util.styleText) requires Node 20+; package engines require Node 22.5+.
+ * @inquirer/prompts (via util.styleText) requires Node 20+; package engines require Node 22.16+.
  */
 const nodeMajor = Number(process.versions.node.split(".")[0]);
 describe.skipIf(nodeMajor < 20)("BUG-009: Wizard with non-interactive stdin", () => {

@@ -1,6 +1,6 @@
 # zmail — Agent Guide
 
-**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 22.5+** (built-in `node:sqlite`); dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). Read-only today; send is in the vision ([VISION.md](docs/VISION.md)) but blocked on customer validation for core search/index/onboarding — we want to nail that first.
+**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). **SQLite on `main`:** until [OPP-027](docs/opportunities/OPP-027-node-sqlite-main-merge-gate.md) clears, **`main` stays on `better-sqlite3`** (ABI warts); a `node:sqlite` path is **not merged** to `main` while Node’s ExperimentalWarning is a CLI deal-breaker. Read-only today; send is in the vision ([VISION.md](docs/VISION.md)) but blocked on customer validation for core search/index/onboarding — we want to nail that first.
 
 **Quick install:**
 ```bash
@@ -10,19 +10,34 @@ npm install -g @cirne/zmail
 ## Key documents
 
 - **End users of zmail (publishable skill `/zmail`):** [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md) — [Agent Skills](https://agentskills.io/specification.md) playbook (`name: zmail`); install, setup, sync, usage; see [`skills/README.md`](skills/README.md). Distinct from internal **`.cursor/skills/*`** below.
-- **Developing this repo in Cursor:** `.cursor/skills/` — internal skills (`commit`, `db-dev`, `install-cli`, `process-feedback`). Not the publishable user skill in `skills/zmail/`.
+- **Developing this repo in Cursor:** `.cursor/skills/` — internal skills (`commit`, `db-dev`, `install-local`, `process-feedback`). Not the publishable user skill in `skills/zmail/`.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical decisions and rationale (**read before making storage, sync, or interface decisions**)
 - [`docs/MCP.md`](docs/MCP.md) — MCP server interface documentation (**read for agent integration**)
 - [`docs/VISION.md`](docs/VISION.md) — product vision
 - [`docs/OPPORTUNITIES.md`](docs/OPPORTUNITIES.md) — product improvement ideas
+- [`docs/opportunities/OPP-027-node-sqlite-main-merge-gate.md`](docs/opportunities/OPP-027-node-sqlite-main-merge-gate.md) — **`main` SQLite driver policy** (`node:sqlite` vs `better-sqlite3`, merge gate)
 
 **Single source of truth:** each fact lives in one place. Update the canonical docs or code not copies. DRY.
 
 ## Tech stack
 
-Node.js 22.5+, TypeScript, **file-backed** SQLite via Node’s built-in **`node:sqlite`** (`DatabaseSync`; libsqlite ships with Node — no separate native addon package, no WASM). FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db`). Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
+Node.js (see `engines` in `package.json`), TypeScript, **file-backed** SQLite with FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db`). **Driver on `main`:** `better-sqlite3` until [OPP-027](docs/opportunities/OPP-027-node-sqlite-main-merge-gate.md) clears; experimental `node:sqlite` branches follow ADR-023. Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
 
-**Runtime:** Use a **Node 22.5+** binary to run `zmail` (see `engines` in `package.json`). The SQLite module is still marked experimental in Node; behavior follows Node’s release notes. **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Runtime:** Use a Node binary that matches **`engines`** in `package.json`. **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+
+## Node.js version (nvm)
+
+**Required for development.** Always use the Node version pinned in [`.nvmrc`](.nvmrc) so it matches **`package.json` → `engines`** and the toolchain behaves consistently.
+
+1. **Before** `npm install`, `npm ci`, `npm run install-cli`, or other installs that must match the published runtime, run:
+   ```bash
+   nvm use
+   ```
+   If that version isn’t installed: `nvm install` (reads `.nvmrc`), then `nvm use`.
+2. **`.npmrc`** sets **`engine-strict=true`** — if your shell is on the wrong Node, **`npm install`** fails with **`EBADENGINE`** (this is intentional).
+3. **Node + SQLite** — follow **`engines`** and [OPP-027](docs/opportunities/OPP-027-node-sqlite-main-merge-gate.md) for `main` vs `node:sqlite` branch policy; use one Node binary for dev, tests, and `npm install -g .` so behavior matches.
+
+**Agents and CI:** When running repo commands in a subprocess, activate nvm first (e.g. `source ~/.nvm/nvm.sh && nvm use && npm test`) or use a Node toolchain that matches `.nvmrc` and `engines`.
 
 ## Project structure
 
@@ -41,6 +56,7 @@ src/
 
 ## Development rules
 
+- **Node:** follow [Node.js version (nvm)](#nodejs-version-nvm) — `nvm use` from the repo root before installs and when running `npm run zmail`, `npm test`, `npm run install-cli`, etc.
 - Never commit email data, credentials, or `.db` files.
 - **No migrations.** Schema is applied on DB creation. For schema changes: run manual `ALTER TABLE` / SQL against the live DB to save a resync. Full reset (`rm -rf ~/.zmail/data/` + resync) also works. Do not create or maintain migration files.
 - When testing search, **use the standard search interface** (`search(db, { query })` from `~/search`). Do not query the DB directly unless debugging or explicitly asked.
@@ -76,6 +92,8 @@ See `.cursor/skills/process-feedback/SKILL.md` for the complete workflow. The `d
 
 ## Commands
 
+**Prerequisite:** `nvm use` (see [Node.js version (nvm)](#nodejs-version-nvm)).
+
 ```bash
 npm install
 npm run dev          # starts background sync (tsx src/index.ts)
@@ -83,7 +101,7 @@ npm run zmail --     # CLI from repo (e.g. npm run zmail -- search "foo"); the -
 npm run sync         # initial sync (or: npm run zmail -- sync --since 7d)
 npm run refresh      # refresh: fetch new messages (or: npm run zmail -- refresh)
 npm run build        # compile to dist/ (tsc + tsc-alias) for npm global install
-npm run install-cli  # install wrapper to ~/.local/bin so `zmail` runs source from any cwd
+npm run install-cli  # build + npm install -g . from this repo (global `zmail` → dist/)
 npm run lint         # tsc --noEmit (no ESLint)
 npm test             # run test suite (excludes eval tests)
 npm run eval         # run eval suite (LLM-based evaluation tests, requires ZMAIL_OPENAI_API_KEY)
@@ -126,7 +144,7 @@ The CLI prints the log file path to stdout (e.g., `Sync log: ~/.zmail/logs/sync-
 
 **Using `zmail` from the repo:** `npm run zmail -- <command> [args]` (the `--` is required so args reach the CLI). Or: `npx tsx src/index.ts -- <command> [args]`.
 
-**Using `zmail` from another directory:** Run `npm run install-cli` from the repo once. That installs a wrapper at `~/.local/bin/zmail` (or `ZMAIL_INSTALL_DIR`) that runs `npx tsx <repo>/src/index.ts -- "$@"`. Ensure that dir is on your PATH. Or install globally: `npm i -g .` (requires `npm run build` first).
+**Using `zmail` from another directory (local dev):** With **`nvm use`** active, from the repo run **`npm run install-cli`** once — it builds `dist/` and runs `npm install -g .` so the global `zmail` command uses the same `dist/index.js` entry as the published package. Remove with `npm uninstall -g @cirne/zmail`. For quick iteration without touching global install, use `npm run zmail -- <command>` from the repo (still use **`nvm use`** so Node matches `.nvmrc`).
 
 ### Attachment commands
 

@@ -2,13 +2,13 @@
 name: zmail
 description: >-
   Local-first email for agents: IMAP sync to maildir + SQLite (FTS5); CLI search, read, thread, who,
-  attachments. Requires Node 22.5+ (built-in `node:sqlite`), global install via npm (`npm install -g @cirne/zmail`),
+  attachments. Requires Node 22.16+ (built-in `node:sqlite`), global install via npm (`npm install -g @cirne/zmail`),
   and IMAP credentials. OpenAI API key required for `zmail setup` /
   wizard, `zmail ask`, and `zmail inbox`—those features can send email-derived text to OpenAI.
   Optional `who --enrich` may call third-party search APIs. Source: github.com/cirne/zmail.
 license: "Refer to https://github.com/cirne/zmail for project license and terms."
 compatibility: >-
-  Node.js 22.5+; npm; `zmail` on PATH after global install. Network: IMAP, OpenAI (ask/inbox/setup),
+  Node.js 22.16+; npm; `zmail` on PATH after global install. Network: IMAP, OpenAI (ask/inbox/setup),
   optional enrich providers. Disk: ~/.zmail (SQLite + maildir). SQLite via Node built-in `node:sqlite`.
 metadata:
   version: "0.1.1"
@@ -39,7 +39,7 @@ Use this block to keep **ClawHub / OpenClaw registry fields** aligned with the s
 | Topic | What to declare |
 |--------|------------------|
 | **Provenance** | Source and issues: **[github.com/cirne/zmail](https://github.com/cirne/zmail)** |
-| **Install** | **`npm install -g @cirne/zmail`** (Node **22.5+**). SQLite uses Node’s built-in **`node:sqlite`** (no separate sqlite npm package). |
+| **Install** | **`npm install -g @cirne/zmail`** (Node **22.16+**). SQLite uses Node’s built-in **`node:sqlite`** (no separate sqlite npm package). |
 | **On PATH** | Global npm `bin` must be on **`PATH`**, or use **`npx @cirne/zmail`** for one-off invocations. |
 | **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and optional **`zmail who --enrich`**. |
 | **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, and **`who --enrich`** can send **email-derived content** (subjects, snippets, bodies, addresses) to **OpenAI** or other APIs—only use if the **mailbox owner** accepts that. Primitives **`search` / `read` / `thread` / `attachment`** (without enrich) are local index + disk only once mail is synced. |
@@ -52,7 +52,7 @@ OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://d
 
 ## Agent checklist
 
-1. Confirm **Node.js 22.5+** (`node -v`).
+1. Confirm **Node.js 22.16+** (`node -v`).
 2. `npm install -g @cirne/zmail` (see [Install](#install)).
 3. Choose setup: **[`zmail wizard`](#zmail-wizard-interactive-humans)** (TTY) or **[`zmail setup`](#zmail-setup-agents--automation)** (flags/env, no prompts).
 4. User must have a **Gmail app password** (or compatible IMAP credentials)—[Gmail: app password](#gmail-get-an-app-password).
@@ -66,7 +66,7 @@ OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://d
 ## Install
 
 ```bash
-node -v   # must be v22.5+
+node -v   # must be v22.16+
 npm install -g @cirne/zmail
 ```
 

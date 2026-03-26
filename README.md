@@ -109,7 +109,7 @@ For a **maildir-only** SQLite reindex without deleting raw email (same steps as 
 
 ## Architecture
 
-Built with TypeScript + Node.js 20+. All data stored locally on a persistent volume — no cloud sync service, no third-party access to your email. 
+Built with TypeScript + Node.js 22.16+. All data stored locally on a persistent volume — no cloud sync service, no third-party access to your email. 
 
 **Documentation:**
 - [`AGENTS.md`](AGENTS.md) — single source of truth for installation, commands, and development

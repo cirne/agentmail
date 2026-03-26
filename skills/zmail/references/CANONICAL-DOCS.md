@@ -1,6 +1,6 @@
 # Canonical docs and how agents should learn zmail
 
-This file is for the **end-user `/zmail` skill** (`skills/zmail/`). For **developing** zmail in Cursor, use the repo’s **`.cursor/skills/`** (`commit`, `db-dev`, `install-cli`, `process-feedback`) — not this playbook.
+This file is for the **end-user `/zmail` skill** (`skills/zmail/`). For **developing** zmail in Cursor, use the repo’s **`.cursor/skills/`** (`commit`, `db-dev`, `install-local`, `process-feedback`) — not this playbook.
 
 ---
 

@@ -150,7 +150,7 @@ After a workflow run, verify:
 
 **Prerequisites:**
 - GitHub Personal Access Token with `read:packages` permission
-- Node.js 20+ installed
+- Node.js 22.16+ installed
 - Clean npm environment (or use a test user)
 
 **Steps:**
@@ -279,7 +279,7 @@ Provide alpha testers with:
 **Tests fail in CI:**
 - Run locally: `npm test`
 - Check test output in Actions logs
-- Verify Node.js version (should be 20+)
+- Verify Node.js version (should match `package.json` `engines`, currently 22.16+)
 
 **Package publish fails:**
 - Check `GITHUB_TOKEN` permissions

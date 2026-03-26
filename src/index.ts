@@ -4,11 +4,15 @@
 
 import { CLI_USAGE } from "~/lib/onboarding";
 import { hasConfig } from "~/lib/config";
+import { assertZmailNodeRuntime, getPackageVersion } from "~/lib/node-runtime";
 
 // When run as "tsx src/index.ts -- <command>", argv[2] is "--" and argv[3] is the command
 const rest = process.argv.slice(2);
 const command = rest[0] === "--" ? rest[1] : rest[0];
 const args = rest[0] === "--" ? rest.slice(2) : rest.slice(1);
+
+/** Every invocation (including --help / --version) requires a supported Node — before node:sqlite. */
+assertZmailNodeRuntime();
 
 /** Emit onboarding hint on stderr and exit 1 when failure is due to missing config. */
 function handleMissingConfig(err: unknown): never {
@@ -25,6 +29,30 @@ if (command === "--help" || command === "-h" || command === "help") {
   console.log(CLI_USAGE);
   process.exit(0);
 }
+if (command === "--version" || command === "-V") {
+  console.log(getPackageVersion());
+  process.exit(0);
+}
+
+if (!command) {
+  console.log("zmail — agent-first email: sync, index, and search your inbox.\n");
+  console.log("First time? Configure with:");
+  console.log("  zmail setup              Configure via flags/env (agent-friendly; no prompts)");
+  console.log("  zmail wizard             Interactive setup (prompts for input; less agent-friendly)");
+  console.log("");
+  console.log("  zmail sync               Start syncing email (background; waits until data flows)");
+  console.log("  zmail refresh            Fetch new email since last sync (fast, foreground)");
+  console.log("  zmail inbox              LLM scan of recent mail (notable messages; needs OpenAI key)");
+  console.log("  zmail rebuild-index      Rebuild local SQLite index from maildir (dev/test)");
+  console.log("  zmail search <query>    Search email — FTS5 full-text search");
+  console.log("  zmail who <query>        Find people by name or address");
+  console.log("  zmail status             Show sync and indexing progress");
+  console.log("  zmail read <id>          Read a message");
+  console.log("");
+  console.log("Run 'zmail --help' for all commands and flags.");
+  process.exit(0);
+}
+
 /** Parse --flag value or --flag=value from args. Returns undefined if not found. */
 function getFlag(args: string[], flag: string): string | undefined {
   const eq = `${flag}=`;
@@ -64,25 +92,7 @@ if (command === "wizard") {
   process.exit(0);
 }
 
-// If no command provided, show quick help
-if (!command) {
-  console.log("zmail — agent-first email: sync, index, and search your inbox.\n");
-  console.log("First time? Configure with:");
-  console.log("  zmail setup              Configure via flags/env (agent-friendly; no prompts)");
-  console.log("  zmail wizard             Interactive setup (prompts for input; less agent-friendly)");
-  console.log("");
-  console.log("  zmail sync               Start syncing email (background; waits until data flows)");
-  console.log("  zmail refresh            Fetch new email since last sync (fast, foreground)");
-  console.log("  zmail inbox              LLM scan of recent mail (notable messages; needs OpenAI key)");
-  console.log("  zmail rebuild-index      Rebuild local SQLite index from maildir (dev/test)");
-  console.log("  zmail search <query>    Search email — FTS5 full-text search");
-  console.log("  zmail who <query>        Find people by name or address");
-  console.log("  zmail status             Show sync and indexing progress");
-  console.log("  zmail read <id>          Read a message");
-  console.log("");
-  console.log("Run 'zmail --help' for all commands and flags.");
-  process.exit(0);
-} else {
+{
   // Command provided, check for config before proceeding
   if (!hasConfig()) {
     console.error("No config found. Run 'zmail setup' or 'zmail wizard' first.");
