@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 import { simpleParser } from "mailparser";
 import type { SqliteDatabase } from "~/db";
@@ -30,11 +30,27 @@ export async function loadThreadingFromSourceMessage(
   ).get(mid)) as { raw_path: string; message_id: string } | undefined;
 
   if (!row) {
-    throw new Error(`Message not found in index: ${sourceMessageId}`);
+    throw new Error(
+      `Cannot build reply threading: source message ${sourceMessageId} is not in the local index. Run zmail sync or zmail refresh, then try again.`
+    );
   }
 
   const abs = join(maildirPath, row.raw_path);
-  const buf = readFileSync(abs);
+  if (!existsSync(abs)) {
+    throw new Error(
+      `Cannot build reply threading: raw .eml for source message ${sourceMessageId} is missing (${abs}). Run zmail sync, or zmail rebuild-index if the local maildir was cleared.`
+    );
+  }
+
+  let buf: Buffer;
+  try {
+    buf = readFileSync(abs);
+  } catch (e) {
+    const hint = e instanceof Error ? e.message : String(e);
+    throw new Error(
+      `Cannot build reply threading: could not read source message ${sourceMessageId} at ${abs} (${hint}). Run zmail sync or zmail rebuild-index if data is incomplete.`
+    );
+  }
   const parsed = await simpleParser(buf);
 
   const ensureBrackets = (id: string): string => {

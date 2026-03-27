@@ -26,11 +26,11 @@ Usage:
   zmail read <id> [--raw]         Read a message (or: zmail message <id>)
   zmail attachment list <message_id>   List attachments (use message_id from search)
   zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
-  zmail send [--to ... --subject ...] [--raw] [<filename>] [--dry-run]   SMTP send-as-user; send a saved draft by filename under data/drafts/ (.md optional; archives to data/sent/). Optional ZMAIL_SEND_TEST=1 restricts To/Cc/Bcc to lewiscirne+zmail@gmail.com when testing sends
+  zmail send [--to ... --subject ...] [--raw] [<draft-id>] [--dry-run]   SMTP send-as-user; send a saved draft by id under data/drafts/ (.md optional; archives to data/sent/). Optional ZMAIL_SEND_TEST=1 restricts To/Cc/Bcc to lewiscirne+zmail@gmail.com when testing sends
   zmail draft …                 Compose locally; see zmail draft --help (list/view: JSON includes absolute path; body omitted unless --with-body; --text = full human-readable)
   zmail mcp                       Start MCP server (stdio)
 
-Draft + send (core loop): zmail draft reply … (or new with --subject, or new --instruction for LLM subject+body) → zmail draft edit <filename> "…" to refine with the LLM → zmail send <filename> --dry-run then zmail send <filename>. Same pipeline via MCP: create_draft, send_draft.
+Draft + send (core loop): zmail draft reply … (or new with --subject, or new --instruction for LLM subject+body) → zmail draft edit <id> "…" to refine with the LLM → zmail send <draft-id> --dry-run then zmail send <draft-id>. Same pipeline via MCP: create_draft, send_draft.
 
 Ask vs search / read / thread / who / attachment / inbox:
   ask — Use for one-shot natural-language questions and let zmail retrieve and summarize (fast path for agents; requires ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY).

@@ -105,13 +105,18 @@ export function draftRewritePositionals(rest: string[]): string[] {
   return out;
 }
 
+/** Message when `zmail send <draft-id>` targets a missing file (exported for tests). */
+export function formatSendDraftNotFoundMessage(draftId: string, draftPath: string): string {
+  return `Draft not found: ${draftId}. Expected file:\n  ${draftPath}\nRun \`zmail draft list\` to see saved draft ids.`;
+}
+
 export function sendUsage(): void {
   console.error("Usage:");
   console.error("  zmail send --to <addr> --subject <s> [--body <text>]   (body optional; stdin if omitted and piped)");
   console.error("  zmail send --raw [--file <path>]                      (RFC 822 from stdin or file)");
-  console.error("  zmail send <filename>                                 (saved draft under data/drafts/; .md optional)");
+  console.error("  zmail send <draft-id>                                 (saved draft under data/drafts/; .md optional)");
   console.error("");
-  console.error("Flags: --cc --bcc --dry-run --text --json (default JSON for machine output)");
+  console.error("Flags: --cc --bcc --dry-run --text   (default JSON on stdout; use --text for human-readable)");
   console.error(`Optional ZMAIL_SEND_TEST=1: restrict To/Cc/Bcc to ${DEV_SEND_ALLOWLIST} when testing sends`);
 }
 
@@ -187,6 +192,8 @@ export async function runSendCli(args: string[]): Promise<void> {
       printSendResult(result, useJson);
       return;
     }
+    console.error(formatSendDraftNotFoundMessage(draftId, draftPath));
+    process.exit(1);
   }
 
   console.error("Invalid send arguments.");
@@ -220,6 +227,7 @@ function printSendResult(result: Awaited<ReturnType<typeof sendSimpleMessage>>, 
 
 export function draftUsage(): void {
   console.error("Usage:");
+  console.error("  <id> is the draft file stem under data/drafts/ (e.g. project-update_a1b2c3d4); .md optional when passing it to send.");
   console.error("  zmail draft list [--text]     JSON: id, path, kind, subject (path = read with read_file)");
   console.error("  zmail draft view <id> [--text] [--with-body]   JSON: path + headers; omit body unless --with-body");
   console.error("  zmail draft new --to <addrs> --subject <s> [--body <t> | --body-file <path>] [--with-body] [--text]");

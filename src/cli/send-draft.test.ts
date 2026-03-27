@@ -1,11 +1,21 @@
 import { describe, it, expect } from "vitest";
 import {
   formatDraftViewText,
+  formatSendDraftNotFoundMessage,
   draftEditPositionals,
   draftRewritePositionals,
   printDraftRecordOutput,
 } from "./send-draft";
 import type { DraftRecord } from "~/send";
+
+describe("formatSendDraftNotFoundMessage", () => {
+  it("includes draft id, expected path, and draft list hint", () => {
+    const msg = formatSendDraftNotFoundMessage("my-draft_abc12345", "/home/u/.zmail/data/drafts/my-draft_abc12345.md");
+    expect(msg).toContain("Draft not found: my-draft_abc12345");
+    expect(msg).toContain("/home/u/.zmail/data/drafts/my-draft_abc12345.md");
+    expect(msg).toContain("zmail draft list");
+  });
+});
 
 describe("formatDraftViewText", () => {
   it("formats headers and body for reading", () => {

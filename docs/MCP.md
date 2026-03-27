@@ -6,7 +6,7 @@ zmail exposes an MCP (Model Context Protocol) server for agent access to your em
 
 The MCP server provides programmatic access to zmail's search, message retrieval, attachment extraction, and (when configured) **outbound SMTP** (`send_email`, `create_draft`, `send_draft`, `list_drafts`). It shares the same underlying SQLite index as the CLI, so all data synced via `zmail sync` or `zmail refresh` is immediately available through MCP tools.
 
-**Draft + send (core agent loop):** create or update drafts with **`create_draft`**, list with **`list_drafts`**, send with **`send_draft`** (mirrors **`zmail draft …`** and **`zmail send <filename>`**). Draft files are **`{id}.md`** under `data/drafts/` (`id` is a subject slug plus an 8-character suffix). **`send_draft`** accepts that filename with or without **`.md`**. For kind **`new`**, omit **`subject`** and pass **`instruction`** to have the LLM generate subject and body (requires OpenAI key). Natural-language revision of an existing draft is **CLI-only** today (`zmail draft edit <filename> "…"`); in MCP, have the outer agent edit the `body` field and call **`create_draft`** again or shell out to the CLI.
+**Draft + send (core agent loop):** create or update drafts with **`create_draft`**, list with **`list_drafts`**, send with **`send_draft`** (mirrors **`zmail draft …`** and **`zmail send <draft-id>`**). Draft files are **`{id}.md`** under `data/drafts/` (`id` is a subject slug plus an 8-character suffix). **`send_draft`** accepts that id with or without **`.md`**. For kind **`new`**, omit **`subject`** and pass **`instruction`** to have the LLM generate subject and body (requires OpenAI key). Natural-language revision of an existing draft is **CLI-only** today (`zmail draft edit <id> "…"`); in MCP, have the outer agent edit the `body` field and call **`create_draft`** again or shell out to the CLI.
 
 ## Architecture
 
@@ -272,7 +272,7 @@ Create a draft file under `data/drafts/` (Markdown + YAML frontmatter). The retu
 
 ### `send_draft`
 
-Send a draft by **`draftId`** (same pipeline as CLI `zmail send <filename>`). On success, moves the draft file to `data/sent/`.
+Send a draft by **`draftId`** (same pipeline as CLI `zmail send <draft-id>`). On success, moves the draft file to `data/sent/`.
 
 **Parameters:** `draftId` (required): the draft filename (**`.md` optional** — same stem as **`create_draft`** / **`list_drafts`** `id`). `dryRun` (optional).
 
@@ -328,7 +328,7 @@ List local drafts: `id` (stem of the `.md` file), `kind`, `subject`.
    { "tool": "send_draft", "arguments": { "draftId": "<id-from-step-1-or-2>" } }
    ```
 
-Same behavior as CLI: on success the draft file moves to **`data/sent/`**. For **LLM-guided revision** of an existing draft, use **`zmail draft edit <filename> "…"`** as a subprocess (no MCP tool yet).
+Same behavior as CLI: on success the draft file moves to **`data/sent/`**. For **LLM-guided revision** of an existing draft, use **`zmail draft edit <id> "…"`** as a subprocess (no MCP tool yet).
 
 ### People discovery workflow
 

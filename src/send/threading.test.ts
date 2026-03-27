@@ -46,4 +46,28 @@ describe("loadThreadingFromSourceMessage", () => {
     expect(t.references).toContain("<orig@example.com>");
     expect(t.references).toContain("<a@older.com>");
   });
+
+  it("throws an actionable error when the message is not in the index", async () => {
+    const db = await createTestDb();
+    await expect(loadThreadingFromSourceMessage(db, maildirPath, "<missing@example.com>")).rejects.toThrow(
+      /Cannot build reply threading.*not in the local index.*zmail sync or zmail refresh/s
+    );
+  });
+
+  it("throws an actionable error when raw .eml is missing on disk", async () => {
+    const db = await createTestDb();
+    const mid = "<ghost@example.com>";
+    const rel = "cur/nowhere.eml";
+    await (
+      await db.prepare(
+        `INSERT INTO messages
+         (message_id, thread_id, folder, uid, from_address, from_name, to_addresses, cc_addresses, subject, body_text, date, raw_path)
+         VALUES (?, 't1', '[Gmail]/All Mail', 1, 'x@y.com', NULL, '[]', '[]', 'S', '', ?, ?)`
+      )
+    ).run(mid, new Date().toISOString(), rel);
+
+    await expect(loadThreadingFromSourceMessage(db, maildirPath, mid)).rejects.toThrow(
+      /Cannot build reply threading.*raw \.eml.*missing.*zmail sync.*rebuild-index/s
+    );
+  });
 });
