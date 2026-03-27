@@ -1,12 +1,12 @@
 # Validating Installation
 
-This document describes how to validate the install script, release workflow, and distribution pipeline to ensure everything works correctly before and after releases.
+This document describes how to validate the install script, manual npm release, and distribution pipeline to ensure everything works correctly before and after releases.
 
 ## Overview
 
 The validation strategy covers:
 1. **Install script validation** - Syntax, logic, and functionality
-2. **Release workflow validation** - GitHub Actions workflow checks
+2. **Release process** - Manual npm publish via `scripts/publish.sh` (no GitHub Actions release workflow)
 3. **End-to-end installation testing** - Full installation and package verification
 4. **Manual validation** - Real-world testing scenarios
 
@@ -74,73 +74,17 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 
 ---
 
-## 2. Release Workflow Validation
+## 2. Release validation (manual npm publish)
 
-### Local Workflow Validation
+Publishing is done locally with `scripts/publish.sh` (see `scripts/publish.sh` and `AGENTS.md`). Before publishing:
 
-**Validate workflow syntax:**
 ```bash
-# Using act (GitHub Actions local runner)
-# Install: brew install act
-act push --workflows .github/workflows/release.yml --dryrun
+npm test
+npm run build
+./scripts/validate-release.sh
 ```
 
-**Check workflow file:**
-```bash
-# Validate YAML syntax
-yamllint .github/workflows/release.yml  # if installed
-# Or use online validator: https://github.com/rhd-gitops-example/actions-workflow-validator
-```
-
-### GitHub Actions Testing
-
-**Test main branch push:**
-1. Make a small change (e.g., update README)
-2. Commit and push to `main`
-3. Check GitHub Actions tab
-4. Verify:
-   - Tests run and pass
-   - Build succeeds
-   - Package publishes to GitHub Packages with `latest` tag
-   - No GitHub Release created
-
-**Test manual dispatch:**
-1. Go to GitHub Actions → "Release npm Package"
-2. Click "Run workflow" → "Run workflow"
-3. Verify:
-   - Tests run
-   - Build succeeds
-   - Package publishes
-   - GitHub Release created with tarball
-
-**Test tag-based release:**
-```bash
-git tag v0.1.0-test.1
-git push origin v0.1.0-test.1
-```
-Verify:
-- Tests run
-- Build succeeds
-- Package publishes with version `0.1.0-test.1`
-- GitHub Release created
-
-### Workflow Output Validation
-
-After a workflow run, verify:
-
-1. **Package published:**
-   - Go to: https://github.com/cirne/zmail/packages
-   - Check that `@cirne/zmail` package exists
-   - Verify version matches expected format
-
-2. **Version format:**
-   - Main push: `0.1.0-alpha.YYYYMMDD.HHMMSS`
-   - Tag push: matches tag (e.g., `v0.1.0-test.1` → `0.1.0-test.1`)
-   - Manual: `0.1.0-alpha.YYYYMMDD.HHMMSS`
-
-3. **Dist-tag:**
-   - Main push: should have `latest` tag
-   - Tag/manual: no dist-tag (default)
+After `publish.sh` completes, confirm the new version appears on the npm registry you use and that `npm install -g @cirne/zmail` works.
 
 ---
 
@@ -209,19 +153,14 @@ zmail status  # Should show "No config found" or similar
 - [ ] Install script syntax validated (`bash -n install.sh`)
 - [ ] ShellCheck passes (`shellcheck install.sh`)
 - [ ] Test script passes (`./scripts/test-install.sh`)
-- [ ] Workflow syntax validated (GitHub Actions UI or act)
 - [ ] Local tests pass (`npm test`)
 - [ ] Build succeeds (`npm run build`)
 - [ ] Package.json name is `@cirne/zmail`
 
-### Post-Push Checklist
+### Post-publish checklist
 
-- [ ] Workflow runs successfully on push to main
-- [ ] Tests pass in CI
-- [ ] Package builds successfully
-- [ ] Package publishes to GitHub Packages
-- [ ] Version format is correct
-- [ ] Dist-tag is set correctly (`latest` for main)
+- [ ] Package published to npm with expected version
+- [ ] Dist-tag is correct if you used a non-default tag
 - [ ] Install script URL is accessible
 - [ ] Can install via curl command
 - [ ] Installed package works (`zmail --help`)
@@ -269,22 +208,16 @@ Provide alpha testers with:
 - Check npm registry config: `npm config get @cirne:registry`
 - Try installing specific version: `npm install -g @cirne/zmail@0.1.0-alpha.20240306.120000`
 
-### Workflow Issues
+### Publish issues
 
-**Workflow doesn't trigger:**
-- Check branch name matches (`main`)
-- Verify workflow file is in `.github/workflows/`
-- Check GitHub Actions tab for errors
-
-**Tests fail in CI:**
+**Tests fail before publish:**
 - Run locally: `npm test`
-- Check test output in Actions logs
-- Verify Node.js version (should be 20+)
+- Verify Node.js version matches `.nvmrc` (20+)
 
 **Package publish fails:**
-- Check `GITHUB_TOKEN` permissions
+- Verify npm login and registry for `@cirne/zmail`
 - Verify package name matches (`@cirne/zmail`)
-- Check for existing package conflicts
+- Check for version conflicts on the registry
 
 ---
 
@@ -309,8 +242,7 @@ Consider adding:
 
 3. **Package validation** after publish:
    ```bash
-   # In release workflow, after publish
-   npm view @cirne/zmail --registry=https://npm.pkg.github.com
+   npm view @cirne/zmail
    ```
 
 ---
@@ -321,10 +253,7 @@ Consider adding:
 # Validate install script
 bash -n install.sh && shellcheck install.sh && ./scripts/test-install.sh
 
-# Test workflow locally (requires act)
-act push --workflows .github/workflows/release.yml --dryrun
-
-# Test full install (requires GitHub PAT)
+# Test full install
 curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 
 # Verify installation

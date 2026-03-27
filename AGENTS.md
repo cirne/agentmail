@@ -5,6 +5,7 @@
 **Quick install:**
 ```bash
 npm install -g @cirne/zmail
+# Alternative: curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 ```
 
 ## Key documents

@@ -69,7 +69,9 @@ Replacements are localized and well-understood:
 
 ## Release workflow
 
-GitHub Actions workflow (`.github/workflows/release.yml`) automatically builds and publishes releases:
+> **Note:** The GitHub Actions workflow described below was removed from the repo. Publishing is manual via `scripts/publish.sh` (see [AGENTS.md](../../AGENTS.md)).
+
+GitHub Actions workflow (`.github/workflows/release.yml`, historical) automatically built and published releases:
 
 **Triggers:**
 - **Main branch push:** Automatically releases "latest" package after tests pass (timestamp version, published with `latest` dist-tag)
