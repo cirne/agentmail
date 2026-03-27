@@ -28,3 +28,15 @@ OPENCLAW_ZMAIL_SKILL_DIR="$HOME/.openclaw/workspace/skills/zmail" npm run instal
 ```
 
 Preview: `npm run install-skill:openclaw -- --dry-run`. Then start a new session or restart the gateway so OpenClaw reloads skills.
+
+## Claude Code (this machine)
+
+[Claude Code — Skills](https://docs.claude.com/en/docs/claude-code/skills) loads skills from **`~/.claude/skills/`** (and project `.claude/skills/`). From a **clone of this repo**:
+
+```bash
+npm run install-skill:claude
+```
+
+Default: symlink **`skills/zmail/`** → **`~/.claude/skills/zmail`**. **`npm run install-cli`** runs this step after the global CLI install (skip: **`ZMAIL_SKIP_CLAUDE_SKILL=1`**). Override destination: **`ZMAIL_CLAUDE_SKILL_DIR`**. Copy instead of symlink: **`ZMAIL_CLAUDE_SKILL_MODE=copy`**.
+
+Preview: `npm run install-skill:claude -- --dry-run`.

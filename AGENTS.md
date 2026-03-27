@@ -101,7 +101,7 @@ npm run zmail --     # CLI from repo (e.g. npm run zmail -- search "foo"); the -
 npm run sync         # initial sync (or: npm run zmail -- sync --since 7d)
 npm run refresh      # refresh: fetch new messages (or: npm run zmail -- refresh)
 npm run build        # compile to dist/ (tsc + tsc-alias) for npm global install
-npm run install-cli  # build + npm install -g . from this repo (global `zmail` → dist/)
+npm run install-cli  # build + npm install -g . + Claude Code skill (~/.claude/skills/zmail); skip skill: ZMAIL_SKIP_CLAUDE_SKILL=1
 npm run lint         # tsc --noEmit (no ESLint)
 npm test             # run test suite (excludes eval tests)
 npm run eval         # run eval suite (LLM-based evaluation tests, requires ZMAIL_OPENAI_API_KEY)
@@ -146,7 +146,7 @@ The CLI prints the log file path to stdout (e.g., `Sync log: ~/.zmail/logs/sync-
 
 **Using `zmail` from the repo:** `npm run zmail -- <command> [args]` (the `--` is required so args reach the CLI). Or: `npx tsx src/index.ts -- <command> [args]`.
 
-**Using `zmail` from another directory (local dev):** With **`nvm use`** active, from the repo run **`npm run install-cli`** once — it builds `dist/` and runs `npm install -g .` so the global `zmail` command uses the same `dist/index.js` entry as the published package. Remove with `npm uninstall -g @cirne/zmail`. For quick iteration without touching global install, use `npm run zmail -- <command>` from the repo (still use **`nvm use`** so Node matches `.nvmrc`).
+**Using `zmail` from another directory (local dev):** With **`nvm use`** active, from the repo run **`npm run install-cli`** once — it builds `dist/`, runs `npm install -g .`, and links **`skills/zmail/`** to **`~/.claude/skills/zmail`** so Claude Code can use **`/zmail`** (override: `ZMAIL_CLAUDE_SKILL_DIR`; copy instead of symlink: `ZMAIL_CLAUDE_SKILL_MODE=copy`; skip the skill step: `ZMAIL_SKIP_CLAUDE_SKILL=1`). The global `zmail` command uses the same `dist/index.js` entry as the published package. Remove with `npm uninstall -g @cirne/zmail`. For quick iteration without touching global install, use `npm run zmail -- <command>` from the repo (still use **`nvm use`** so Node matches `.nvmrc`). To install only the Claude skill from the repo: **`npm run install-skill:claude`**.
 
 ### Attachment commands
 

@@ -13,7 +13,7 @@ From the **repository root**:
 npm run install-cli
 ```
 
-This runs **`npm run build`** (compile to `dist/`) then **`npm install -g .`**, installing **`@cirne/zmail`** into your npm global prefix so `zmail` on your PATH runs **`dist/index.js`**.
+This runs **`npm run build`** (compile to `dist/`), then **`npm install -g .`**, then installs the publishable **`skills/zmail/`** tree into **`~/.claude/skills/zmail`** (symlink to the repo by default) so **Claude Code** can use **`/zmail`** as a global skill. Skip the skill step with **`ZMAIL_SKIP_CLAUDE_SKILL=1`**. Install only the skill: **`npm run install-skill:claude`**.
 
 ## Requirements
 
@@ -24,6 +24,7 @@ This runs **`npm run build`** (compile to `dist/`) then **`npm install -g .`**, 
 
 - Run `zmail` from any directory; config/data default to `~/.zmail` (or `ZMAIL_HOME`).
 - **`better-sqlite3`** is a native addon; first **`zmail`** run may run **`npm rebuild better-sqlite3`** if the addon’s ABI does not match the running Node (`ensure-better-sqlite-native`).
+- **Claude Code:** restart or start a new session so **`/zmail`** loads from **`~/.claude/skills/zmail`**. Copy instead of symlink: **`ZMAIL_CLAUDE_SKILL_MODE=copy`**.
 
 ## Remove
 

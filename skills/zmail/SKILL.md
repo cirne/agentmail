@@ -60,9 +60,10 @@ OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://d
 3. Choose setup: **[`zmail wizard`](#zmail-wizard-interactive-humans)** (TTY) or **[`zmail setup`](#zmail-setup-agents--automation)** (flags/env, no prompts).
 4. User must have a **Gmail app password** (or compatible IMAP credentials)—[Gmail: app password](#gmail-get-an-app-password).
 5. Run **`zmail sync --since …`** then **`zmail refresh`** / **`zmail status`**.
-6. **Learn the CLI from the CLI:** run **`zmail`**, **`zmail --help`**, and **`zmail <command> --help`** (e.g. **`zmail draft --help`** for compose, LLM **`draft edit`**, **`draft rewrite`**, **`--text`** output). Read any **`hint`** (and truncation fields) in **JSON** output—zmail uses them to disclose the next capability ([Canonical docs & discovery](references/CANONICAL-DOCS.md)).
-7. For questions over mail, prefer **`zmail ask`** first; use **`search` / `read` / `thread` / `who` / `attachment`** when you need fine control ([Ask vs primitives](#zmail-ask-vs-primitives)). To **reply or send**, follow **[Agent workflow: draft and send](#agent-workflow-draft-and-send)** (detail: [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md)).
-8. Never paste secrets into chat logs; use env or flags in the **user’s** shell.
+6. **Keep the index fresh:** **`search`**, **`read`**, **`thread`**, **`attachment`**, and **`ask`** only see mail already synced locally—run **`zmail refresh`** regularly (especially before mail work when **recency** matters), and recommend the user **schedule** **`zmail refresh`** (cron, launchd, or a host **heartbeat**) so new mail is indexed without manual steps ([Keeping mail fresh](#keeping-mail-fresh-indexed-and-searchable)).
+7. **Learn the CLI from the CLI:** run **`zmail`**, **`zmail --help`**, and **`zmail <command> --help`** (e.g. **`zmail draft --help`** for compose, LLM **`draft edit`**, **`draft rewrite`**, **`--text`** output). Read any **`hint`** (and truncation fields) in **JSON** output—zmail uses them to disclose the next capability ([Canonical docs & discovery](references/CANONICAL-DOCS.md)).
+8. For questions over mail, prefer **`zmail ask`** first; use **`search` / `read` / `thread` / `who` / `attachment`** when you need fine control ([Ask vs primitives](#zmail-ask-vs-primitives)). To **reply or send**, follow **[Agent workflow: draft and send](#agent-workflow-draft-and-send)** (detail: [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md)).
+9. Never paste secrets into chat logs; use env or flags in the **user’s** shell.
 
 ---
 
@@ -193,6 +194,22 @@ zmail search 'query'      # FTS hits (JSON default; --text for tables)
 - Long **`sync`:** Safe to run in background; use **`zmail status`** and the **sync log file** path the CLI prints.
 - **Refresh** is the habitual “get new mail” command after the first sync.
 - **Outbound:** use **[Agent workflow: draft and send](#agent-workflow-draft-and-send)** (`zmail draft …`, then **`zmail send <draft-id>`**; see [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md)).
+
+---
+
+## Keeping mail fresh (indexed and searchable)
+
+**Local** **`search`**, **`read`**, **`thread`**, **`attachment`**, and **`ask`** only see messages that have been **pulled from IMAP and indexed**. Mail that arrived on the server **after** the last sync is **not** in SQLite/FTS until another sync runs.
+
+**Agents**
+
+- Run **`zmail refresh`** **before** **`search` / `read` / `thread` / `attachment` / `ask`** when **recency** matters (e.g. “anything today?”, “did they reply yet?”, “latest from X”). In **long sessions**, refresh again if the user is waiting for new mail or you have not synced recently.
+- Use **`zmail status`** when you need a quick read on whether the local cache looks current.
+
+**Users (automation)**
+
+- Do not rely on the agent alone: **schedule** **`zmail refresh`** so the index stays current in the background—e.g. **cron** (Linux), **`launchd`** (macOS), **Task Scheduler** (Windows), or your orchestrator’s equivalent **heartbeat** / periodic job.
+- **OpenClaw** can fold **`zmail refresh`** into a **heartbeat** checklist (often preferable to a raw cron for agent hosts)—see [OpenClaw: heartbeat + fresh mail](#openclaw-heartbeat--fresh-mail).
 
 ---
 
