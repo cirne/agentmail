@@ -89,6 +89,7 @@ if (!command) {
   console.log("  zmail who [query]        Find people by name or address");
   console.log("  zmail status             Show sync and indexing progress");
   console.log("  zmail read <id>          Read a message");
+  console.log("  zmail send               Send mail (SMTP); zmail draft — local drafts");
   console.log("");
   console.log("Run 'zmail --help' for all commands and flags.");
   process.exit(0);

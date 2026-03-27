@@ -26,6 +26,8 @@ Usage:
   zmail read <id> [--raw]         Read a message (or: zmail message <id>)
   zmail attachment list <message_id>   List attachments (use message_id from search)
   zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
+  zmail send [--to ... --subject ...] [--raw] [<draft-id>]   Send mail via SMTP (dev: only lewiscirne+zmail@gmail.com unless ZMAIL_SEND_PRODUCTION=1)
+  zmail draft new|reply|forward|list|view|edit   Local drafts (Markdown+YAML under data/drafts/); see --help
   zmail mcp                       Start MCP server (stdio)
 
 Ask vs search / read / thread / who / attachment / inbox:

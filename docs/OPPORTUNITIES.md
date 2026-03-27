@@ -4,7 +4,7 @@ Improvement ideas discovered through real usage. Each entry captures the problem
 
 See [VISION.md](./VISION.md) for product vision, [ARCHITECTURE.md](./ARCHITECTURE.md) for technical decisions.
 
-**Strategic sequencing:** Send (draft + SMTP) is in the vision. Send is blocked on customer validation for core search/index/onboarding — we want to nail that first. See [OPP-011](opportunities/OPP-011-send-email.md).
+**Strategic sequencing:** Send (draft + SMTP) is **implemented in code** ([OPP-011](opportunities/OPP-011-send-email.md), [ADR-024](ARCHITECTURE.md#adr-024-outbound-email--smtp-send-as-user--local-drafts)); product may still sequence broad promotion behind read/sync validation. See OPP-011 for **remaining work**.
 
 ---
 
@@ -15,7 +15,7 @@ See [VISION.md](./VISION.md) for product vision, [ARCHITECTURE.md](./ARCHITECTUR
 | [OPP-001](opportunities/OPP-001-personalization.md) | Personalization — User Context for Search | Let users define aliases and context so queries like "ranch" match emails that use project names like "Son Story." |
 | [OPP-006](opportunities/OPP-006-attachment-search-and-caching.md) | Attachment Search and Sibling-File Caching | FTS5 indexing of attachment content so search matches inside PDFs/docs; sibling-file caching for faster reads; additional format support (PPTX, images via vision). Extraction is shipped — these are next steps. |
 | [OPP-010](opportunities/OPP-010-sync-performance.md) | Sync / Refresh Performance — Remaining IMAP Backlog | **Milestone done:** sub-10s incremental refresh when nothing new; STATUS/EXAMINE/parallel connect/batch work shipped (see [SYNC.md](./SYNC.md)). **Still open:** wire saturation on backfill, IDLE/persistent connection, TLS session reuse, and related ideas in the doc. |
-| [OPP-011](opportunities/OPP-011-send-email.md) | Send Email — Draft + SMTP | Add send via SMTP (send-as-user). Draft + confirm, voice profile from history, tagline. **Blocked on customer validation for core search/index/onboarding.** |
+| [OPP-011](opportunities/OPP-011-send-email.md) | Send Email — Draft + SMTP | **Shipped in repo:** SMTP + local drafts + MCP (`send_email`, `create_draft`, `send_draft`, `list_drafts`); dev recipient guard + `ZMAIL_SEND_PRODUCTION`. **Remaining:** MD→plain polish, forward body inline, optional setup SMTP verify, OAuth/IMAP-Drafts, voice/tagline. Product gating: see opp doc. |
 | [OPP-012](opportunities/OPP-012-who-smart-address-book.md) | Contacts & `zmail who` — Smart Address Book | **Single roadmap:** identity (merge, noreply, name inference), **owner-centric counts + `contactRank`** (who sort, search boost), signature extraction (shipped basics → richer fields next), optional `refresh`/`inbox` validation. Former OPP-013/015/027 merged here (2026-03-26). |
 | [OPP-016](opportunities/OPP-016-multi-inbox.md) | Multi-Inbox — One Install, Home + Work | Single install supports multiple mailboxes (e.g. home + work). One unified SQLite DB, single config.json (config only), root .env + per-mailbox .env; sync/refresh all by default with optional --mailbox to narrow; optional inbox: query operator. |
 | [OPP-017](opportunities/OPP-017-code-health-idiomatic-patterns.md) | Code Health Sprint — Simplify, Reuse, and Idiomatic Patterns | Prioritized code-health refactors: atomic process locks, shared sync/index orchestration, CLI modularization, explicit config loading, sync/rebuild reuse, MCP/CLI boundary cleanup, and consistent search filter semantics. |

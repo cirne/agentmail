@@ -4,7 +4,7 @@ zmail exposes an MCP (Model Context Protocol) server for agent access to your em
 
 ## Overview
 
-The MCP server provides programmatic access to zmail's search, message retrieval, and attachment extraction capabilities. It shares the same underlying SQLite index as the CLI, so all data synced via `zmail sync` or `zmail refresh` is immediately available through MCP tools.
+The MCP server provides programmatic access to zmail's search, message retrieval, attachment extraction, and (when configured) **outbound SMTP** (`send_email`, `create_draft`, `send_draft`, `list_drafts`). It shares the same underlying SQLite index as the CLI, so all data synced via `zmail sync` or `zmail refresh` is immediately available through MCP tools.
 
 ## Architecture
 
@@ -246,6 +246,39 @@ Read and extract an attachment. Returns markdown (for documents) or CSV (for spr
   "attachmentId": 42
 }
 ```
+
+### `send_email`
+
+Send a plain-text email via SMTP (same credentials as IMAP). **Dev/test:** only `lewiscirne+zmail@gmail.com` unless **`ZMAIL_SEND_PRODUCTION=1`** in the environment.
+
+**Parameters:**
+- `to` (string or array, required): Recipient address(es)
+- `subject` (string, required)
+- `body` (string, required): Plain-text body
+- `cc`, `bcc` (optional): Additional recipients
+- `dryRun` (boolean, optional): Validate only; do not send
+
+**Returns:** JSON: `ok`, `messageId`, `smtpResponse` (when sent), `dryRun` (when applicable).
+
+### `create_draft`
+
+Create a draft file under `data/drafts/` (Markdown + YAML frontmatter). Does not appear in the provider’s Drafts UI until/unless IMAP Drafts sync is added.
+
+**Parameters:** `kind` (`new` | `reply` | `forward`), optional `to`, `subject`, `body`, `sourceMessageId` (reply), `forwardOf` (forward). See tool description in the server for required fields per kind.
+
+**Returns:** JSON with `id`, frontmatter fields, and `body`.
+
+### `send_draft`
+
+Send a draft by id (same pipeline as CLI `zmail send <draft-id>`). On success, moves the draft file to `data/sent/`.
+
+**Parameters:** `draftId` (required), `dryRun` (optional).
+
+### `list_drafts`
+
+List local drafts: `id`, `kind`, `subject`.
+
+---
 
 ## Tool Workflow Examples
 

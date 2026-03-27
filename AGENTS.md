@@ -1,6 +1,6 @@
 # zmail — Agent Guide
 
-**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). Read-only today; send is in the vision ([VISION.md](docs/VISION.md)) but blocked on customer validation for core search/index/onboarding — we want to nail that first.
+**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). **Outbound mail** uses SMTP send-as-user (`zmail send`, `zmail draft`, MCP tools); dev defaults restrict recipients unless `ZMAIL_SEND_PRODUCTION=1` (see [ADR-024](docs/ARCHITECTURE.md#adr-024-outbound-email--smtp-send-as-user--local-drafts)).
 
 **Quick install:**
 ```bash
@@ -120,6 +120,8 @@ zmail stats [--json]
 zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)
 zmail attachment list <message_id> [--text]
 zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]
+zmail send [--to addr --subject s] [--raw] [<draft-id>]   # SMTP; dev allowlist or ZMAIL_SEND_PRODUCTION=1
+zmail draft new|reply|forward|list|view|edit [--help]   # Local drafts (data/drafts/)
 zmail mcp  # Start MCP server (stdio)
 ```
 

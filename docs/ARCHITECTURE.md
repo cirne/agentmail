@@ -19,7 +19,7 @@ IMAP provider → raw email store → SQLite FTS5 index → MCP server
 
 **Rationale:** If you can search your own email from an agent (Cursor, Claude Desktop) in natural language, the core value is proven. Everything else — filesystem interface, semantic embeddings, replacement SMTP mode — comes later.
 
-**Deferred:** Filesystem (FUSE) interface, SMTP ingress (MX hosting), semantic/vector search, multi-user. **Send (SMTP outbound)** is in the vision ([VISION.md](./VISION.md) — "The Full Loop"). Send is blocked on customer validation for core search/index/onboarding — we want to nail that first.
+**Deferred:** Filesystem (FUSE) interface, SMTP ingress (MX hosting), semantic/vector search, multi-user. **Send (SMTP outbound)** is implemented as send-as-user SMTP ([ADR-024](#adr-024-outbound-email--smtp-send-as-user--local-drafts)); product sequencing may still prioritize read/sync quality before promoting send broadly.
 
 ---
 
@@ -538,6 +538,22 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 **Deferred:** WASM SQLite with a custom file VFS for Node remains an alternative if native rebuild stops being sufficient; FTS5 and file-backed behavior would need to be re-validated before switching.
 
 **See also:** [OPP-024](opportunities/archive/OPP-024-sqlite-node-abi-mitigation.md) — opportunity log for the ABI / global-install mitigation.
+
+---
+
+### ADR-024: Outbound Email — SMTP Send-as-User + Local Drafts
+
+**Decision:** Outbound mail uses **SMTP submission** with the **same identity and password as IMAP** (provider mailbox, not Mailgun/SendGrid by default). Infer `smtp.host` / port / TLS from `imap.host` with optional `smtp` overrides in `config.json` (see `resolveSmtpSettings` in `src/send/smtp-resolve.ts`). Implementation uses **nodemailer**.
+
+**Dev/test safety:** Unless **`ZMAIL_SEND_PRODUCTION=1`**, SMTP sends are allowed only to **`lewiscirne+zmail@gmail.com`** (enforced in `src/send/recipients.ts`) so development does not email arbitrary recipients.
+
+**Drafts:** Pre-send content lives as **Markdown + YAML frontmatter** under `{dataDir}/drafts/`; after send, the draft file is moved to `{dataDir}/sent/`. Local drafts are **not** synced to the provider’s IMAP Drafts folder in v1.
+
+**Threading:** `In-Reply-To` / `References` for replies are built from the source message’s raw `.eml` via **mailparser** (`src/send/threading.ts`), because those headers are not stored as columns in SQLite.
+
+**Non-goals (v1):** OAuth2-only SMTP, per-message relay APIs, IMAP APPEND to Drafts.
+
+**See also:** [OPP-011](opportunities/OPP-011-send-email.md).
 
 ---
 

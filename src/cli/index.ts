@@ -1757,6 +1757,18 @@ async function main() {
       break;
     }
 
+    case "send": {
+      const { runSendCli } = await import("~/cli/send-draft");
+      await runSendCli(args);
+      break;
+    }
+
+    case "draft": {
+      const { runDraftCli } = await import("~/cli/send-draft");
+      await runDraftCli(args);
+      break;
+    }
+
     default: {
       if (command) {
         const hint = getUnknownCommandHint(command);

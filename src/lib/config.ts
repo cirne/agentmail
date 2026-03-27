@@ -1,6 +1,7 @@
 import { join } from "path";
 import { homedir } from "os";
 import { existsSync, readFileSync } from "fs";
+import { resolveSmtpSettings } from "~/send/smtp-resolve";
 
 /** Canonical app root: ~/.zmail (cross-platform via os.homedir()). Can be overridden via ZMAIL_HOME env var. */
 export function getZmailHome(): string {
@@ -15,6 +16,13 @@ interface ConfigJson {
     host?: string;
     port?: number;
     user?: string;
+  };
+  /** Optional SMTP submission overrides. When omitted, inferred from IMAP host (see resolveSmtpSettings). */
+  smtp?: {
+    host?: string;
+    port?: number;
+    /** true = implicit TLS (e.g. 465); false = STARTTLS (e.g. 587) */
+    secure?: boolean;
   };
   sync?: {
     defaultSince?: string;
@@ -94,6 +102,11 @@ export function loadConfig(options?: { home?: string; env?: NodeJS.ProcessEnv })
     user: string;
     password: string;
   };
+  smtp: {
+    host: string;
+    port: number;
+    secure: boolean;
+  };
   sync: {
     defaultSince: string;
     mailbox: string;
@@ -131,14 +144,19 @@ export function loadConfig(options?: { home?: string; env?: NodeJS.ProcessEnv })
   }
   
   const dataDir = join(home, "data");
-  
+
+  const imapHost = configJson.imap?.host ?? "imap.gmail.com";
+  const smtpOverrides = configJson.smtp ?? undefined;
+  const smtpResolved = resolveSmtpSettings(imapHost, smtpOverrides);
+
   return {
     imap: {
-      host: configJson.imap?.host ?? "imap.gmail.com",
+      host: imapHost,
       port: configJson.imap?.port ?? 993,
       user: configJson.imap?.user ?? optionalZmail("ZMAIL_EMAIL", ""),
       password: optionalZmail("ZMAIL_IMAP_PASSWORD", ""),
     },
+    smtp: smtpResolved,
     sync: {
       defaultSince: configJson.sync?.defaultSince ?? "1y",
       mailbox: configJson.sync?.mailbox ?? "",
@@ -181,6 +199,9 @@ for (const [key, value] of Object.entries(envFile)) {
 export const config = {
   get imap() {
     return loadConfig().imap;
+  },
+  get smtp() {
+    return loadConfig().smtp;
   },
   get sync() {
     return loadConfig().sync;

@@ -23,6 +23,41 @@ import {
   type ShapedMessageLike,
 } from "~/messages/lean-shape";
 import { resolveGetMessagesShapeDetail } from "./get-messages-detail";
+import {
+  sendSimpleMessage,
+  sendDraftById,
+  writeDraft,
+  readDraft,
+  listDrafts,
+  createDraftId,
+  archiveDraftToSent,
+  type DraftFrontmatter,
+} from "~/send";
+
+/** Param keys for send_email MCP tool — keep in sync with schema. */
+export const MCP_SEND_EMAIL_PARAM_KEYS: readonly string[] = [
+  "to",
+  "cc",
+  "bcc",
+  "subject",
+  "body",
+  "dryRun",
+];
+
+/** Param keys for create_draft MCP tool. */
+export const MCP_CREATE_DRAFT_PARAM_KEYS: readonly string[] = [
+  "kind",
+  "to",
+  "cc",
+  "bcc",
+  "subject",
+  "body",
+  "sourceMessageId",
+  "forwardOf",
+];
+
+/** Param keys for send_draft MCP tool. */
+export const MCP_SEND_DRAFT_PARAM_KEYS: readonly string[] = ["draftId", "dryRun"];
 
 /**
  * Param keys for search_mail tool. Used by CLI/MCP sync test; keep in sync with the tool schema and SearchOptions.
@@ -466,6 +501,189 @@ export function createMcpServer() {
             text: JSON.stringify(result, null, 2),
           },
         ],
+      };
+    }
+  );
+
+  server.tool(
+    "send_email",
+    "Send a plain-text email via SMTP (same credentials as IMAP). Dev/test: only lewiscirne+zmail@gmail.com unless ZMAIL_SEND_PRODUCTION=1. Returns ok, messageId, smtpResponse.",
+    {
+      to: z.union([z.string(), z.array(z.string())]).describe("Recipient(s) — comma-separated or array"),
+      subject: z.string().describe("Subject line"),
+      body: z.string().describe("Plain-text body"),
+      cc: z.union([z.string(), z.array(z.string())]).optional().describe("Optional CC addresses"),
+      bcc: z.union([z.string(), z.array(z.string())]).optional().describe("Optional BCC addresses"),
+      dryRun: z.boolean().optional().describe("If true, validate only — do not send"),
+    },
+    async ({ to, subject, body, cc, bcc, dryRun }) => {
+      const norm = (v: string | string[] | undefined): string[] | undefined => {
+        if (v == null) return undefined;
+        if (Array.isArray(v)) return v;
+        return v
+          .split(/[,;]/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+      };
+      const toList = norm(to as string | string[]) ?? [];
+      if (toList.length === 0) {
+        return { content: [{ type: "text", text: JSON.stringify({ error: "to is required" }) }] };
+      }
+      const result = await sendSimpleMessage(
+        {
+          to: toList,
+          cc: norm(cc as string | string[] | undefined),
+          bcc: norm(bcc as string | string[] | undefined),
+          subject,
+          text: body,
+        },
+        { dryRun: dryRun ?? false }
+      );
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "create_draft",
+    "Create a local draft (Markdown+YAML under data/drafts/). Does not sync to provider Drafts folder. Returns id and full draft fields.",
+    {
+      kind: z.enum(["new", "reply", "forward"]).describe("Draft type"),
+      to: z.union([z.string(), z.array(z.string())]).optional().describe("Recipients (required for new/forward; reply defaults to original sender)"),
+      subject: z.string().optional().describe("Subject"),
+      body: z.string().optional().describe("Body text"),
+      sourceMessageId: z
+        .string()
+        .optional()
+        .describe("For reply: Message-ID of the message being replied to (from search/read)"),
+      forwardOf: z.string().optional().describe("For forward: Message-ID of forwarded message"),
+    },
+    async ({ kind, to, subject, body, sourceMessageId, forwardOf }) => {
+      const dataDir = config.dataDir;
+      const normTo = (v: string | string[] | undefined): string[] => {
+        if (v == null) return [];
+        if (Array.isArray(v)) return v;
+        return v
+          .split(/[,;]/)
+          .map((x) => x.trim())
+          .filter(Boolean);
+      };
+      const db = await getDb();
+      let fm: DraftFrontmatter;
+      const textBody = body ?? "";
+
+      if (kind === "new") {
+        const toList = normTo(to as string | string[] | undefined);
+        if (toList.length === 0 || !subject) {
+          return {
+            content: [
+              { type: "text", text: JSON.stringify({ error: "new draft requires to and subject" }) },
+            ],
+          };
+        }
+        fm = { kind: "new", to: toList, subject };
+      } else if (kind === "reply") {
+        if (!sourceMessageId) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: "reply requires sourceMessageId" }) }],
+          };
+        }
+        const row = (await (
+          await db.prepare(
+            "SELECT message_id, from_address, subject, thread_id FROM messages WHERE message_id = ?"
+          )
+        ).get(normalizeMessageId(sourceMessageId))) as
+          | { message_id: string; from_address: string; subject: string; thread_id: string }
+          | undefined;
+        if (!row) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: "message not found" }) }],
+          };
+        }
+        const toList = to ? normTo(to as string | string[]) : [row.from_address];
+        const subj = subject ?? (row.subject.startsWith("Re:") ? row.subject : `Re: ${row.subject}`);
+        fm = {
+          kind: "reply",
+          to: toList,
+          subject: subj,
+          sourceMessageId: row.message_id,
+          threadId: row.thread_id,
+        };
+      } else {
+        if (!forwardOf || !to) {
+          return {
+            content: [
+              { type: "text", text: JSON.stringify({ error: "forward requires forwardOf and to" }) },
+            ],
+          };
+        }
+        const row = (await (
+          await db.prepare("SELECT message_id, subject, thread_id FROM messages WHERE message_id = ?")
+        ).get(normalizeMessageId(forwardOf))) as
+          | { message_id: string; subject: string; thread_id: string }
+          | undefined;
+        if (!row) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: "message not found" }) }],
+          };
+        }
+        const subj = subject ?? `Fwd: ${row.subject}`;
+        fm = {
+          kind: "forward",
+          to: normTo(to as string | string[]),
+          subject: subj,
+          forwardOf: row.message_id,
+          threadId: row.thread_id,
+        };
+      }
+
+      const id = createDraftId();
+      writeDraft(dataDir, id, fm, textBody);
+      const d = readDraft(dataDir, id);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({ id: d.id, ...d.frontmatter, body: d.body }, null, 2),
+          },
+        ],
+      };
+    }
+  );
+
+  server.tool(
+    "send_draft",
+    "Send a draft created with create_draft (SMTP). Archives the draft file to data/sent/ on success. Same dev allowlist as send_email.",
+    {
+      draftId: z.string().describe("Draft id returned by create_draft"),
+      dryRun: z.boolean().optional().describe("If true, validate only"),
+    },
+    async ({ draftId, dryRun }) => {
+      const db = await getDb();
+      const result = await sendDraftById(draftId, {
+        dryRun: dryRun ?? false,
+        db,
+        dataDir: config.dataDir,
+        maildirPath: config.maildirPath,
+      });
+      if (!dryRun && result.ok) {
+        archiveDraftToSent(config.dataDir, draftId);
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+  );
+
+  server.tool(
+    "list_drafts",
+    "List local drafts (ids, kind, subject).",
+    {},
+    async () => {
+      const rows = listDrafts(config.dataDir);
+      return {
+        content: [{ type: "text", text: JSON.stringify({ drafts: rows }, null, 2) }],
       };
     }
   );
