@@ -1,5 +1,5 @@
 import { existsSync, readFileSync } from "fs";
-import { join } from "path";
+import { join, resolve } from "path";
 import { loadConfig, requireImapConfig } from "~/lib/config";
 import { getDb } from "~/db";
 import {
@@ -11,10 +11,13 @@ import {
   listDrafts,
   createDraftId,
   archiveDraftToSent,
+  normalizeDraftFilename,
   normalizeMessageId,
   loadForwardSourceExcerpt,
   composeForwardDraftBody,
   rewriteDraftWithInstruction,
+  composeNewDraftFromInstruction,
+  draftRecordToJsonObject,
   type DraftFrontmatter,
   type DraftRecord,
 } from "~/send";
@@ -37,7 +40,7 @@ function hasFlag(args: string[], flag: string): boolean {
 export function formatDraftViewText(d: DraftRecord): string {
   const fm = d.frontmatter;
   const lines: string[] = [];
-  lines.push(`Draft-ID: ${d.id}`);
+  lines.push(`Path: ${d.path}`);
   lines.push(`Kind: ${fm.kind}`);
   if (fm.to?.length) lines.push(`To: ${fm.to.join(", ")}`);
   if (fm.cc?.length) lines.push(`Cc: ${fm.cc.join(", ")}`);
@@ -56,21 +59,22 @@ export function formatDraftViewText(d: DraftRecord): string {
 }
 
 /**
- * After create/update, print full draft as JSON (default) or human-readable text via {@link formatDraftViewText}.
+ * JSON: metadata + absolute `path` to the `.md` file (read with read_file — body omitted unless `withBody`).
+ * Text: full draft via {@link formatDraftViewText}.
  */
-export function printDraftRecordOutput(d: DraftRecord, asJson: boolean): void {
+export function printDraftRecordOutput(d: DraftRecord, asJson: boolean, withBody = false): void {
   if (asJson) {
-    console.log(JSON.stringify({ id: d.id, ...d.frontmatter, body: d.body }, null, 2));
+    console.log(JSON.stringify(draftRecordToJsonObject(d, withBody), null, 2));
   } else {
     console.log(formatDraftViewText(d));
   }
 }
 
-/** Positional args for `draft edit` (only `--text` allowed besides id + instruction words). */
+/** Positional args for `draft edit` (only `--text` / `--with-body` allowed besides id + instruction words). */
 export function draftEditPositionals(rest: string[]): string[] {
   const out: string[] = [];
   for (const a of rest) {
-    if (a === "--text") continue;
+    if (a === "--text" || a === "--with-body") continue;
     if (a.startsWith("--")) {
       throw new Error(`draft edit: unknown flag ${a}`);
     }
@@ -85,7 +89,7 @@ export function draftRewritePositionals(rest: string[]): string[] {
   const out: string[] = [];
   for (let i = 0; i < rest.length; i++) {
     const a = rest[i];
-    if (a === "--text") continue;
+    if (a === "--text" || a === "--with-body") continue;
     if (valueFlags.has(a)) {
       i++;
       continue;
@@ -105,10 +109,10 @@ export function sendUsage(): void {
   console.error("Usage:");
   console.error("  zmail send --to <addr> --subject <s> [--body <text>]   (body optional; stdin if omitted and piped)");
   console.error("  zmail send --raw [--file <path>]                      (RFC 822 from stdin or file)");
-  console.error("  zmail send <draft-id>                                 (send a saved draft)");
+  console.error("  zmail send <filename>                                 (saved draft under data/drafts/; .md optional)");
   console.error("");
   console.error("Flags: --cc --bcc --dry-run --text --json (default JSON for machine output)");
-  console.error(`Dev/test: only ${DEV_SEND_ALLOWLIST} unless ZMAIL_SEND_PRODUCTION=1`);
+  console.error(`Optional ZMAIL_SEND_TEST=1: restrict To/Cc/Bcc to ${DEV_SEND_ALLOWLIST} when testing sends`);
 }
 
 export async function runSendCli(args: string[]): Promise<void> {
@@ -166,9 +170,9 @@ export async function runSendCli(args: string[]): Promise<void> {
   }
 
   if (positional.length === 1 && !to && !rawMode) {
-    const draftId = positional[0];
+    const draftId = normalizeDraftFilename(positional[0]!);
     const dataDir = loadConfig().dataDir;
-    const draftPath = join(dataDir, "drafts", `${draftId}.md`);
+    const draftPath = resolve(join(dataDir, "drafts", `${draftId}.md`));
     if (existsSync(draftPath)) {
       const db = await getDb();
       const result = await sendDraftById(draftId, {
@@ -216,16 +220,17 @@ function printSendResult(result: Awaited<ReturnType<typeof sendSimpleMessage>>, 
 
 export function draftUsage(): void {
   console.error("Usage:");
-  console.error("  zmail draft new --to <addrs> --subject <s> [--body <t> | --body-file <path>] [--text]");
-  console.error("  zmail draft reply --message-id <id> [...] [--text]");
-  console.error("  zmail draft forward --message-id <id> --to <addrs> [...] [--text]");
-  console.error("  zmail draft list [--text]");
-  console.error("  zmail draft view <id> [--text]");
-  console.error("  zmail draft edit <id> <instruction...> [--text]   (LLM; needs ZMAIL_OPENAI_API_KEY)");
-  console.error("  zmail draft rewrite <id> <body...> [--subject <s>] [--to <addrs>] [--body-file <path>] [--text]");
+  console.error("  zmail draft list [--text]     JSON: id, path, kind, subject (path = read with read_file)");
+  console.error("  zmail draft view <id> [--text] [--with-body]   JSON: path + headers; omit body unless --with-body");
+  console.error("  zmail draft new --to <addrs> --subject <s> [--body <t> | --body-file <path>] [--with-body] [--text]");
+  console.error("  zmail draft new --to <addrs> --instruction <text> [--with-body] [--text]   (LLM compose)");
+  console.error("  zmail draft reply --message-id <id> [...] [--with-body] [--text]");
+  console.error("  zmail draft forward --message-id <id> --to <addrs> [...] [--with-body] [--text]");
+  console.error("  zmail draft edit <id> <instruction...> [--with-body] [--text]   (LLM; needs OpenAI key)");
+  console.error("  zmail draft rewrite <id> <body...> [--subject <s>] [--to <addrs>] [--body-file <path>] [--with-body] [--text]");
   console.error("");
-  console.error("Default output is JSON for structured results; --text prints human-oriented output (full draft text for mutations/view; tab lines for list).");
-  console.error("On send, draft bodies are converted from Markdown to plain text for SMTP.");
+  console.error("JSON defaults are agent-first: absolute paths to .md files, no duplicate body. --with-body adds body to JSON.");
+  console.error("--text is human-readable (full message including body). On send, Markdown body becomes plain text for SMTP.");
 }
 
 export async function runDraftCli(args: string[]): Promise<void> {
@@ -241,6 +246,7 @@ export async function runDraftCli(args: string[]): Promise<void> {
   const dataDir = cfg.dataDir;
   const forceText = hasFlag(rest, "--text");
   const asJson = !forceText;
+  const withBody = hasFlag(rest, "--with-body");
 
   if (sub === "list") {
     const rows = listDrafts(dataDir);
@@ -248,7 +254,7 @@ export async function runDraftCli(args: string[]): Promise<void> {
       console.log(JSON.stringify({ drafts: rows }, null, 2));
     } else {
       for (const r of rows) {
-        console.log(`${r.id}\t${r.kind}\t${r.subject ?? ""}`);
+        console.log(`${r.id}\t${r.kind}\t${r.subject ?? ""}\t${r.path}`);
       }
     }
     return;
@@ -261,7 +267,7 @@ export async function runDraftCli(args: string[]): Promise<void> {
       process.exit(1);
     }
     const d = readDraft(dataDir, id);
-    printDraftRecordOutput(d, asJson);
+    printDraftRecordOutput(d, asJson, withBody);
     return;
   }
 
@@ -307,7 +313,7 @@ export async function runDraftCli(args: string[]): Promise<void> {
     if (revised.subject !== undefined) fm.subject = revised.subject;
     writeDraft(dataDir, id, fm, revised.body);
     const updated = readDraft(dataDir, id);
-    printDraftRecordOutput(updated, asJson);
+    printDraftRecordOutput(updated, asJson, withBody);
     return;
   }
 
@@ -345,29 +351,67 @@ export async function runDraftCli(args: string[]): Promise<void> {
     if (to !== undefined) fm.to = splitAddrs(to);
     writeDraft(dataDir, id, fm, body);
     const updated = readDraft(dataDir, id);
-    printDraftRecordOutput(updated, asJson);
+    printDraftRecordOutput(updated, asJson, withBody);
     return;
   }
 
   if (sub === "new") {
     const to = getFlag(rest, "--to");
-    const subject = getFlag(rest, "--subject");
-    if (!to || subject === undefined) {
-      console.error("zmail draft new requires --to and --subject");
+    const subjectFlag = getFlag(rest, "--subject");
+    const instructionFlag = getFlag(rest, "--instruction");
+
+    let instruction = (instructionFlag ?? "").trim();
+    if (!instruction && !process.stdin.isTTY && subjectFlag === undefined) {
+      instruction = (await readStdin()).toString("utf8").trim();
+    }
+
+    const useLlm = subjectFlag === undefined && instruction.length > 0;
+    const manual = subjectFlag !== undefined;
+
+    if (!to) {
+      console.error("zmail draft new requires --to");
       process.exit(1);
     }
-    let body = getFlag(rest, "--body");
-    const bodyFile = getFlag(rest, "--body-file");
-    if (bodyFile) body = readFileSync(bodyFile, "utf8");
-    if (body === undefined && !process.stdin.isTTY) {
-      body = (await readStdin()).toString("utf8");
+    if (!manual && !useLlm) {
+      console.error(
+        "zmail draft new requires --to and --subject, or --to with --instruction or piped instruction (LLM compose)"
+      );
+      process.exit(1);
     }
-    body = body ?? "";
-    const id = createDraftId();
+
+    let subject: string;
+    let body: string;
+    if (useLlm) {
+      let apiKey: string;
+      try {
+        apiKey = cfg.openai.apiKey;
+      } catch {
+        console.error("zmail draft new requires ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY for LLM compose.");
+        process.exit(1);
+      }
+      const composed = await composeNewDraftFromInstruction({
+        to: splitAddrs(to),
+        instruction,
+        apiKey,
+      });
+      subject = composed.subject;
+      body = composed.body;
+    } else {
+      subject = subjectFlag!;
+      let bodyOpt = getFlag(rest, "--body");
+      const bodyFile = getFlag(rest, "--body-file");
+      if (bodyFile) bodyOpt = readFileSync(bodyFile, "utf8");
+      if (bodyOpt === undefined && !process.stdin.isTTY) {
+        bodyOpt = (await readStdin()).toString("utf8");
+      }
+      body = bodyOpt ?? "";
+    }
+
+    const id = createDraftId(dataDir, subject);
     const fm: DraftFrontmatter = { kind: "new", to: splitAddrs(to), subject };
     writeDraft(dataDir, id, fm, body);
     const d = readDraft(dataDir, id);
-    printDraftRecordOutput(d, asJson);
+    printDraftRecordOutput(d, asJson, withBody);
     return;
   }
 
@@ -404,7 +448,7 @@ export async function runDraftCli(args: string[]): Promise<void> {
       body = (await readStdin()).toString("utf8");
     }
     body = body ?? "";
-    const id = createDraftId();
+    const id = createDraftId(dataDir, subject);
     const fm: DraftFrontmatter = {
       kind: "reply",
       to: toList,
@@ -414,7 +458,7 @@ export async function runDraftCli(args: string[]): Promise<void> {
     };
     writeDraft(dataDir, id, fm, body);
     const d = readDraft(dataDir, id);
-    printDraftRecordOutput(d, asJson);
+    printDraftRecordOutput(d, asJson, withBody);
     return;
   }
 
@@ -445,7 +489,7 @@ export async function runDraftCli(args: string[]): Promise<void> {
     preamble = preamble ?? "";
     const excerpt = await loadForwardSourceExcerpt(db, cfg.maildirPath, row.message_id);
     const body = composeForwardDraftBody(preamble, excerpt);
-    const id = createDraftId();
+    const id = createDraftId(dataDir, subject);
     const fm: DraftFrontmatter = {
       kind: "forward",
       to: splitAddrs(to),
@@ -455,7 +499,7 @@ export async function runDraftCli(args: string[]): Promise<void> {
     };
     writeDraft(dataDir, id, fm, body);
     const d = readDraft(dataDir, id);
-    printDraftRecordOutput(d, asJson);
+    printDraftRecordOutput(d, asJson, withBody);
     return;
   }
 

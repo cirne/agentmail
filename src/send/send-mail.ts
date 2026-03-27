@@ -102,7 +102,7 @@ export async function sendSimpleMessage(
 }
 
 /**
- * Parse raw RFC 822 and send (Phase 1). Recipients taken from To/Cc/Bcc for allowlist.
+ * Parse raw RFC 822 and send (Phase 1). Recipients taken from To/Cc/Bcc for optional ZMAIL_SEND_TEST guard.
  */
 export async function sendRawRfc822(
   raw: string | Buffer,

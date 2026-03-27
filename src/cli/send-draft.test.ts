@@ -21,7 +21,7 @@ describe("formatDraftViewText", () => {
       body: "Hello\nthere",
     };
     const out = formatDraftViewText(d);
-    expect(out).toContain("Draft-ID: abc");
+    expect(out).toContain("Path: /tmp/x.md");
     expect(out).toContain("Kind: reply");
     expect(out).toContain("To: a@b.com");
     expect(out).toContain("Subject: Re: Hi");
@@ -44,8 +44,9 @@ describe("formatDraftViewText", () => {
 });
 
 describe("draftEditPositionals", () => {
-  it("collects id and instruction words; skips --text", () => {
+  it("collects id and instruction words; skips --text and --with-body", () => {
     expect(draftEditPositionals(["u1", "remove", "foo", "--text"])).toEqual(["u1", "remove", "foo"]);
+    expect(draftEditPositionals(["u1", "x", "--with-body"])).toEqual(["u1", "x"]);
   });
 
   it("rejects unknown flags", () => {
@@ -70,8 +71,47 @@ describe("printDraftRecordOutput", () => {
       console.log = log;
     }
     expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("Draft-ID: z");
+    expect(lines[0]).toContain("Path: /z");
     expect(lines[0]).toContain("Hi");
+  });
+
+  it("JSON omits body by default; includes path and headers", () => {
+    const d: DraftRecord = {
+      id: "z",
+      path: "/zmail/drafts/z.md",
+      frontmatter: { kind: "new", to: ["a@b.com"], subject: "S" },
+      body: "SECRET",
+    };
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (m: unknown) => lines.push(String(m));
+    try {
+      printDraftRecordOutput(d, true, false);
+    } finally {
+      console.log = log;
+    }
+    const obj = JSON.parse(lines[0]!) as Record<string, unknown>;
+    expect(obj.path).toBeDefined();
+    expect(obj.subject).toBe("S");
+    expect(obj.body).toBeUndefined();
+  });
+
+  it("JSON with third arg true includes body", () => {
+    const d: DraftRecord = {
+      id: "z",
+      path: "/z",
+      frontmatter: { kind: "new", to: ["a@b.com"], subject: "S" },
+      body: "Hi",
+    };
+    const lines: string[] = [];
+    const log = console.log;
+    console.log = (m: unknown) => lines.push(String(m));
+    try {
+      printDraftRecordOutput(d, true, true);
+    } finally {
+      console.log = log;
+    }
+    expect(JSON.parse(lines[0]!).body).toBe("Hi");
   });
 });
 
@@ -80,6 +120,7 @@ describe("draftRewritePositionals", () => {
     expect(
       draftRewritePositionals(["u1", "hello", "world", "--subject", "Subj", "--text"])
     ).toEqual(["u1", "hello", "world"]);
+    expect(draftRewritePositionals(["u1", "body", "--with-body"])).toEqual(["u1", "body"]);
   });
 
   it("skips equals form flags", () => {

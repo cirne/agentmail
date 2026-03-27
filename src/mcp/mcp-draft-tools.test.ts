@@ -5,7 +5,16 @@ describe("MCP draft tool schemas", () => {
   it("exposes stable param keys for send_draft and create_draft", () => {
     expect(MCP_SEND_DRAFT_PARAM_KEYS).toEqual(expect.arrayContaining(["draftId", "dryRun"]));
     expect(MCP_CREATE_DRAFT_PARAM_KEYS).toEqual(
-      expect.arrayContaining(["kind", "to", "subject", "body", "sourceMessageId", "forwardOf"])
+      expect.arrayContaining([
+        "kind",
+        "to",
+        "subject",
+        "body",
+        "instruction",
+        "sourceMessageId",
+        "forwardOf",
+        "withBody",
+      ])
     );
   });
 });

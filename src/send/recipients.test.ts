@@ -12,21 +12,21 @@ describe("extractEmailAddress", () => {
 });
 
 describe("assertSendRecipientsAllowed", () => {
-  it("allows only allowlist when production off", () => {
+  it("allows any address when ZMAIL_SEND_TEST is unset", () => {
     expect(() =>
-      assertSendRecipientsAllowed([`Name <${DEV_SEND_ALLOWLIST}>`], { ZMAIL_SEND_PRODUCTION: undefined })
+      assertSendRecipientsAllowed(["anyone@example.com"], { ZMAIL_SEND_TEST: undefined })
     ).not.toThrow();
   });
 
-  it("rejects other addresses when production off", () => {
+  it("allows only allowlist when ZMAIL_SEND_TEST is set", () => {
     expect(() =>
-      assertSendRecipientsAllowed(["other@example.com"], { ZMAIL_SEND_PRODUCTION: undefined })
+      assertSendRecipientsAllowed([`Name <${DEV_SEND_ALLOWLIST}>`], { ZMAIL_SEND_TEST: "1" })
+    ).not.toThrow();
+  });
+
+  it("rejects other addresses when ZMAIL_SEND_TEST is set", () => {
+    expect(() =>
+      assertSendRecipientsAllowed(["other@example.com"], { ZMAIL_SEND_TEST: "1" })
     ).toThrow(/Send blocked/);
-  });
-
-  it("allows any address when ZMAIL_SEND_PRODUCTION=1", () => {
-    expect(() =>
-      assertSendRecipientsAllowed(["anyone@example.com"], { ZMAIL_SEND_PRODUCTION: "1" })
-    ).not.toThrow();
   });
 });

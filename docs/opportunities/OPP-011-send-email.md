@@ -25,7 +25,7 @@ zmail was read-only for outbound mail until this work. The vision (see [VISION.m
 
 ### Dev/test safety
 
-- Default: **only** `lewiscirne+zmail@gmail.com` may appear in To/Cc/Bcc unless **`ZMAIL_SEND_PRODUCTION=1`** (see `src/send/recipients.ts`). Documented in ADR-024, CLI help, MCP tool descriptions, and [AGENTS.md](../../AGENTS.md).
+- Optional **`ZMAIL_SEND_TEST=1`**: To/Cc/Bcc restricted to `lewiscirne+zmail@gmail.com` (see `src/send/recipients.ts`). Default sends allow any recipient. Documented in ADR-024, CLI help, MCP tool descriptions, and [AGENTS.md](../../AGENTS.md).
 
 ### Out of scope for this first pass (unchanged intent)
 
@@ -72,7 +72,7 @@ Add send capability via SMTP (send-as-user through Gmail/Outlook/Fastmail). Same
 
 ## Remaining work (prioritized)
 
-1. **Product / docs polish:** Remove or relax the dev-only recipient allowlist for production installs (keep `ZMAIL_SEND_PRODUCTION` or replace with a clearer policy).
+1. **Product / docs polish:** Further refine optional dev/test recipient guard (`ZMAIL_SEND_TEST`) if needed.
 2. **Testing:** Optional `smtp-server` (or transport mock) integration test for `sendMail` envelope; richer MCP tool tests.
 3. **MCP:** Optional `rewrite_draft` / `edit_draft` tools matching CLI semantics.
 4. **OAuth2 SMTP** for providers that disable app passwords (follow-up opp or section of this doc).

@@ -545,7 +545,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Decision:** Outbound mail uses **SMTP submission** with the **same identity and password as IMAP** (provider mailbox, not Mailgun/SendGrid by default). Infer `smtp.host` / port / TLS from `imap.host` with optional `smtp` overrides in `config.json` (see `resolveSmtpSettings` in `src/send/smtp-resolve.ts`). Implementation uses **nodemailer**.
 
-**Dev/test safety:** Unless **`ZMAIL_SEND_PRODUCTION=1`**, SMTP sends are allowed only to **`lewiscirne+zmail@gmail.com`** (enforced in `src/send/recipients.ts`) so development does not email arbitrary recipients.
+**Dev/test safety (optional):** Set **`ZMAIL_SEND_TEST=1`** to restrict SMTP sends to **`lewiscirne+zmail@gmail.com`** (enforced in `src/send/recipients.ts`). Default is unrestricted recipients.
 
 **Drafts:** Pre-send content lives as **Markdown + YAML frontmatter** under `{dataDir}/drafts/`; after send, the draft file is moved to `{dataDir}/sent/`. Local drafts are **not** synced to the provider’s IMAP Drafts folder in v1. **CLI:** `zmail draft new|reply|forward|list|view`, **`zmail draft edit <id> "<instruction>"`** (LLM revision via OpenAI), **`zmail draft rewrite <id> …`** (literal body), then **`zmail send <draft-id>`**. Mutating commands default to JSON; **`--text`** prints a human-readable draft. **MCP:** `create_draft`, `list_drafts`, `send_draft` (same send pipeline; LLM edit is CLI subprocess today).
 

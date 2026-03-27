@@ -11,10 +11,15 @@ export {
   writeDraft,
   listDrafts,
   createDraftId,
+  normalizeDraftFilename,
+  subjectToSlug,
+  generateDraftSuffix8,
+  DRAFT_SUBJECT_SLUG_MAX,
   archiveDraftToSent,
   draftsDir,
   sentDir,
   serializeDraftMarkdown,
+  draftRecordToJsonObject,
   type DraftRecord,
   type DraftFrontmatter,
   type DraftKind,
@@ -32,3 +37,9 @@ export {
   type RewriteDraftWithInstructionOptions,
   type RewriteDraftLlmComplete,
 } from "./draft-rewrite";
+export {
+  composeNewDraftFromInstruction,
+  type ComposeNewDraftResult,
+  type ComposeNewDraftFromInstructionOptions,
+  type ComposeNewDraftLlmComplete,
+} from "./compose-new-draft";

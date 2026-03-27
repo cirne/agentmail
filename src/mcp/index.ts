@@ -29,9 +29,11 @@ import {
   writeDraft,
   readDraft,
   listDrafts,
+  draftRecordToJsonObject,
   createDraftId,
   archiveDraftToSent,
   composeForwardDraftBody,
+  composeNewDraftFromInstruction,
   loadForwardSourceExcerpt,
   type DraftFrontmatter,
 } from "~/send";
@@ -54,8 +56,10 @@ export const MCP_CREATE_DRAFT_PARAM_KEYS: readonly string[] = [
   "bcc",
   "subject",
   "body",
+  "instruction",
   "sourceMessageId",
   "forwardOf",
+  "withBody",
 ];
 
 /** Param keys for send_draft MCP tool. */
@@ -509,7 +513,7 @@ export function createMcpServer() {
 
   server.tool(
     "send_email",
-    "Send a plain-text email via SMTP (same credentials as IMAP). Dev/test: only lewiscirne+zmail@gmail.com unless ZMAIL_SEND_PRODUCTION=1. Returns ok, messageId, smtpResponse.",
+    "Send a plain-text email via SMTP (same credentials as IMAP). Optional ZMAIL_SEND_TEST=1 restricts recipients to lewiscirne+zmail@gmail.com for dev/test. Returns ok, messageId, smtpResponse.",
     {
       to: z.union([z.string(), z.array(z.string())]).describe("Recipient(s) — comma-separated or array"),
       subject: z.string().describe("Subject line"),
@@ -549,19 +553,27 @@ export function createMcpServer() {
 
   server.tool(
     "create_draft",
-    "Create a local draft (Markdown+YAML under data/drafts/). Forward kind inlines the original message body from raw mail. Does not sync to provider Drafts folder. Returns id and full draft fields.",
+    "Create a local draft (Markdown+YAML under data/drafts/). Response is agent-first: absolute path plus headers; body is omitted unless withBody=true (read the file instead). id is the draft stem; file is id.md. For kind new, omit subject and pass instruction for LLM compose. Forward inlines the original message from raw mail. Does not sync to provider Drafts folder.",
     {
       kind: z.enum(["new", "reply", "forward"]).describe("Draft type"),
       to: z.union([z.string(), z.array(z.string())]).optional().describe("Recipients (required for new/forward; reply defaults to original sender)"),
-      subject: z.string().optional().describe("Subject"),
+      subject: z.string().optional().describe("Subject (for new: omit with instruction to use LLM compose)"),
       body: z.string().optional().describe("Body text"),
+      instruction: z
+        .string()
+        .optional()
+        .describe("For kind new only: when subject is omitted, natural-language instruction to generate subject and body via LLM"),
       sourceMessageId: z
         .string()
         .optional()
         .describe("For reply: Message-ID of the message being replied to (from search/read)"),
       forwardOf: z.string().optional().describe("For forward: Message-ID of forwarded message"),
+      withBody: z
+        .boolean()
+        .optional()
+        .describe("If true, include draft body in JSON (default false — use path to read the .md file)"),
     },
-    async ({ kind, to, subject, body, sourceMessageId, forwardOf }) => {
+    async ({ kind, to, subject, body, instruction, sourceMessageId, forwardOf, withBody }) => {
       const dataDir = config.dataDir;
       const normTo = (v: string | string[] | undefined): string[] => {
         if (v == null) return [];
@@ -573,17 +585,57 @@ export function createMcpServer() {
       };
       const db = await getDb();
       let fm: DraftFrontmatter;
+      let textBody: string;
 
       if (kind === "new") {
         const toList = normTo(to as string | string[] | undefined);
-        if (toList.length === 0 || !subject) {
+        if (toList.length === 0) {
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: "new draft requires to" }) }],
+          };
+        }
+        const instr = (instruction ?? "").trim();
+        const subjTrim = subject?.trim();
+        const hasExplicitSubject = subjTrim !== undefined && subjTrim !== "";
+
+        if (hasExplicitSubject) {
+          fm = { kind: "new", to: toList, subject: subjTrim };
+          textBody = body ?? "";
+        } else if (instr.length > 0) {
+          let apiKey: string;
+          try {
+            apiKey = config.openai.apiKey;
+          } catch {
+            return {
+              content: [
+                {
+                  type: "text",
+                  text: JSON.stringify({
+                    error: "LLM compose requires ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY",
+                  }),
+                },
+              ],
+            };
+          }
+          const composed = await composeNewDraftFromInstruction({
+            to: toList,
+            instruction: instr,
+            apiKey,
+          });
+          fm = { kind: "new", to: toList, subject: composed.subject };
+          textBody = composed.body;
+        } else {
           return {
             content: [
-              { type: "text", text: JSON.stringify({ error: "new draft requires to and subject" }) },
+              {
+                type: "text",
+                text: JSON.stringify({
+                  error: "new draft requires to and subject, or to with instruction for LLM compose",
+                }),
+              },
             ],
           };
         }
-        fm = { kind: "new", to: toList, subject };
       } else if (kind === "reply") {
         if (!sourceMessageId) {
           return {
@@ -611,6 +663,7 @@ export function createMcpServer() {
           sourceMessageId: row.message_id,
           threadId: row.thread_id,
         };
+        textBody = body ?? "";
       } else {
         if (!forwardOf || !to) {
           return {
@@ -637,9 +690,9 @@ export function createMcpServer() {
           forwardOf: row.message_id,
           threadId: row.thread_id,
         };
+        textBody = body ?? "";
       }
 
-      let textBody = body ?? "";
       if (kind === "forward") {
         try {
           const excerpt = await loadForwardSourceExcerpt(db, config.maildirPath, fm.forwardOf!);
@@ -652,14 +705,14 @@ export function createMcpServer() {
         }
       }
 
-      const id = createDraftId();
+      const id = createDraftId(dataDir, fm.subject ?? "draft");
       writeDraft(dataDir, id, fm, textBody);
       const d = readDraft(dataDir, id);
       return {
         content: [
           {
             type: "text",
-            text: JSON.stringify({ id: d.id, ...d.frontmatter, body: d.body }, null, 2),
+            text: JSON.stringify(draftRecordToJsonObject(d, withBody ?? false), null, 2),
           },
         ],
       };
@@ -668,9 +721,9 @@ export function createMcpServer() {
 
   server.tool(
     "send_draft",
-    "Send a draft created with create_draft (SMTP). Body is converted from Markdown to plain text for the message. Archives the draft file to data/sent/ on success. Same dev allowlist as send_email.",
+    "Send a draft created with create_draft (SMTP). Body is converted from Markdown to plain text for the message. Archives the draft file to data/sent/ on success. Same optional ZMAIL_SEND_TEST recipient guard as send_email.",
     {
-      draftId: z.string().describe("Draft id returned by create_draft"),
+      draftId: z.string().describe("Draft filename (.md optional; same as create_draft / list_drafts id)"),
       dryRun: z.boolean().optional().describe("If true, validate only"),
     },
     async ({ draftId, dryRun }) => {
@@ -692,7 +745,7 @@ export function createMcpServer() {
 
   server.tool(
     "list_drafts",
-    "List local drafts (ids, kind, subject).",
+    "List local drafts. Each row includes id, absolute path to the .md file (read with read_file), kind, subject. id matches .md stem; .md optional when passing to send_draft.",
     {},
     async () => {
       const rows = listDrafts(config.dataDir);

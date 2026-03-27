@@ -11,7 +11,7 @@ compatibility: >-
   Node.js 20+; npm; `zmail` on PATH after global install. Network: IMAP, OpenAI (ask/inbox/setup),
   optional enrich providers. Disk: ~/.zmail (SQLite + maildir). Native addon: better-sqlite3 (rebuilt on first run if needed).
 metadata:
-  version: "0.1.3"
+  version: "0.1.4"
   homepage: "https://github.com/cirne/zmail"
   repository: "https://github.com/cirne/zmail"
   openclaw:
@@ -28,7 +28,7 @@ metadata:
 
 # /zmail — agent-first email
 
-**What zmail is:** Email reimagined for **agents and automation**—not a human-first inbox UI. It syncs mail over **IMAP**, stores messages as **files (maildir-style)** and indexes them in **local SQLite** with **FTS5**. The primary surface is the **CLI**: search, read, thread, who, attachments, **`zmail ask`** for natural-language questions (OpenAI), and **draft + SMTP send** so agents can **compose, iterate, and send** without opening Gmail—same index and credentials as sync (see [Draft + send](#draft--send-core-loop)).
+**What zmail is:** Email reimagined for **agents and automation**—not a human-first inbox UI. It syncs mail over **IMAP**, stores messages as **files (maildir-style)** and indexes them in **local SQLite** with **FTS5**. The primary surface is the **CLI**: search, read, thread, who, attachments, **`zmail ask`** for natural-language questions (OpenAI), and **draft + SMTP send** so agents can **compose, iterate, and send** without opening Gmail—same index and credentials as sync (see [Agent workflow: draft and send](#agent-workflow-draft-and-send)).
 
 **Why use it:** Traditional webmail is slow and awkward for AI workflows. zmail’s promise is **local-first, privacy-friendly** mail you control, **agent-intuitive** commands, and room to grow toward “the agent is the interface”—plain-language prompts become searches and reads, not manual digging.
 
@@ -44,7 +44,7 @@ Use this block to keep **ClawHub / OpenClaw registry fields** aligned with the s
 | **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and optional **`zmail who --enrich`**. |
 | **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, **`zmail draft edit`** (LLM revision), and **`who --enrich`** can send **email-derived or draft content** to **OpenAI** or other APIs—only use if the **mailbox owner** accepts that. Primitives **`search` / `read` / `thread` / `attachment`** (without enrich) and **`zmail draft rewrite`** (literal body replace, no LLM) are local only once mail is synced. |
 | **Credentials on disk** | Secrets live under **`ZMAIL_HOME/.env`** (and non-secret settings in **`config.json`**). They are used only to talk to **your** IMAP host and (when configured) **OpenAI**—not to third-party analytics or the zmail project. Treat **`.env`** like any password file (permissions, backups, don’t paste into chats). |
-| **IMAP / send posture** | **SMTP send-as-user** via **`zmail send`** (including **`zmail send <draft-id>`**) and **`zmail draft …`** (and MCP `send_email` / `create_draft` / `send_draft` / `list_drafts`). Default dev safety: only **`lewiscirne+zmail@gmail.com`** unless **`ZMAIL_SEND_PRODUCTION=1`**. Sync remains a **local cache** of server mail—deleting local data does not remove server-side mail. |
+| **IMAP / send posture** | **SMTP send-as-user** via **`zmail send`** (including **`zmail send <draft-id>`**) and **`zmail draft …`** (and MCP `send_email` / `create_draft` / `send_draft` / `list_drafts`). Optional **`ZMAIL_SEND_TEST=1`** restricts recipients to **`lewiscirne+zmail@gmail.com`** for dev/test sends. Sync remains a **local cache** of server mail—deleting local data does not remove server-side mail. |
 | **MCP (optional)** | **`zmail mcp`** uses **stdio** JSON-RPC only (stdin/stdout)—**no** in-process HTTP server or listening TCP port for MCP. |
 | **Persistence & local wipe** | Config and a **local** copy of mail (SQLite index + maildir cache under **`data/`**) live under **`ZMAIL_HOME`** (default **`~/.zmail`**). **`zmail setup --clean --yes`** removes that local tree and rewrites config—it does **not** delete mail on the **IMAP server**; after setup, run **`zmail sync`** to **rebuild** the local cache from IMAP. You still lose unsaved **local-only** state (e.g. extracted-attachment cache, any data not on the server). |
 | **Shell safety** | Invoke **`zmail`** with **argument arrays** (or careful quoting). **Never** paste untrusted mail text or chat content into a **`sh -c "zmail …"`** string—**command-injection** risk. |
@@ -61,7 +61,7 @@ OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://d
 4. User must have a **Gmail app password** (or compatible IMAP credentials)—[Gmail: app password](#gmail-get-an-app-password).
 5. Run **`zmail sync --since …`** then **`zmail refresh`** / **`zmail status`**.
 6. **Learn the CLI from the CLI:** run **`zmail`**, **`zmail --help`**, and **`zmail <command> --help`** (e.g. **`zmail draft --help`** for compose, LLM **`draft edit`**, **`draft rewrite`**, **`--text`** output). Read any **`hint`** (and truncation fields) in **JSON** output—zmail uses them to disclose the next capability ([Canonical docs & discovery](references/CANONICAL-DOCS.md)).
-7. For questions over mail, prefer **`zmail ask`** first; use **`search` / `read` / `thread` / `who` / `attachment`** when you need fine control ([Ask vs primitives](#zmail-ask-vs-primitives)). To **reply or send**, use the **[draft + send](#draft--send-core-loop)** flow.
+7. For questions over mail, prefer **`zmail ask`** first; use **`search` / `read` / `thread` / `who` / `attachment`** when you need fine control ([Ask vs primitives](#zmail-ask-vs-primitives)). To **reply or send**, follow **[Agent workflow: draft and send](#agent-workflow-draft-and-send)** (detail: [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md)).
 8. Never paste secrets into chat logs; use env or flags in the **user’s** shell.
 
 ---
@@ -148,22 +148,22 @@ If any required value is missing, `zmail setup` prints what’s missing and exit
 
 ---
 
-## Draft + send (core loop)
+## Agent workflow: draft and send
 
-zmail is built for **agents as the compose surface**: create a **local draft** (Markdown + YAML under **`data/drafts/`**), refine it, then **send via SMTP** as the mailbox user (same app password as IMAP). No separate “send API”—see **[ADR-024](https://github.com/cirne/zmail/blob/main/docs/ARCHITECTURE.md)** in the repo.
+zmail treats **agents as the compose surface**: outbound mail is a **local draft** (Markdown + YAML under **`{ZMAIL_HOME}/data/drafts/`**), then **SMTP send-as-user** with the same credentials as IMAP—no separate “send API.” Architecture: **[ADR-024](https://github.com/cirne/zmail/blob/main/docs/ARCHITECTURE.md)**.
 
-**Typical CLI flow**
+### Phases (new mail, replies, forwards)
 
-1. **`zmail draft reply --message-id "<id>" --body "…"`** (or **`draft new`** / **`draft forward`**; use **`zmail search`** / **`read`** to get **`message_id`**).
-2. **`zmail draft edit <draft-id> "your instruction in plain language"`** — LLM rewrites the draft (needs **`ZMAIL_OPENAI_API_KEY`**). Use **`zmail draft rewrite <draft-id> …`** to set the body literally without an LLM.
-3. **`zmail draft view <draft-id> --text`** (or default JSON) to confirm.
-4. **`zmail send <draft-id> --dry-run`**, then **`zmail send <draft-id>`**. Successful send **moves** the file to **`data/sent/`**.
+1. **Gather context** — For replies/forwards, obtain **`message_id`** (and facts/tone) via **`search` → `read` / `thread`**, or use **`zmail ask`** for fuzzy questions. Skip this for cold **new** mail if the user already gave recipients and intent.
+2. **Create a draft** — **`zmail draft new|reply|forward`** or MCP **`create_draft`** (`kind`: `new` | `reply` | `forward`). For **new** mail, either pass **subject + body** or use **`--instruction`** / LLM compose (requires OpenAI key).
+3. **Review and revise** — **`zmail draft view`** / **`draft list`**; optional **`zmail draft edit <id> "…"`** (LLM) or **`draft rewrite`** (literal body/subject/to). MCP has no `draft_edit` tool—**subprocess** those CLI commands, or edit the draft **`.md`** file in **`data/drafts/`** if your environment allows safe file access.
+4. **Send** — **`zmail send <draft-id> --dry-run`** then **`zmail send <draft-id>`**, or MCP **`send_draft`** (optional **`dryRun`**). Success **moves** the file to **`data/sent/`**. One-shot without a draft file: **`zmail send --to …`** or MCP **`send_email`**.
 
-**Output:** Mutating draft commands default to **JSON**; add **`--text`** for the same human-readable draft layout as **`draft view`**.
+**Defaults:** Mutating draft commands return **JSON**; add **`--text`** for human-readable output like **`draft view`**.
 
-**Safety:** In dev, **`ZMAIL_SEND_PRODUCTION=1`** may be required for recipients other than the shipped allowlist—read STDERR / **`zmail --help`** and ADR-024.
+**Safety:** Optional **`ZMAIL_SEND_TEST=1`** restricts recipients for dev/test—see **`zmail --help`** and ADR-024.
 
-**MCP:** Same pipeline: **`create_draft`**, **`list_drafts`**, **`send_draft`** (no CLI-only **`draft edit`** tool yet—use subprocess or rewrite body via **`create_draft`** + replace).
+**Full workflows, CLI/MCP examples, and comparison table:** [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md).
 
 ---
 
@@ -192,7 +192,7 @@ zmail search 'query'      # FTS hits (JSON default; --text for tables)
 
 - Long **`sync`:** Safe to run in background; use **`zmail status`** and the **sync log file** path the CLI prints.
 - **Refresh** is the habitual “get new mail” command after the first sync.
-- **Outbound:** use **[Draft + send](#draft--send-core-loop)** (`zmail draft …`, then **`zmail send <draft-id>`**).
+- **Outbound:** use **[Agent workflow: draft and send](#agent-workflow-draft-and-send)** (`zmail draft …`, then **`zmail send <draft-id>`**; see [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md)).
 
 ---
 
@@ -243,3 +243,4 @@ For **[OpenClaw](https://docs.openclaw.ai/)**, use a **heartbeat** (not a separa
 ## More detail
 
 - [references/CANONICAL-DOCS.md](references/CANONICAL-DOCS.md) — **CLI-first discovery** (`zmail`, `--help`, per-command help), **hints in output**, and a **table of canonical markdown** (`AGENTS.md`, `docs/VISION.md`, `docs/ASK.md`, `docs/ARCHITECTURE.md`, `docs/MCP.md`, OPP-025).
+- [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md) — **Compose, reply, forward, revise, send** — detailed agent workflow, CLI and MCP examples, safety.

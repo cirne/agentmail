@@ -1,5 +1,6 @@
 /**
- * Dev/test guard: only one recipient allowed unless ZMAIL_SEND_PRODUCTION is set.
+ * Optional dev/test guard: when ZMAIL_SEND_TEST is set, only DEV_SEND_ALLOWLIST may receive mail.
+ * Default (unset): no recipient restriction.
  */
 
 export const DEV_SEND_ALLOWLIST = "lewiscirne+zmail@gmail.com";
@@ -16,14 +17,19 @@ function normalizeForCompare(addr: string): string {
   return extractEmailAddress(addr).toLowerCase();
 }
 
+function isSendTestMode(env: NodeJS.ProcessEnv): boolean {
+  return env.ZMAIL_SEND_TEST === "1" || env.ZMAIL_SEND_TEST === "true";
+}
+
 /**
- * Throws if any recipient is not the dev allowlist and production mode is off.
+ * When ZMAIL_SEND_TEST is set, throws if any recipient is not the dev allowlist.
+ * When unset, allows any recipient.
  */
 export function assertSendRecipientsAllowed(
   addresses: string[],
   env: NodeJS.ProcessEnv = process.env
 ): void {
-  if (env.ZMAIL_SEND_PRODUCTION === "1" || env.ZMAIL_SEND_PRODUCTION === "true") {
+  if (!isSendTestMode(env)) {
     return;
   }
   const allowed = normalizeForCompare(DEV_SEND_ALLOWLIST);
@@ -31,7 +37,7 @@ export function assertSendRecipientsAllowed(
     if (!addr.trim()) continue;
     if (normalizeForCompare(addr) !== allowed) {
       throw new Error(
-        `Send blocked: recipient "${addr}" is not allowed in dev/test. Only ${DEV_SEND_ALLOWLIST} is permitted, or set ZMAIL_SEND_PRODUCTION=1 to send to other addresses.`
+        `Send blocked: recipient "${addr}" is not allowed when ZMAIL_SEND_TEST is set. Only ${DEV_SEND_ALLOWLIST} is permitted, or unset ZMAIL_SEND_TEST to send to other addresses.`
       );
     }
   }

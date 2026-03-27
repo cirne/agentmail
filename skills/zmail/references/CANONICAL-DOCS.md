@@ -10,7 +10,7 @@ This file is for the **end-user `/zmail` skill** (`skills/zmail/`). For **develo
 
 **Discovery order (recommended):**
 
-1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — full overview, including when to use **`zmail ask`** vs **`search` / `read` / `thread` / `who` / `attachment` / `inbox`**, the **draft + send** loop (`zmail draft`, `zmail send <draft-id>`), and where to read more (`docs/ASK.md`, `docs/MCP.md`).
+1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — full overview, including when to use **`zmail ask`** vs **`search` / `read` / `thread` / `who` / `attachment` / `inbox`**, the **draft + send** loop (`zmail draft`, `zmail send <draft-id>`), and where to read more (`docs/ASK.md`, `docs/MCP.md`). For agent-oriented compose/send detail, see **`skills/zmail/references/DRAFT-AND-SEND.md`** (with **`SKILL.md`** § Agent workflow).
 2. **`zmail <command> --help`** — flags and examples for that command (e.g. `zmail search --help`, `zmail who --help`, `zmail attachment list --help`).
 3. **Run a command** and read the **structured output** — zmail **embeds hints** so you learn the next step without opening docs (see below).
 
@@ -44,6 +44,7 @@ Paths below are relative to the **repository root** or the **installed `@cirne/z
 | **Full agent guide** — commands, env, sync, MCP overview | `AGENTS.md` | Primary maintainer-facing index; keep skill content thin and link here. |
 | **Vision** — agent-first product goals | `docs/VISION.md` | Why zmail exists; not a command reference. |
 | **`ask` vs primitives** — orchestration, hybrid patterns | `docs/ASK.md` | When `zmail ask` wins vs `search`/`read`/…; complements `--help`. |
+| **Draft + send** — agent compose/reply/forward, CLI vs MCP | `skills/zmail/references/DRAFT-AND-SEND.md` | Shipped with the skill; high-level in `SKILL.md` § Agent workflow. |
 | **Architecture** — SQLite, sync, indexing decisions | `docs/ARCHITECTURE.md` | Read before changing storage or sync behavior. |
 | **MCP** — tools, params, token-efficient patterns | `docs/MCP.md` | Same index as CLI; hints in JSON sometimes align with MCP batch patterns. |
 | **Skill packaging** — spec, hosts, `skills/zmail/` layout | `docs/opportunities/OPP-025-cross-platform-agent-skills-packaging.md` | Strategy for `/zmail` vs internal Cursor skills. |

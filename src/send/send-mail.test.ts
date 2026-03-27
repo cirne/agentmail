@@ -19,7 +19,7 @@ describe("sendDraftById", () => {
   });
 
   it("dryRun succeeds for a new draft without hitting SMTP", async () => {
-    const id = createDraftId();
+    const id = createDraftId(dataDir, "Subj");
     writeDraft(
       dataDir,
       id,
