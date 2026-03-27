@@ -43,7 +43,7 @@ export interface SearchOptions {
   includeThreads?: boolean;
   /** When true, includes noise messages (promotional, social, forums, bulk, spam). Defaults to false (noise excluded). */
   includeNoise?: boolean;
-  /** Mailbox owner (IMAP user). When set, search ranking applies a small participant contact-rank boost (OPP-027). */
+  /** Mailbox owner (IMAP user). When set, search ranking applies a small participant contact-rank boost (OPP-012). */
   ownerAddress?: string;
 }
 
@@ -70,7 +70,7 @@ const BODY_PREVIEW_LEN = 300;
 
 type FtsRow = SearchResult & { combinedRank: number };
 
-/** After FTS+date ordering, optionally rerank by max participant contact rank (OPP-027). */
+/** After FTS+date ordering, optionally rerank by max participant contact rank (OPP-012). */
 async function applyContactRankRerank(
   db: SqliteDatabase,
   ownerAddress: string | undefined,

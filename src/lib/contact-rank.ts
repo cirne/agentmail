@@ -1,10 +1,10 @@
 /**
- * Shared contact rank (OPP-027): same formula for `zmail who` ordering and search participant boost.
+ * Shared contact rank (OPP-012): same formula for `zmail who` ordering and search participant boost.
  * "Rank" = ordering signal from indexed mail (volume, reciprocity); not personal worth.
  * Uses log scaling and per-dimension caps so one noisy channel does not dominate.
  */
 
-/** Raw owner-centric counts (see OPP-027). */
+/** Raw owner-centric counts (see OPP-012). */
 export interface ContactRankFields {
   sentCount: number;
   repliedCount: number;

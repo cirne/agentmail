@@ -762,7 +762,7 @@ describe("search", () => {
 
   });
 
-  describe("OPP-027 contact rank (search)", () => {
+  describe("OPP-012 contact rank (search)", () => {
     it("ranks a frequent correspondent higher when body match strength is similar", async () => {
       const owner = "me@example.com";
       const friend = "friend@example.com";

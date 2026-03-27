@@ -64,5 +64,5 @@ Same issue applies to `katelyn.cirne@gmail.com` and `katelyn_cirne@icloud.com` �
 ## References
 
 - Vision (agent-first): [VISION.md](../VISION.md)
-- Related: [OPP-013](../opportunities/OPP-013-who-name-inference-from-address.md) — Name Inference from Address (fixes this)
+- Related: [OPP-012](../opportunities/OPP-012-who-smart-address-book.md) — Contacts & `who` (name inference; fixes this)
 - Related: [OPP-012](../opportunities/OPP-012-who-smart-address-book.md) — Smart Address Book (includes identity merging)

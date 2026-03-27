@@ -68,5 +68,5 @@ The display name from email headers (e.g., "LinkedIn") is already correct for no
 ## References
 
 - Vision (agent-first): [VISION.md](../VISION.md)
-- Related: [OPP-013](../opportunities/OPP-013-who-name-inference-from-address.md) — Name Inference from Address (feature that introduced this issue)
+- Related: [OPP-012](../opportunities/OPP-012-who-smart-address-book.md) — Contacts & `who` (name inference)
 - Related: [BUG-013](BUG-013-who-noreply-display-name-leaks.md) — Noreply addresses leaking through filter

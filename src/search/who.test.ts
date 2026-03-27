@@ -258,7 +258,7 @@ describe("who", () => {
     expect(result.people[0].primaryAddress.toLowerCase()).toBe("tombig@example.com");
   });
 
-  describe("with ownerAddress (OPP-027 owner-centric)", () => {
+  describe("with ownerAddress (OPP-012 owner-centric)", () => {
     const me = "me@example.com";
 
     it("sent+replied equals owner messages to peer (per thread)", async () => {

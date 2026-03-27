@@ -1,128 +1,62 @@
-# OPP-012: Make `zmail who` a Smart, Unified Address Book
+# OPP-012: Contacts & `zmail who` — Smart Address Book
 
-**Status:** Partial — Tiers 1-2 complete, Tier 3 mostly complete (signature extraction robust), Tier 4 remaining.
+**Problem:** Agents need one reliable way to answer “who is this?” and “how do I reach them?” from mail. That means **merged identities**, **honest interaction counts**, **sensible ordering**, and **structured fields** (phone, title, company, links) — without turning zmail into Google Contacts.
 
-**Problem:** As an agent, `zmail who` is my only way to answer "who is this person?" or "how do I reach them?" Right now it returns raw per-address rows with no identity merging, no contact metadata, and no way to distinguish a real person from a noreply address. For `who` to become a true address book — the agent's de facto contact lookup — it needs to evolve significantly.
-
-**Example:** `zmail who "cirne"` returns 8 separate rows for what is clearly one person across `@gmail.com`, `@mac.com`, `@icloud.com`, `@me.com`, `@alum.dartmouth.org`. `noreply@email.apple.com` shows up as "Kirsten Vliet" because Apple sends notifications using the sharer's display name. Automated senders pollute the people index.
-
-**Proposed direction:** Evolve `zmail who` into an identity-aware contact graph with multiple tiers of enhancement:
-
-### Tier 1: Core fixes (low effort, high impact) ✅ **COMPLETE**
-
-- ✅ **Case-insensitive dedup** — Normalize email addresses to lowercase at index time (addresses [BUG-008](../bugs/archive/BUG-008-who-case-sensitive-email-dedup.md))
-- ✅ **Filter noreply/automated senders** — Flag or deprioritize addresses matching `noreply@`, `no-reply@`, `mailer-daemon@`, etc. (addresses [BUG-013](../bugs/archive/BUG-013-who-noreply-display-name-leaks.md))
-- ✅ **Add `lastContact` timestamp** — When was the last email to/from this person?
-- ⚠️ **Add `relationship` score** — Simple heuristic: `sentCount * 3 + receivedCount * 2 + mentionedCount` (weighting direct communication higher) — *Not yet implemented*
-
-### Tier 2: Identity merging (medium effort, high impact) ✅ **COMPLETE**
-
-- ✅ **Auto-merge by name** — When two addresses share the same `displayName` (exact or fuzzy match) and aren't noreply addresses, link them as the same person
-- ✅ **AKA field** — `"aka": ["Kirsten Cirne", "Kirsten Vliet"]` — track all display names seen for a person
-- ⚠️ **Domain grouping** — Show which organizations a person is associated with: `"orgs": ["greenlonghorninc.com", "gmail.com"]` — *Not yet implemented*
-- ⚠️ **Manual merge/split** — `zmail who merge <addr1> <addr2>` and `zmail who split <addr>` for corrections — *Not yet implemented*
-
-### Tier 3: Signature extraction (medium effort, high value) ✅ **MOSTLY COMPLETE**
-
-- ✅ **Phone numbers** — Parse email signatures for phone numbers: `"phone": "+1-555-123-4567"` — *Implemented and verified*
-- ✅ **Title / role** — Extract from signatures: `"title": "CEO, Green Longhorn Inc."` — *Implemented with boilerplate filtering* (addresses [BUG-014](../bugs/archive/BUG-014-who-signature-parser-noise.md))
-- ✅ **Company** — From signature or domain: `"company": "Green Longhorn Inc."` — *Implemented with boilerplate filtering and standalone company name detection* (verified 2026-03-07)
-- ✅ **Social links** — LinkedIn, Twitter URLs from signatures — *Implemented with tracking URL filtering*
-- ✅ **Quoted reply detection** — Signature extraction stops at quoted reply patterns (e.g., "On ... wrote:") to avoid false positives — *Implemented and verified*
-
-### Tier 4: Smart queries (lower priority, polishes the experience)
-
-- **`zmail who "sterling" --full`** — Show all merged identities, all known addresses, extracted contact info
-- **`zmail who --top 20`** — Top contacts by relationship score
-- **`zmail who --recent`** — Recently active contacts
-- **`zmail who "company:gamaliel"`** — Search by organization/domain
-- **`zmail who --groups`** — Cluster contacts by domain/organization
-
-**Open questions:**
-- Should identity merging be automatic (by name matching) or require manual confirmation?
-- How to handle false positives in name-based merging (e.g., two different "John Smith" people)?
-- Should signature extraction use regex patterns or LLM-based extraction for better accuracy?
-- Should `who` become a full contact management system, or remain focused on email-derived data?
+**Direction:** Treat `zmail who` as the **contact layer** on top of the indexed corpus: same data model for CLI, MCP `who`, and (indirectly) search / `ask` when retrieval uses `search()`.
 
 ---
 
-## Example: Ideal Output
+## What’s shipped
 
-```bash
-$ zmail who "cirne"
-```
-
-```json
-{
-  "query": "cirne",
-  "people": [
-    {
-      "name": "Lewis Cirne",
-      "aka": ["Lew Cirne", "Lewis Cirne"],
-      "primaryAddress": "lewiscirne@gmail.com",
-      "addresses": [
-        "lewiscirne@gmail.com",
-        "lewiscirne@mac.com",
-        "lewiscirne@icloud.com",
-        "lewiscirne@me.com",
-        "lewis.cirne@alum.dartmouth.org"
-      ],
-      "phone": ["+1-555-123-4567"],
-      "title": "Founder",
-      "company": "Green Longhorn Inc.",
-      "sentCount": 2,
-      "receivedCount": 10,
-      "mentionedCount": 290,
-      "relationshipScore": 0.95,
-      "lastContact": "2026-03-07T14:30:00Z"
-    },
-    {
-      "name": "Kirsten Vliet",
-      "aka": ["Kirsten Cirne"],
-      "primaryAddress": "kirstencirne@mac.com",
-      "addresses": ["kirstencirne@mac.com"],
-      "sentCount": 1,
-      "receivedCount": 18,
-      "mentionedCount": 4,
-      "relationshipScore": 0.72,
-      "lastContact": "2026-02-28T23:43:38Z"
-    }
-  ]
-}
-```
-
-Note: `noreply@email.apple.com` no longer pollutes Kirsten's results. All of Lewis's address variants are merged into one identity.
+| Area | Summary |
+|------|---------|
+| **Hygiene** | Case-insensitive addresses, noreply/bot handling, `lastContact`. |
+| **Identity** | Merge by display name, `aka` aliases, basic domain/address lists. |
+| **Name inference** | Heuristic names from local-part (`firstname.lastname`, etc.) when headers lack a name; optional `--enrich` for harder cases ([BUG-011](../bugs/archive/BUG-011-who-dartmouth-not-merged.md)). |
+| **Signatures** | Phone, title, company, social URLs, alt emails, quoted-reply cutoff ([BUG-014](../bugs/archive/BUG-014-who-signature-parser-noise.md)). |
+| **Owner-centric counts + `contactRank`** | `sentCount` / `repliedCount` / `receivedCount` / `mentionedCount` (CC exposure) with mailbox owner from config; **`people` sorted by `contactRank` descending**; search can apply a small participant boost. See [`src/lib/contact-rank.ts`](../../src/lib/contact-rank.ts), [`docs/MCP.md`](../MCP.md) (`who` tool). |
 
 ---
 
-## Benefits
+## Ranking & interaction signals (core contract)
 
-- Agents can answer "what's Sterling's phone number?" or "what company does Matt work for?" in one call
-- No more guessing which of 8 email addresses is the right one to reference
-- Relationship scoring lets agents prioritize important contacts
-- Becomes the single source of truth for "who is this person?" across all agent workflows
+Counts are over indexed mail; **owner** = configured IMAP user. **`contactRank`** is a log-scaled score from those counts (ordering signal, not “importance”). **Fuzzy name/address match** filters candidates; **primary sort** among matches is **`contactRank`**, not best string match.
 
-## Agent-Friendliness Impact
+| Field | Meaning (owner-centric) |
+|-------|-------------------------|
+| `sentCount` | Your messages **to** them that **start** a thread (first outbound in that `thread_id`). |
+| `repliedCount` | Your **further** outbound **to** them in threads you already started with them. |
+| `receivedCount` | Messages **from** them **to** you. |
+| `mentionedCount` | They appear in **Cc** (not sender) on messages in the corpus. |
+| `lastContact` | Latest message date involving them. |
 
-Massive. Currently, an agent doing any people-related task (draft an email, find a contact, summarize a relationship) has to do multiple `who` queries, manually deduplicate, and still can't get phone/title/company data. A smart `who` collapses that to a single call.
+**Still validate:** Whether **search** tie-break boosts are worth tuning beyond the current small boost; whether **`refresh` / `inbox`** should use the same signal to protect mail from regular correspondents vs bulk (may combine with [OPP-021](OPP-021-ask-spam-promo-awareness.md)).
 
-## Alternatives Considered
+---
 
-- External contacts API (Google Contacts, etc.) — adds dependency, doesn't capture email-only contacts
-- Manual address book file — doesn't scale, goes stale
-- Current approach + agent-side dedup — wastes tokens and is fragile
+## Deeper signature extraction (next)
 
-## Implementation Notes
+Basics exist; **richer structure** is still open:
 
-- Tier 1 (case normalization, noreply filter, lastContact, score) is likely a few hours of work
-- Tier 2 (identity merging) needs a `people` or `identities` table linking addresses to a canonical person
-- Tier 3 (signature parsing) can start simple with regex, improve over time with LLM extraction
-- All tiers are independently shippable — each one makes `who` meaningfully better
+- Multiple phones with labels (mobile / office / fax), categorized URLs (LinkedIn, GitHub, …), department, location/timezone, pronouns — see implementation notes in `src/search/signature.ts` / `who-dynamic.ts`.
+
+---
+
+## Smarter `who` queries (later)
+
+- `--full`, `--top`, `--recent`, `company:` filters, clustering — polish once ranking and fields stabilize.
+
+---
+
+## Non-goals
+
+- Full external CRM sync as default; named groups (“family”) as a v1 requirement; LLM clustering of everyone in the mailbox. Optional external enrichment was explored ([archived OPP-014](archive/OPP-014-who-external-enrichment-exploration.md)); signature + inference stay primary.
 
 ---
 
 ## References
 
-- Vision (agent-first): [VISION.md](../VISION.md)
-- Related: [BUG-008](../bugs/archive/BUG-008-who-case-sensitive-email-dedup.md) — Case-sensitive email dedup (Tier 1)
-- Related: [OPP-004](../opportunities/archive/OPP-004-people-index-contacts.md) — People Index and Contacts (basic `who` implemented)
+- [VISION.md](../VISION.md) — agent-first product
+- [OPP-001](OPP-001-personalization.md) — user aliases; complements structural boosts
+- [OPP-019 archived](archive/OPP-019-fts-first-retire-semantic-default.md) — FTS-first; ranking augments FTS, does not replace it
+- [archive/OPP-004-people-index-contacts.md](archive/OPP-004-people-index-contacts.md) — original people index

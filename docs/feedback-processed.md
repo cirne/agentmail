@@ -28,7 +28,7 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `bug-who-min-sent-splits-identity.md` | 2026-03-07 | Created bug | [BUG-012](bugs/archive/BUG-012-who-min-sent-splits-identity.md) |
 | `bug-who-noreply-display-name-leaks.md` | 2026-03-07 | Created bug | [BUG-013](bugs/archive/BUG-013-who-noreply-display-name-leaks.md) |
 | `bug-who-signature-parser-noise.md` | 2026-03-07 | Created bug | [BUG-014](bugs/archive/BUG-014-who-signature-parser-noise.md) |
-| `ux-who-name-inference-from-address.md` | 2026-03-07 | Created opportunity | [OPP-013](opportunities/OPP-013-who-name-inference-from-address.md) — Partial: dot/underscore patterns work, firstlast (no separator) still null |
+| `ux-who-name-inference-from-address.md` | 2026-03-07 | Created opportunity | [OPP-013 archived](opportunities/archive/OPP-013-who-name-inference-from-address.md) → [OPP-012](opportunities/OPP-012-who-smart-address-book.md) — Partial: dot/underscore patterns work, firstlast (no separator) still null |
 | `bug-who-name-inference-noreply-garbage.md` | 2026-03-07 | Created bug | [BUG-015](bugs/archive/BUG-015-who-name-inference-noreply-garbage.md) |
 | `bakeoff-results.md` | 2026-03-07 | Created bug | [BUG-016](bugs/archive/BUG-016-bakeoff-incomplete-coverage-critical.md) — Archived 2026-03-10; domain→from scope → BUG-020 |
 | `bug-search-silent-truncation-and-fts-dot-syntax.md` | 2026-03-07 | Updated existing bug | [BUG-016](bugs/archive/BUG-016-bakeoff-incomplete-coverage-critical.md) — Post-fix retest; archived 2026-03-10 |

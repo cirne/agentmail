@@ -89,7 +89,7 @@ export interface SearchResult {
   rank: number;
   /**
    * When owner-centric search ranking is active: participant contact-rank term subtracted from
-   * combined FTS+date rank (same units as `rank`). OPP-027. Set when `DEBUG_SEARCH=1`.
+   * combined FTS+date rank (same units as `rank`). OPP-012. Set when `DEBUG_SEARCH=1`.
    */
   contactRankBoost?: number;
   /** First ~300 chars of body (always present) to reduce follow-up get_message calls. */
@@ -115,10 +115,10 @@ export interface WhoPerson {
   company?: string;
   urls?: string[];
   sentCount: number;
-  /** Owner→peer replies in existing threads (not the first outbound in that thread). OPP-027. */
+  /** Owner→peer replies in existing threads (not the first outbound in that thread). OPP-012. */
   repliedCount: number;
   receivedCount: number;
-  /** CC-only exposure: peer in cc, not the sender (OPP-027). */
+  /** CC-only exposure: peer in cc, not the sender (OPP-012). */
   mentionedCount: number;
   /** Mailbox interaction rank from indexed mail (shared with search ordering). Higher = stronger signal, not personal worth. */
   contactRank: number;

@@ -644,7 +644,7 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
       receivedCount: totalReceived,
       mentionedCount: totalMentioned,
       contactRank,
-      _score: score, // Fuzzy tie-breaker only (OPP-027)
+      _score: score, // Fuzzy tie-breaker only (OPP-012)
       ...(phone ? { phone } : {}),
       ...(title ? { title } : {}),
       ...(company ? { company } : {}),

@@ -1,6 +1,6 @@
 # OPP-014: External Enrichment for `zmail who` — Exploration
 
-**Archived:** 2026-03-26 — **exploration complete** (findings retained). Exa `--enrich` behavior and limitations are documented below; follow-on provider work (e.g. Tavily) belongs under [OPP-012](../OPP-012-who-smart-address-book.md) / [OPP-015](../OPP-015-who-enhanced-signature-extraction.md) if prioritized.
+**Archived:** 2026-03-26 — **exploration complete** (findings retained). Exa `--enrich` behavior and limitations are documented below; follow-on provider work (e.g. Tavily) belongs under [OPP-012](../OPP-012-who-smart-address-book.md) if prioritized.
 
 **Status (historical):** Exploration — Exa tested, accuracy insufficient. Alternatives evaluated.
 

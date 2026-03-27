@@ -94,7 +94,7 @@ zmail refresh                    ← Refresh: fetch new messages since last sync
 zmail search <query> [flags]    ← FTS5 full-text search
                                   Query supports inline operators: from:, to:, subject:, after:, before:
                                   Example: zmail search "from:alice@example.com invoice OR receipt"
-zmail who [query] [flags]        ← people by address or display name; owner-centric counts + contactRank sort when owner configured ([OPP-027](opportunities/OPP-027-owner-centric-who-counts-and-search-ranking.md)); omit query for top contacts
+zmail who [query] [flags]        ← people by address or display name; owner-centric counts + contactRank sort when owner configured ([OPP-012](opportunities/OPP-012-who-smart-address-book.md)); omit query for top contacts
 zmail status [--imap]           ← sync/indexing/search readiness (--imap for IMAP server comparison)
 zmail stats                     ← DB stats (volume + top senders/folders)
 zmail read <id> [--raw]         ← read a message (or: zmail message <id>)

@@ -81,7 +81,7 @@ The search, read, who, attachment functions in `src/search/`, `src/messages/`, `
 | **Offline/no-API-key usage** — primitives work without OpenAI; `ask` requires `ZMAIL_OPENAI_API_KEY` | Medium | Prerequisite: solve before removing primitives. Options: (a) require API key for all query features (acceptable for agent-first product), (b) local model fallback (if vector search returns; [OPP-002 archived](archive/OPP-002-local-embeddings.md)), (c) keep a minimal `search --offline` escape hatch. |
 | **Debugging opaqueness** — can't `search` then `read` to verify what `ask` sees | Low | `ask --verbose` already shows the full pipeline (searches run, messages fetched, context assembled). Enhance verbose output if needed. |
 | **Raw data access** — `attachment read --raw` for binary extraction, `read --raw` for EML | Low | These are rare power-user operations. Could keep as hidden/undocumented commands or add `ask --raw-attachment <id>` if needed. |
-| **`who` as structured contact lookup** — returns JSON with addresses, phone, title, counts | Low | `ask "who is X?"` returns the same info as prose. If structured contact data is needed later (OPP-012, OPP-015), expose a dedicated `contacts` command rather than the current `who`. |
+| **`who` as structured contact lookup** — returns JSON with addresses, phone, title, counts | Low | `ask "who is X?"` returns the same info as prose. If structured contact data is needed later ([OPP-012](OPP-012-who-smart-address-book.md)), expose a dedicated `contacts` command rather than the current `who`. |
 
 ### Key risk: API key dependency
 
@@ -134,7 +134,7 @@ Before removing anything, add `ask` as an MCP tool so MCP consumers have the rep
 | **OPP-022** (ask detail level) | Must ship first. If `ask` is the only interface, it must handle every query well. |
 | **OPP-021** (noise awareness) | Applies to `ask` only after this change — no search primitive to separately filter. |
 | **OPP-018** (reduce round-trips) | **Archived** (phase 1 delivered). Partially superseded for external orchestration: [archive/OPP-018-reduce-agent-round-trips.md](archive/OPP-018-reduce-agent-round-trips.md). With `ask` as the only tool, the outer agent makes one call — internal pipeline improvements (body preview, batch reads, slim search) still help `ask` internally. |
-| **OPP-012, OPP-013, OPP-015** (who/contacts) | `who` as a primitive goes away. Contact features would be exposed through `ask` ("who is X?") or a future dedicated `contacts` command. |
+| **OPP-012** (contacts / `who`) | `who` as a primitive goes away. Contact features would be exposed through `ask` ("who is X?") or a future dedicated `contacts` command. |
 | **BUG-017** (semantic recall gap) | Resolved by FTS-first + `ask`'s internal agent loop. No primitive to mis-use. |
 | **BUG-018** (`who --timings`) | Eliminated — `who` command no longer exists. |
 | **BUG-021** (read prepare error) | Eliminated — `read` command no longer exists. |

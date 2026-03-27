@@ -93,7 +93,7 @@ async function loadMessagesForOwnerStats(
 
 /**
  * Owner-centric counts for each normalized peer address in `candidateNorms`.
- * Skips noreply peers for count increments (OPP-012 / OPP-027).
+ * Skips noreply peers for count increments (OPP-012).
  */
 export async function computeOwnerCentricStatsForCandidates(
   db: SqliteDatabase,
