@@ -15,6 +15,7 @@ import {
   loadExistingEnv,
   maskSecret,
 } from "./setup";
+import { resolveSmtpSettings, verifySmtpConnection } from "~/send";
 
 const SYNC_DURATION_CHOICES = [
   { value: "7d", name: "7 days", description: "Quick start, recent email only" },
@@ -134,6 +135,19 @@ export async function runWizard(options: { noValidate?: boolean; clean?: boolean
       process.exit(1);
     }
     console.log(`Connected to ${host} as ${email}`);
+  }
+
+  if (!noValidate) {
+    process.stdout.write("  Verifying SMTP... ");
+    try {
+      const smtp = resolveSmtpSettings(host);
+      await verifySmtpConnection(smtp, { user: email, pass: passwordValue });
+      console.log("OK");
+    } catch {
+      console.log("Failed");
+      console.error("  Could not verify SMTP. Check your credentials and try again.");
+      process.exit(1);
+    }
   }
 
   let apiKey: string;

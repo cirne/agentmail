@@ -547,7 +547,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Dev/test safety:** Unless **`ZMAIL_SEND_PRODUCTION=1`**, SMTP sends are allowed only to **`lewiscirne+zmail@gmail.com`** (enforced in `src/send/recipients.ts`) so development does not email arbitrary recipients.
 
-**Drafts:** Pre-send content lives as **Markdown + YAML frontmatter** under `{dataDir}/drafts/`; after send, the draft file is moved to `{dataDir}/sent/`. Local drafts are **not** synced to the provider’s IMAP Drafts folder in v1.
+**Drafts:** Pre-send content lives as **Markdown + YAML frontmatter** under `{dataDir}/drafts/`; after send, the draft file is moved to `{dataDir}/sent/`. Local drafts are **not** synced to the provider’s IMAP Drafts folder in v1. **CLI:** `zmail draft new|reply|forward|list|view`, **`zmail draft edit <id> "<instruction>"`** (LLM revision via OpenAI), **`zmail draft rewrite <id> …`** (literal body), then **`zmail send <draft-id>`**. Mutating commands default to JSON; **`--text`** prints a human-readable draft. **MCP:** `create_draft`, `list_drafts`, `send_draft` (same send pipeline; LLM edit is CLI subprocess today).
 
 **Threading:** `In-Reply-To` / `References` for replies are built from the source message’s raw `.eml` via **mailparser** (`src/send/threading.ts`), because those headers are not stored as columns in SQLite.
 

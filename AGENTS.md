@@ -121,11 +121,11 @@ zmail rebuild-index              # Wipe SQLite and reindex from local maildir (d
 zmail attachment list <message_id> [--text]
 zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]
 zmail send [--to addr --subject s] [--raw] [<draft-id>]   # SMTP; dev allowlist or ZMAIL_SEND_PRODUCTION=1
-zmail draft new|reply|forward|list|view|edit [--help]   # Local drafts (data/drafts/)
+zmail draft new|reply|forward|list|view|edit|rewrite [--help]   # Local drafts (data/drafts/); edit = LLM instruction, rewrite = replace body
 zmail mcp  # Start MCP server (stdio)
 ```
 
-See [`docs/ASK.md`](docs/ASK.md) for details on using `zmail ask` as a higher-level query interface.
+See [`docs/ASK.md`](docs/ASK.md) for **`zmail ask`** vs primitives and for the **compose loop** (`zmail draft` → **`zmail draft edit`** / **`rewrite`** → **`zmail send <draft-id>`**). Publishable playbook: [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md).
 
 ### Sync logging and background execution
 

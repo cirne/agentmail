@@ -3,6 +3,7 @@ import { join } from "path";
 import { ImapFlow } from "imapflow";
 import OpenAI from "openai";
 import { ZMAIL_HOME } from "~/lib/config";
+import { resolveSmtpSettings, verifySmtpConnection } from "~/send";
 
 interface SetupConfig {
   imap: {
@@ -165,6 +166,19 @@ async function executeNonInteractiveSetup(opts: Required<Pick<SetupOptions, "ema
   }
 
   if (!noValidate) {
+    process.stdout.write("Validating SMTP... ");
+    try {
+      const smtp = resolveSmtpSettings(host);
+      await verifySmtpConnection(smtp, { user: email, pass: password });
+      console.log("OK");
+    } catch {
+      console.error("Failed");
+      console.error("Could not verify SMTP. Check your credentials and network.");
+      process.exit(1);
+    }
+  }
+
+  if (!noValidate) {
     process.stdout.write("Validating OpenAI API key... ");
     const openaiValid = await validateOpenAI(openaiKey);
     if (!openaiValid) {
@@ -195,6 +209,7 @@ function printSetupHelp(): void {
   console.error("zmail setup — CLI/agent-first. Provide credentials via flags or env.");
   console.error("");
   console.error("  zmail setup --email <email> --password <app-password> --openai-key <key> [--no-validate]");
+  console.error("  (--no-validate skips IMAP, SMTP, and OpenAI checks)");
   console.error("  ZMAIL_EMAIL=... ZMAIL_IMAP_PASSWORD=... ZMAIL_OPENAI_API_KEY=... zmail setup");
   console.error("");
   console.error("For interactive prompts, use: zmail wizard");

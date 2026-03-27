@@ -31,6 +31,8 @@ import {
   listDrafts,
   createDraftId,
   archiveDraftToSent,
+  composeForwardDraftBody,
+  loadForwardSourceExcerpt,
   type DraftFrontmatter,
 } from "~/send";
 
@@ -547,7 +549,7 @@ export function createMcpServer() {
 
   server.tool(
     "create_draft",
-    "Create a local draft (Markdown+YAML under data/drafts/). Does not sync to provider Drafts folder. Returns id and full draft fields.",
+    "Create a local draft (Markdown+YAML under data/drafts/). Forward kind inlines the original message body from raw mail. Does not sync to provider Drafts folder. Returns id and full draft fields.",
     {
       kind: z.enum(["new", "reply", "forward"]).describe("Draft type"),
       to: z.union([z.string(), z.array(z.string())]).optional().describe("Recipients (required for new/forward; reply defaults to original sender)"),
@@ -571,7 +573,6 @@ export function createMcpServer() {
       };
       const db = await getDb();
       let fm: DraftFrontmatter;
-      const textBody = body ?? "";
 
       if (kind === "new") {
         const toList = normTo(to as string | string[] | undefined);
@@ -638,6 +639,19 @@ export function createMcpServer() {
         };
       }
 
+      let textBody = body ?? "";
+      if (kind === "forward") {
+        try {
+          const excerpt = await loadForwardSourceExcerpt(db, config.maildirPath, fm.forwardOf!);
+          textBody = composeForwardDraftBody(textBody, excerpt);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          return {
+            content: [{ type: "text", text: JSON.stringify({ error: msg }) }],
+          };
+        }
+      }
+
       const id = createDraftId();
       writeDraft(dataDir, id, fm, textBody);
       const d = readDraft(dataDir, id);
@@ -654,7 +668,7 @@ export function createMcpServer() {
 
   server.tool(
     "send_draft",
-    "Send a draft created with create_draft (SMTP). Archives the draft file to data/sent/ on success. Same dev allowlist as send_email.",
+    "Send a draft created with create_draft (SMTP). Body is converted from Markdown to plain text for the message. Archives the draft file to data/sent/ on success. Same dev allowlist as send_email.",
     {
       draftId: z.string().describe("Draft id returned by create_draft"),
       dryRun: z.boolean().optional().describe("If true, validate only"),

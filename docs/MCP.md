@@ -6,6 +6,8 @@ zmail exposes an MCP (Model Context Protocol) server for agent access to your em
 
 The MCP server provides programmatic access to zmail's search, message retrieval, attachment extraction, and (when configured) **outbound SMTP** (`send_email`, `create_draft`, `send_draft`, `list_drafts`). It shares the same underlying SQLite index as the CLI, so all data synced via `zmail sync` or `zmail refresh` is immediately available through MCP tools.
 
+**Draft + send (core agent loop):** create or update drafts with **`create_draft`**, list with **`list_drafts`**, send with **`send_draft`** (mirrors **`zmail draft …`** and **`zmail send <draft-id>`**). Natural-language revision is **CLI-only** today (`zmail draft edit <id> "…"`); in MCP, have the outer agent edit the `body` field and call **`create_draft`** again or shell out to the CLI.
+
 ## Architecture
 
 - **Transport:** stdio (stdin/stdout) — no network, no ports, no auth required for local use
@@ -308,6 +310,25 @@ List local drafts: `id`, `kind`, `subject`.
    ```json
    { "tool": "read_attachment", "arguments": { "attachmentId": 7 } }
    ```
+
+### Draft and send workflow
+
+1. **Create a draft** (reply example):
+   ```json
+   { "tool": "create_draft", "arguments": { "kind": "reply", "sourceMessageId": "<id-from-search>", "body": "Thanks — sounds good.\n" } }
+   ```
+
+2. **List drafts** (get `draftId` if needed):
+   ```json
+   { "tool": "list_drafts", "arguments": {} }
+   ```
+
+3. **Send** (optional `dryRun: true` first):
+   ```json
+   { "tool": "send_draft", "arguments": { "draftId": "<uuid-from-step-1-or-2>" } }
+   ```
+
+Same behavior as CLI: on success the draft file moves to **`data/sent/`**. For **LLM-guided revision** of an existing draft, use **`zmail draft edit <id> "…"`** as a subprocess (no MCP tool yet).
 
 ### People discovery workflow
 

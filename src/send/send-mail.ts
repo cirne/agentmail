@@ -7,6 +7,7 @@ import { assertSendRecipientsAllowed } from "./recipients";
 import { createSmtpTransport } from "./transport";
 import { loadThreadingFromSourceMessage } from "./threading";
 import { readDraft } from "./draft-store";
+import { draftMarkdownToPlainText } from "./draft-body-plain";
 
 export interface SendSimpleFields {
   to: string[];
@@ -206,10 +207,10 @@ export async function sendDraftById(
       cc: fm.cc,
       bcc: fm.bcc,
       subject: fm.subject ?? "(no subject)",
-      text: draft.body,
+      text: draftMarkdownToPlainText(draft.body),
       inReplyTo,
       references,
     },
-    { dryRun: options.dryRun, env: options.env, db: options.db, maildirPath: options.maildirPath }
+  { dryRun: options.dryRun, env: options.env, db: options.db, maildirPath: options.maildirPath }
   );
 }

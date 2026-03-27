@@ -20,3 +20,15 @@ export {
   type DraftKind,
 } from "./draft-store";
 export { loadThreadingFromSourceMessage, normalizeMessageId } from "./threading";
+export {
+  loadForwardSourceExcerpt,
+  composeForwardDraftBody,
+  type ForwardSourceExcerpt,
+} from "./load-message-body";
+export { draftMarkdownToPlainText } from "./draft-body-plain";
+export {
+  rewriteDraftWithInstruction,
+  type RewriteDraftResult,
+  type RewriteDraftWithInstructionOptions,
+  type RewriteDraftLlmComplete,
+} from "./draft-rewrite";

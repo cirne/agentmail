@@ -99,9 +99,9 @@ Clarity about what we don't do is as important as what we do.
 
 - **Not a replacement for Gmail/Outlook.** Users keep their existing provider. zmail is an intelligence layer in front of the provider, not a standalone mail client.
 - **Not an API proxy.** We don't forward queries to providers. We build a local dataset and query it directly.
-- **Not yet a write interface.** Today we are read-only — search, fetch, summarize. Send is in the vision (see [VISION.md](./VISION.md) — "The Full Loop"). Send is blocked on customer validation for core search/index/onboarding — we want to nail that first.
+- **Outbound mail is optional and gated.** Core value remains deep, fast, intelligent *read* access (search, fetch, summarize). **Send** is available via SMTP send-as-user (`zmail draft`, `zmail send`; see [VISION.md](./VISION.md) — "The Full Loop" and [ARCHITECTURE.md](./ARCHITECTURE.md) ADR-024). Dev defaults restrict recipients unless production send is enabled.
 
-This sequencing is intentional. The underserved problem is deep, fast, intelligent *read* access. Once that works reliably for new users, send completes the loop.
+This sequencing is intentional. We nail read for new users first; send completes the agent loop for those who configure it.
 
 ---
 

@@ -37,8 +37,8 @@ When you’re in Claude Code (or another coding agent) with zmail wired up, thes
 - **“When is my flight to Cabo taking off? What’s my confirmation number?”**  
   Agent: search for Cabo/travel/booking emails, find the itinerary or confirmation, return departure time and confirmation number.
 
-- **"RSVP yes to the dinner invite from Sarah."** *(future)*  
-  Agent: find the invite, draft "Yes, I'll be there. Thanks!", confirm with user, send via zmail. No inbox. No compose. Just intent.
+- **"RSVP yes to the dinner invite from Sarah."**  
+  Agent: find the invite (`zmail search` / `read`), **`zmail draft reply`** (and **`zmail draft edit "…"`** to refine with the LLM), confirm with user, **`zmail send <draft-id>`**. Same loop via MCP (`create_draft`, `send_draft`). No inbox UI. No compose window.
 
 In each case: **user asks in plain language → LLM issues zmail search / zmail read (or thread) (and attachment) calls → LLM assembles the answer.** No inbox opening, no manual digging. Reliable and fast.
 
@@ -321,9 +321,9 @@ Examples:
 
 # The Full Loop: Inbox + Outbox
 
-Today zmail is read-only — search, fetch, summarize. The end state is **read + write**: the agent is the complete interface. You never open your inbox. You never open a compose window.
+Today zmail covers **read + write** for the core loop: sync and index (IMAP), search and read locally, then **draft and send** (SMTP send-as-user through the same provider). The product end state is unchanged: the agent is the complete interface. You never open your inbox. You never open a compose window.
 
-**How it works:** zmail syncs mail (IMAP), indexes it, and exposes search + read to the agent. Add send (SMTP via the user's existing provider) and the loop closes: the agent can draft and send on your behalf. Notification → intent → draft → confirm → send. All through the agent.
+**How it works:** zmail syncs mail (IMAP), indexes it, and exposes search + read to the agent. SMTP (same credentials as IMAP where the provider supports it) closes the loop: the agent can draft and send on your behalf. Notification → intent → draft → confirm → send. All through the agent.
 
 **Killer differentiators** (beyond "agent can send"):
 
@@ -331,11 +331,11 @@ Today zmail is read-only — search, fetch, summarize. The end state is **read +
 
 2. **Tagline as advertisement** — Every sent email carries a subtle footer: "Sent via zmail." Free distribution. Configurable.
 
-3. **Intent-to-action** — OpenClaw + zmail already surfaces what matters. Add send: user says "rsvp yes" → agent finds the invite, drafts the reply, confirms, sends. No inbox. No compose. Just intent.
+3. **Intent-to-action** — OpenClaw + zmail already surfaces what matters. With send: user says "rsvp yes" → agent finds the invite, drafts the reply, confirms, sends. No inbox. No compose. Just intent.
 
 **Architecture:** SMTP (send-as-user through Gmail/Outlook/Fastmail) — same credentials, same identity, messages appear in Sent, zero deliverability risk. The provider stays the source of truth; zmail is the intelligence layer in front of it.
 
-**Sequencing:** Send is blocked on customer validation for core search/index/onboarding. We want to nail that first.
+**Sequencing:** Outbound mail ships as SMTP send-as-user (see [ARCHITECTURE.md](./ARCHITECTURE.md) ADR-024). We continue to harden search, index, and onboarding first; send completes the loop for agents who enable it.
 
 ---
 

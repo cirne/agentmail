@@ -1,6 +1,6 @@
 # OPP-011: Send Email — Draft + SMTP
 
-**Status:** **Partially implemented** (2026-03). Core SMTP + local drafts + MCP tools are in the repo; product sequencing may still treat broad “send” promotion as gated on customer validation for read/sync/search — see **Blocked by** below.
+**Status:** **Shipped in repo** (2026-03). SMTP send-as-user, local drafts, LLM **`draft edit`**, literal **`draft rewrite`**, Markdown→plain on send, forward body inlining from raw maildir, optional SMTP verify in setup/wizard, and MCP send/draft tools are implemented; product sequencing may still treat broad *marketing* emphasis on send as gated on read/sync validation — see **Blocked by** below.
 
 **Canonical technical decisions:** [ADR-024](../ARCHITECTURE.md#adr-024-outbound-email--smtp-send-as-user--local-drafts) in [ARCHITECTURE.md](../ARCHITECTURE.md).
 
@@ -20,7 +20,7 @@ zmail was read-only for outbound mail until this work. The vision (see [VISION.m
 ### Local drafts
 
 - **On disk:** `{dataDir}/drafts/<uuid>.md` — YAML frontmatter + body; `{dataDir}/sent/` holds archived draft files after successful send.
-- **CLI:** `zmail draft new|reply|forward|list|view|edit` — mutating commands print JSON (use `--text` for human-oriented output).
+- **CLI:** `zmail draft new|reply|forward|list|view|edit|rewrite` — **`edit <id> <instruction…>`** = LLM revises draft (OpenAI); **`rewrite <id> <body…>`** = literal body replace; default JSON; **`--text`** = full human-readable draft (same layout as **`draft view`**).
 - **Reply:** `threadId` / `sourceMessageId` stored; `In-Reply-To` / `References` for **reply** sends are built from the source message’s raw maildir file (not from SQLite columns).
 
 ### Dev/test safety
@@ -57,28 +57,27 @@ Add send capability via SMTP (send-as-user through Gmail/Outlook/Fastmail). Same
 
 | Item | Status |
 |------|--------|
-| `zmail send` (flags + `--raw` + `<draft-id>`) | Done |
-| `zmail draft list|view|edit|new|reply|forward` | Done |
-| Mutating commands print full draft JSON (default) | Done |
-| `draft edit` non-interactive (`--body`, `--body-file`, flags) | Done |
-| `--dry-run` on `zmail send` | Done |
-| Markdown body → plain text (rich conversion) | **Not done** — body sent as stored (plain / literal) |
-| Forward: inline quoted original body in draft | **Partial** — placeholder text; fetch from raw at send time not fully implemented |
-| Optional `validateSmtp` during `zmail setup` | **Not done** — optional follow-up |
-| Fake-SMTP integration tests in CI | **Partial** — unit tests for resolve/allowlist/drafts/threading; no `smtp-server` devDependency yet |
+| `zmail send` (flags + `--raw` + `<draft-id>` + `--dry-run`) | Done |
+| `zmail draft list|view|new|reply|forward|edit|rewrite` | Done |
+| `draft edit <id> <instruction…>` (LLM revision) | Done |
+| `draft rewrite <id> <body…>` (literal) + optional `--subject` / `--to` / `--body-file` | Done |
+| Mutating draft commands: JSON default; **`--text`** = full draft (reuse `formatDraftViewText`) | Done |
+| Markdown body → plain text at send (`sendDraftById`) | Done |
+| Forward: inline quoted original from raw maildir | Done |
+| Optional SMTP `verify()` in `zmail setup` / `zmail wizard` (skipped with `--no-validate`) | Done |
+| MCP: `draft edit` equivalent | **Not done** — use CLI subprocess or agent edits `body` + `create_draft` |
+| Fake-SMTP integration tests in CI | **Partial** — unit tests; optional `smtp-server` devDependency |
 
 ---
 
 ## Remaining work (prioritized)
 
-1. **Product / docs polish:** Remove or relax the dev-only recipient allowlist for production installs (keep `ZMAIL_SEND_PRODUCTION` or replace with a clearer policy); document in user-facing skill/README when “send” is considered stable.
-2. **Setup:** Optional SMTP `verify()` during `zmail setup` (or document defer-first-send only).
-3. **Bodies:** Deterministic Markdown → plain text at send time if we want Markdown drafts to render cleanly in all clients.
-4. **Forward:** Optionally inline forwarded message body from raw maildir at send or draft time.
-5. **Testing:** Optional `smtp-server` (or transport mock) integration test for `sendMail` envelope; MCP tool tests for send/draft tools.
-6. **OAuth2 SMTP** for providers that disable app passwords (follow-up opp or section of this doc).
-7. **IMAP Append to Drafts** so local drafts appear in Gmail Drafts UI (optional).
-8. **Phase 3 (vision):** Voice profile from sent history; “Sent via zmail” tagline; deeper intent-to-action flows.
+1. **Product / docs polish:** Remove or relax the dev-only recipient allowlist for production installs (keep `ZMAIL_SEND_PRODUCTION` or replace with a clearer policy).
+2. **Testing:** Optional `smtp-server` (or transport mock) integration test for `sendMail` envelope; richer MCP tool tests.
+3. **MCP:** Optional `rewrite_draft` / `edit_draft` tools matching CLI semantics.
+4. **OAuth2 SMTP** for providers that disable app passwords (follow-up opp or section of this doc).
+5. **IMAP Append to Drafts** so local drafts appear in Gmail Drafts UI (optional).
+6. **Phase 3 (vision):** Voice profile from sent history; “Sent via zmail” tagline; deeper intent-to-action flows.
 
 ---
 
@@ -86,11 +85,11 @@ Add send capability via SMTP (send-as-user through Gmail/Outlook/Fastmail). Same
 
 Treat each outgoing message as a **draft object** with a stable id, stored under the zmail data directory (`drafts/` + `sent/`). State machine: **create → iterate → send**.
 
-**Contract for agents** (implemented): mutating commands print JSON; stable draft ids; `draft edit` supports non-interactive flags.
+**Contract for agents** (implemented): mutating commands print JSON by default (or **`--text`** for human-readable full draft); stable draft ids; **`draft edit`** takes a natural-language instruction; **`draft rewrite`** replaces body text literally.
 
 ### Draft file format (on disk)
 
-Markdown with YAML frontmatter — see `src/send/draft-store.ts`. Forward example with preamble remains a future enhancement for auto-inlined bodies.
+Markdown with YAML frontmatter — see `src/send/draft-store.ts`. **Forward** drafts include an inlined quoted original from the source message’s raw `.eml` when created (CLI + MCP `create_draft` forward).
 
 **Local drafts vs provider Drafts:** Pre-send drafts live under zmail’s data dir only; they do **not** sync to IMAP `Drafts` in v1.
 

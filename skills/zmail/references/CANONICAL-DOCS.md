@@ -10,7 +10,7 @@ This file is for the **end-user `/zmail` skill** (`skills/zmail/`). For **develo
 
 **Discovery order (recommended):**
 
-1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — full overview, including when to use **`zmail ask`** vs **`search` / `read` / `thread` / `who` / `attachment` / `inbox`**, and where to read more (`docs/ASK.md`, `docs/MCP.md`).
+1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — full overview, including when to use **`zmail ask`** vs **`search` / `read` / `thread` / `who` / `attachment` / `inbox`**, the **draft + send** loop (`zmail draft`, `zmail send <draft-id>`), and where to read more (`docs/ASK.md`, `docs/MCP.md`).
 2. **`zmail <command> --help`** — flags and examples for that command (e.g. `zmail search --help`, `zmail who --help`, `zmail attachment list --help`).
 3. **Run a command** and read the **structured output** — zmail **embeds hints** so you learn the next step without opening docs (see below).
 

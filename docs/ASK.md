@@ -293,6 +293,18 @@ See [OPP-020](../opportunities/OPP-020-answer-engine-local-agent.md) for roadmap
 
 ---
 
+## Compose: `draft` + `send` (orthogonal to `ask`)
+
+**`zmail ask`** answers questions **about** mail; it does not send email. The **core outbound loop** is separate:
+
+1. **`zmail draft new` / `reply` / `forward`** — create a local draft (`data/drafts/`, Markdown + YAML).
+2. **`zmail draft edit <id> "natural language instruction"`** — LLM revises the draft (requires OpenAI key). **`zmail draft rewrite <id> …`** replaces the body literally (no LLM).
+3. **`zmail send <draft-id>`** — SMTP send-as-user; successful send archives the file under **`data/sent/`**. Use **`--dry-run`** first.
+
+Default output is **JSON**; **`--text`** on draft subcommands prints the same human-readable layout as **`draft view`**. MCP: **`create_draft`**, **`list_drafts`**, **`send_draft`** — see [MCP.md](./MCP.md). Details: [ARCHITECTURE.md § ADR-024](./ARCHITECTURE.md#adr-024-outbound-email--smtp-send-as-user--local-drafts), [OPP-011](./opportunities/OPP-011-send-email.md), publishable skill **`skills/zmail/SKILL.md`**.
+
+---
+
 ## See Also
 
 - [OPP-020](../opportunities/OPP-020-answer-engine-local-agent.md) — Answer engine architecture, phasing, and design philosophy

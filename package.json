@@ -57,6 +57,7 @@
     "nodemailer": "^8.0.4",
     "openai": "^6.27.0",
     "postal-mime": "^2.7.3",
+    "remove-markdown": "^0.6.3",
     "search-query-parser": "^1.6.0",
     "turndown": "^7.2.2",
     "yaml": "^2.8.3"
@@ -72,5 +73,17 @@
     "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"
-  }
+  },
+  "bundleDependencies": [
+    "archiver",
+    "dayjs",
+    "exceljs",
+    "fast-csv",
+    "jszip",
+    "readable-stream",
+    "saxes",
+    "tmp",
+    "unzipper",
+    "uuid"
+  ]
 }
