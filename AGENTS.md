@@ -23,13 +23,13 @@ npm install -g @cirne/zmail
 
 Node.js 20+, TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native addon, OS page cache — not a whole-DB-in-RAM WASM/sql.js model), FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db`). Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
 
-**Native addon ABI:** `npm install` runs **`postinstall`** → `npm rebuild better-sqlite3` for the **current** Node, so the `.node` binary matches `NODE_MODULE_VERSION` (common pain point with `npm i -g` when prebuilds don’t match the runtime). If load still fails, run `npm rebuild better-sqlite3` using the same `node` that executes `zmail`. **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Native addon ABI:** `better-sqlite3` ships a `.node` binary for Node’s `NODE_MODULE_VERSION`. On first `zmail` run, **`ensure-better-sqlite-native`** loads the addon; if the ABI is wrong, it runs **`npm rebuild better-sqlite3`** from the install directory (same as manual `npm rebuild` with the `node` that runs `zmail`). **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
 ## Node.js version (nvm)
 
 **Required for development.** Always use the Node version pinned in [`.nvmrc`](.nvmrc) so it matches **`package.json` → `engines`** and the toolchain behaves consistently.
 
-1. **Before** `npm install`, `npm ci`, `npm run install-cli`, or any install that runs **`postinstall`** / rebuilds native modules, run:
+1. **Before** `npm install`, `npm ci`, `npm run install-cli`, or any install that builds **native** dependencies (`better-sqlite3`), run:
    ```bash
    nvm use
    ```
@@ -95,7 +95,7 @@ See `.cursor/skills/process-feedback/SKILL.md` for the complete workflow. The `d
 **Prerequisite:** `nvm use` (see [Node.js version (nvm)](#nodejs-version-nvm)).
 
 ```bash
-npm install          # runs postinstall: rebuild better-sqlite3 for current Node (engine-strict: Node must match package.json engines, >=20)
+npm install          # builds better-sqlite3 native addon for current Node (engine-strict: Node must match package.json engines, >=20)
 npm run dev          # starts background sync (tsx src/index.ts)
 npm run zmail --     # CLI from repo (e.g. npm run zmail -- search "foo"); the -- passes args
 npm run sync         # initial sync (or: npm run zmail -- sync --since 7d)

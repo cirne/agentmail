@@ -1,6 +1,6 @@
 /**
  * Ensure better-sqlite3's native `.node` matches the *running* Node (NODE_MODULE_VERSION).
- * postinstall rebuild only runs at npm install time; users often switch Node later.
+ * On ABI mismatch, runs `npm rebuild better-sqlite3` from the package root (users may switch Node after install).
  * Side-effect module: import before any `import ... from "better-sqlite3"`.
  */
 import { spawnSync } from "node:child_process";

@@ -23,7 +23,7 @@ This runs **`npm run build`** (compile to `dist/`) then **`npm install -g .`**, 
 ## After install
 
 - Run `zmail` from any directory; config/data default to `~/.zmail` (or `ZMAIL_HOME`).
-- **`postinstall`** runs during `npm install -g .` and rebuilds **`better-sqlite3`** for the Node used by that command.
+- **`better-sqlite3`** is a native addon; first **`zmail`** run may run **`npm rebuild better-sqlite3`** if the addon’s ABI does not match the running Node (`ensure-better-sqlite-native`).
 
 ## Remove
 

@@ -2,14 +2,15 @@
 name: zmail
 description: >-
   Local-first email for agents: IMAP sync to maildir + SQLite (FTS5); CLI search, read, thread, who,
-  attachments. Requires Node 20+, global install via npm (`npm install -g @cirne/zmail`; postinstall
-  rebuilds native better-sqlite3), and IMAP credentials. OpenAI API key required for `zmail setup` /
-  wizard, `zmail ask`, and `zmail inbox`—those features can send email-derived text to OpenAI.
-  Optional `who --enrich` may call third-party search APIs. Source: github.com/cirne/zmail.
+  attachments. Requires Node 20+, npm install (`npm install -g @cirne/zmail` or `npx @cirne/zmail`),
+  native better-sqlite3 (rebuilt on first run if Node ABI mismatch), and IMAP credentials. OpenAI API
+  key required for `zmail setup` / wizard, `zmail ask`, and `zmail inbox`—those features can send
+  email-derived text to OpenAI. Optional `who --enrich` may call third-party search APIs. Source:
+  github.com/cirne/zmail.
 license: "Refer to https://github.com/cirne/zmail for project license and terms."
 compatibility: >-
   Node.js 20+; npm; `zmail` on PATH after global install. Network: IMAP, OpenAI (ask/inbox/setup),
-  optional enrich providers. Disk: ~/.zmail (SQLite + maildir). Native addon: better-sqlite3 (rebuilt on install).
+  optional enrich providers. Disk: ~/.zmail (SQLite + maildir). Native addon: better-sqlite3 (rebuilt on first run if needed).
 metadata:
   version: "0.1.1"
   homepage: "https://github.com/cirne/zmail"
@@ -39,7 +40,7 @@ Use this block to keep **ClawHub / OpenClaw registry fields** aligned with the s
 | Topic | What to declare |
 |--------|------------------|
 | **Provenance** | Source and issues: **[github.com/cirne/zmail](https://github.com/cirne/zmail)** |
-| **Install** | **`npm install -g @cirne/zmail`** (Node **20+**). Package runs **`postinstall`** → rebuilds **`better-sqlite3`** for the current Node/OS (native addon; supply-chain/install risk is the same as any npm global with native deps). If load fails: **`npm rebuild better-sqlite3`** with the same `node` that runs `zmail`. |
+| **Install** | **`npm install -g @cirne/zmail`** or **`npx @cirne/zmail`** (Node **20+**). Native **`better-sqlite3`**; on ABI mismatch, first **`zmail`** run rebuilds via **`ensure-better-sqlite-native`** (or run **`npm rebuild better-sqlite3`** yourself with the same `node` that runs `zmail`). |
 | **On PATH** | Global npm `bin` must be on **`PATH`**, or use **`npx @cirne/zmail`** for one-off invocations. |
 | **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and optional **`zmail who --enrich`**. |
 | **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, and **`who --enrich`** can send **email-derived content** (subjects, snippets, bodies, addresses) to **OpenAI** or other APIs—only use if the **mailbox owner** accepts that. Primitives **`search` / `read` / `thread` / `attachment`** (without enrich) are local index + disk only once mail is synced. |
@@ -70,9 +71,7 @@ node -v   # must be v20+
 npm install -g @cirne/zmail
 ```
 
-- **`postinstall`** rebuilds **`better-sqlite3`** for the current Node. If you see a native load error, run:  
-  `npm rebuild better-sqlite3`  
-  using the **same** `node` binary that runs `zmail`.
+- If **`better-sqlite3`** fails to load (wrong Node ABI), the CLI may rebuild automatically on first run; if not, run **`npm rebuild better-sqlite3`** using the **same** `node` binary that runs `zmail`.
 - **Global install note:** `npm` may install to a directory that is not on `PATH`; ensure that global `bin` is on `PATH`, or use `npx @cirne/zmail` for one-off commands.
 
 Config and data default to **`ZMAIL_HOME`** (default **`~/.zmail`**): `config.json`, `.env`, and `data/` (SQLite + maildir).

@@ -159,7 +159,7 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 **Rationale:**
 - Node.js is ubiquitous; no separate runtime (Bun) required. Aligns with OpenClaw/Claude Code (`npm i -g`).
-- **better-sqlite3** for SQLite — synchronous native binding, **true file-backed** SQLite (suitable for very large `.db` files; RSS bounded by OS cache, not file size). Packaged with **`postinstall` → `npm rebuild better-sqlite3`** so the addon matches the installing Node’s `NODE_MODULE_VERSION` (ADR-023).
+- **better-sqlite3** for SQLite — synchronous native binding, **true file-backed** SQLite (suitable for very large `.db` files; RSS bounded by OS cache, not file size). **Startup ABI recovery** (`ensure-better-sqlite-native`) runs **`npm rebuild better-sqlite3`** when the loaded addon does not match the running Node (ADR-023).
 - `tsx` gives first-class TypeScript in development without a build step.
 - Strong ecosystem for IMAP (`imapflow`) and MCP SDK.
 
@@ -523,13 +523,13 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ---
 
-### ADR-023: SQLite Access — File-Backed Native + Async Facade + Install-Time Rebuild
+### ADR-023: SQLite Access — File-Backed Native + Async Facade + ABI Recovery
 
 **Decision:** Keep **file-backed** SQLite using **`better-sqlite3`** (native addon). Do **not** use an in-process model that loads the entire database file into JS/WASM heap for production (e.g. sql.js `readFile` → `Database(uint8)` / `export()` persistence), which would make RSS scale with DB size — unacceptable for very large mailstores.
 
 **Application API:** Expose a narrow **`SqliteDatabase`** interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by a small adapter around `better-sqlite3`. All CLI, sync, search, MCP, and ask code paths **`await`** DB operations so the surface is consistently async even though the underlying driver is synchronous.
 
-**Packaging / ABI:** `package.json` **`postinstall`** runs **`npm rebuild better-sqlite3`** for the **current** Node when `node_modules` is present. That aligns the prebuilt or freshly compiled `.node` with the runtime’s **`NODE_MODULE_VERSION`**, reducing `ERR_DLOPEN_FAILED` after **`npm install -g`** when install-time Node ≠ runtime Node. **Startup recovery:** if the addon still fails to load (e.g. the user switched Node after install), `ensure-better-sqlite-native` runs **`npm rebuild better-sqlite3`** from the `@cirne/zmail` install directory and retries; set **`ZMAIL_SKIP_NATIVE_SQLITE_ENSURE=1`** to skip (e.g. constrained environments). **Repo dev:** **`.npmrc`** **`engine-strict=true`** enforces **`package.json` `engines`**. Documented manual fallback when recovery fails: run **`npm rebuild better-sqlite3`** with the same `node` that runs `zmail`.
+**Packaging / ABI:** There is **no** `postinstall` rebuild. **`better-sqlite3`’s** own install may supply a matching prebuild; if loading fails with a **`NODE_MODULE_VERSION`** / ABI mismatch (common after **`npm install -g`** or switching Node), **`ensure-better-sqlite-native`** (imported before **`better-sqlite3`**) runs **`npm rebuild better-sqlite3`** from the **`@cirne/zmail`** install directory and retries. Set **`ZMAIL_SKIP_NATIVE_SQLITE_ENSURE=1`** to skip (e.g. constrained environments). **Repo dev:** **`.npmrc`** **`engine-strict=true`** enforces **`package.json` `engines`**. Manual fallback when recovery fails: run **`npm rebuild better-sqlite3`** with the same `node` that runs `zmail`.
 
 **Global install vs `overrides`:** For **`npm install -g`**, npm’s install root is the global prefix, so **`overrides` in `@cirne/zmail/package.json` are not applied** to the dependency tree the way they are in a repo-root install. **`bundledDependencies`** (the **`exceljs`** stack) ships the maintainer’s resolved **`node_modules` subtrees** in the published tarball so global installs pick up the same pinned/override-resolved versions. Remaining install noise is mostly **`prebuild-install`** (from **`better-sqlite3`**) until that chain changes upstream.
 

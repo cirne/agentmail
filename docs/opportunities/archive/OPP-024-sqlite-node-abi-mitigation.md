@@ -13,7 +13,7 @@ when the addon was built or prebuilt for a different Node than the one running `
 
 ## Direction (implemented)
 
-1. **`package.json` `postinstall`** — runs `npm rebuild better-sqlite3` for the **current** Node when `node_modules` exists, so the addon matches the installing runtime in the common case.
+1. **`ensure-better-sqlite-native`** — on first load of `better-sqlite3`, if the native addon’s ABI does not match the running Node, runs `npm rebuild better-sqlite3` from the `@cirne/zmail` package root and retries (no `postinstall`; rebuild happens at first `zmail` run when needed).
 2. **Async `SqliteDatabase` facade** — narrow interface (`exec`, `prepare` → async `run` / `get` / `all`, `close`) implemented by `src/db/better-sqlite-adapter.ts` around `better-sqlite3`. Call sites use `await` consistently (CLI, sync, search, MCP, ask).
 3. **Documentation** — [ADR-023](../../ARCHITECTURE.md) in `docs/ARCHITECTURE.md`; install / fallback notes in [AGENTS.md](../../AGENTS.md).
 4. **Schema / data** — On schema or packaging changes that invalidate the DB: bump `SCHEMA_VERSION`, delete DB + WAL sidecars, **rebuild from maildir** (no row migration). Same as [ADR-021](../../ARCHITECTURE.md).
@@ -29,4 +29,4 @@ If load still fails: run **`npm rebuild better-sqlite3`** using the **same** `no
 
 ## See also
 
-- [ADR-023: SQLite access — file-backed native + async facade + install-time rebuild](../../ARCHITECTURE.md#adr-023-sqlite-access--file-backed-native--async-facade--install-time-rebuild)
+- [ADR-023: SQLite access — file-backed native + async facade + ABI recovery](../../ARCHITECTURE.md#adr-023-sqlite-access--file-backed-native--async-facade--abi-recovery)
