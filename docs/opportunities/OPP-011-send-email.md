@@ -29,7 +29,7 @@ zmail was read-only for outbound mail until this work. The vision (see [VISION.m
 
 ### Out of scope for this first pass (unchanged intent)
 
-- Mailgun/SendGrid-style relays as default; OAuth2-only SMTP; voice profile; tagline; IMAP `Drafts` folder sync.
+- Mailgun/SendGrid-style relays as default; OAuth2-only SMTP; **configurable signatures** (see [Key requirement](#key-requirement-configurable-signatures) below); voice profile; tagline; IMAP `Drafts` folder sync.
 
 ---
 
@@ -78,6 +78,19 @@ Add send capability via SMTP (send-as-user through Gmail/Outlook/Fastmail). Same
 4. **OAuth2 SMTP** for providers that disable app passwords (follow-up opp or section of this doc).
 5. **IMAP Append to Drafts** so local drafts appear in Gmail Drafts UI (optional).
 6. **Phase 3 (vision):** Voice profile from sent history; “Sent via zmail” tagline; deeper intent-to-action flows.
+7. **Signatures (key requirement):** See [Key requirement: configurable signatures](#key-requirement-configurable-signatures) below.
+
+---
+
+## Key requirement: configurable signatures
+
+**Not implemented yet.** Outbound mail should support **one or more user-defined signatures**, stored in the same configuration surface as the rest of zmail (e.g. `signatures` in `~/.zmail/config.json`, or a dedicated file under `ZMAIL_HOME` referenced from config — single canonical location TBD in ADR/config schema).
+
+- **User control:** Each signature is a named block (e.g. `"work"`, `"personal"`) or ordered list; drafts/send pick a default or an explicit id. Format: plain text and/or Markdown with deterministic conversion at send (aligned with existing draft→plain behavior).
+- **Onboarding / wizard (optional):** Use an LLM **once during setup** (or a `zmail setup --suggest-signatures` flow) to **recommend** candidate signatures by scanning **historically sent mail** already synced into the local index — e.g. detect recurring closings, title/phone blocks, disclaimers — without guessing secrets. User confirms or edits before persisting to config.
+- **Agent use:** MCP/CLI should expose enough metadata (active signature id, list of ids) that agents append the right closing when creating or editing drafts.
+
+This is distinct from the broader **voice profile** phase (tone/length per recipient); signatures are explicit, user-owned text the model should not invent without config.
 
 ---
 
