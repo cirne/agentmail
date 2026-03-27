@@ -29,6 +29,7 @@ import { emptySyncResult, printRefreshStyleOutput } from "~/cli/refresh-output";
 import type { RefreshPreviewRow } from "~/lib/refresh-preview";
 import { parseInboxWindowToIsoCutoff } from "~/inbox/parse-window";
 import { runInboxScan } from "~/inbox/scan";
+import { sortRowsBySenderContactRank } from "~/search/owner-contact-stats";
 import {
   isNodeNativeAddonAbiError,
   printBetterSqliteAbiMismatchHint,
@@ -181,9 +182,10 @@ interface ParsedWhoArgs {
 }
 
 function whoUsage() {
-  console.error("Usage: zmail who <query> [flags]");
+  console.error("Usage: zmail who [query] [flags]");
+  console.error("  (no query)         top contacts by activity / contact rank (same --limit cap)");
   console.error("  --text             human-readable table output (default: JSON)");
-  console.error("  --limit <n>        max results (default: 50)");
+  console.error("  --limit <n>        max people returned (default: 50; broad queries cap earlier stages too)");
   console.error("  --min-sent <n>     minimum sent count");
   console.error("  --min-received <n> minimum received count");
   console.error("  --all              include noreply/bot addresses");
@@ -273,9 +275,6 @@ function parseWhoArgs(rawArgs: string[]): ParsedWhoArgs {
   }
 
   parsed.query = queryParts.join(" ").trim();
-  if (!parsed.query) {
-    throw new Error("Provide a query (e.g. zmail who tom).");
-  }
 
   return parsed;
 }
@@ -661,7 +660,7 @@ function getUnknownCommandHint(unknownCommand: string): string {
     return "Use: zmail read <message_id>, zmail search \"<query>\", or zmail ask \"<question>\" for a summarized answer.";
   }
   if (c === "find" || c === "lookup") {
-    return "Use: zmail search \"<query>\", zmail who <query>, or zmail ask \"<question>\".";
+    return "Use: zmail search \"<query>\", zmail who [query], or zmail ask \"<question>\".";
   }
   return "Run 'zmail' for usage.";
 }
@@ -1009,6 +1008,7 @@ async function main() {
           limit: effectiveLimit,
           includeThreads: parsed.threads,
           includeNoise: parsed.includeNoise,
+          ownerAddress: config.imap.user?.trim() || undefined,
         });
       } catch (err) {
         console.error(err instanceof Error ? err.message : String(err));
@@ -1156,7 +1156,11 @@ async function main() {
         break;
       }
 
-      console.log(`People matching "${result.query}":\n`);
+      const whoHeading =
+        result.query.trim().length > 0
+          ? `People matching "${result.query}"`
+          : "Top contacts";
+      console.log(`${whoHeading}:\n`);
       for (const p of result.people) {
         // Display name: use firstname/lastname if available, otherwise name field
         const name = (p.firstname && p.lastname) 
@@ -1180,7 +1184,7 @@ async function main() {
           console.log(`    URLs: ${p.urls.join(", ")}`);
         }
         console.log(
-          `    Counts: ${p.sentCount} sent, ${p.receivedCount} received, ${p.mentionedCount} mentioned`
+          `    Counts: ${p.sentCount} thread-starts, ${p.repliedCount} replies, ${p.receivedCount} received, ${p.mentionedCount} cc-mentions (contact rank ${p.contactRank.toFixed(2)})`
         );
         if (p.lastContact) {
           console.log(`    Last contact: ${p.lastContact}`);
@@ -1339,7 +1343,9 @@ async function main() {
           isNoise: number;
         }>;
         const filtered = includeNoise ? rows : rows.filter((r) => r.isNoise === 0);
-        const base = filtered.slice(0, 10).map((r) => ({
+        const ownerForRank = config.imap.user?.trim() || undefined;
+        const ranked = await sortRowsBySenderContactRank(db, ownerForRank, filtered);
+        const base = ranked.slice(0, 10).map((r) => ({
           messageId: r.messageId,
           date: r.date,
           fromAddress: r.fromAddress,
@@ -1420,6 +1426,7 @@ async function main() {
         const scanResult = await runInboxScan(db, {
           cutoffIso,
           includeNoise,
+          ownerAddress: config.imap.user?.trim() || undefined,
         });
         newMail = scanResult.newMail;
         candidatesScanned = scanResult.candidatesScanned;

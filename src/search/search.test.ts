@@ -759,5 +759,97 @@ describe("search", () => {
       expect(results.length).toBe(0);
     });
   });
-});
+
+  });
+
+  describe("OPP-027 contact rank (search)", () => {
+    it("ranks a frequent correspondent higher when body match strength is similar", async () => {
+      const owner = "me@example.com";
+      const friend = "friend@example.com";
+      const stranger = "stranger@example.com";
+      const tieBody = "zzopp027tiekeywordzz same text for both";
+      for (let i = 0; i < 12; i++) {
+        await insertTestMessage(db, {
+          fromAddress: owner,
+          toAddresses: JSON.stringify([friend]),
+          bodyText: "history bulk",
+          subject: "hist",
+        });
+      }
+      await insertTestMessage(db, {
+        fromAddress: friend,
+        toAddresses: JSON.stringify([owner]),
+        bodyText: "reply",
+        subject: "hist",
+      });
+      await insertTestMessage(db, {
+        messageId: "<tie-friend@x>",
+        fromAddress: friend,
+        toAddresses: JSON.stringify([owner]),
+        bodyText: tieBody,
+        subject: "Tie friend",
+      });
+      await insertTestMessage(db, {
+        messageId: "<tie-stranger@x>",
+        fromAddress: stranger,
+        toAddresses: JSON.stringify([owner]),
+        bodyText: tieBody,
+        subject: "Tie stranger",
+      });
+
+      const results = await search(db, {
+        query: "zzopp027tiekeywordzz",
+        limit: 10,
+        ownerAddress: owner,
+      });
+      expect(results.length).toBeGreaterThanOrEqual(2);
+      expect(results[0].fromAddress).toBe(friend);
+    });
+
+    it("filter-only search reranks by contact rank when owner is set", async () => {
+      const owner = "me@example.com";
+      const friend = "friend@example.com";
+      const stranger = "stranger@example.com";
+      for (let i = 0; i < 8; i++) {
+        await insertTestMessage(db, {
+          fromAddress: owner,
+          toAddresses: JSON.stringify([friend]),
+          bodyText: "bulk",
+          subject: "s",
+          date: "2023-06-01T12:00:00Z",
+        });
+      }
+      await insertTestMessage(db, {
+        fromAddress: friend,
+        toAddresses: JSON.stringify([owner]),
+        bodyText: "hi",
+        subject: "s",
+        date: "2023-06-02T12:00:00Z",
+      });
+      await insertTestMessage(db, {
+        fromAddress: friend,
+        toAddresses: JSON.stringify([owner]),
+        bodyText: "in window",
+        subject: "s",
+        date: "2024-06-01T12:00:00Z",
+      });
+      await insertTestMessage(db, {
+        messageId: "<new-stranger@x>",
+        fromAddress: stranger,
+        toAddresses: JSON.stringify([owner]),
+        bodyText: "in window",
+        subject: "s",
+        date: "2024-06-10T12:00:00Z",
+      });
+
+      const results = await search(db, {
+        afterDate: "2024-01-01",
+        limit: 5,
+        ownerAddress: owner,
+      });
+      expect(results.length).toBe(2);
+      expect(results[0].fromAddress).toBe(friend);
+    });
+  });
+
 });

@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import type { SqliteDatabase } from "~/db";
 import { createTestDb, insertTestMessage } from "~/db/test-helpers";
+import { normalizeAddress } from "./normalize";
 import { who } from "./who";
 
 /** Insert a message with full control over from/to/cc for who() tests. */
@@ -14,10 +15,11 @@ async function insertMessage(
     ccAddresses?: string[];
     subject?: string;
     date?: string;
+    threadId?: string;
   }
 ): Promise<void> {
   const messageId = opts.messageId;
-  const threadId = "thread-1";
+  const threadId = opts.threadId ?? "thread-1";
   const to = JSON.stringify(opts.toAddresses ?? []);
   const cc = JSON.stringify(opts.ccAddresses ?? []);
   const subject = opts.subject ?? "Test";
@@ -49,6 +51,22 @@ describe("who", () => {
     const result = await queryWho("nonexistent");
     expect(result.query).toBe("nonexistent");
     expect(result.people).toEqual([]);
+  });
+
+  it("with empty query returns top contacts capped by limit", async () => {
+    await insertMessage(db, {
+      messageId: "<a>",
+      fromAddress: "zebra@example.com",
+      fromName: "Zebra",
+    });
+    await insertMessage(db, {
+      messageId: "<b>",
+      fromAddress: "alpha@example.com",
+      fromName: "Alpha",
+    });
+    const result = await who(db, { query: "", limit: 1 });
+    expect(result.query).toBe("");
+    expect(result.people).toHaveLength(1);
   });
 
   it("matches identity by from_address", async () => {
@@ -100,8 +118,8 @@ describe("who", () => {
     const result = await queryWho("recipient");
     expect(result.people.length).toBe(1);
     expect(result.people[0].primaryAddress).toBe("recipient@example.com");
-    // No display name - should be null
-    expect(result.people[0].name).toBeNull();
+    // No display name - omit name fields from JSON-shaped result
+    expect(result.people[0].name).toBeUndefined();
     expect(result.people[0].firstname).toBeUndefined();
     expect(result.people[0].lastname).toBeUndefined();
     expect(result.people[0].sentCount).toBe(0);
@@ -240,8 +258,75 @@ describe("who", () => {
     expect(result.people[0].primaryAddress.toLowerCase()).toBe("tombig@example.com");
   });
 
-  describe("with ownerAddress (sent = I sent to them, received = from them to me, mentioned = in to/cc not sender)", () => {
+  describe("with ownerAddress (OPP-027 owner-centric)", () => {
     const me = "me@example.com";
+
+    it("sent+replied equals owner messages to peer (per thread)", async () => {
+      const peer = "peer@example.com";
+      await insertMessage(db, {
+        messageId: "<t1a>",
+        threadId: "t1",
+        fromAddress: me,
+        toAddresses: [peer],
+        date: "2020-01-01T12:00:00.000Z",
+      });
+      await insertMessage(db, {
+        messageId: "<t1b>",
+        threadId: "t1",
+        fromAddress: me,
+        toAddresses: [peer],
+        date: "2020-01-02T12:00:00.000Z",
+      });
+      await insertMessage(db, {
+        messageId: "<t2a>",
+        threadId: "t2",
+        fromAddress: me,
+        toAddresses: [peer],
+        date: "2020-01-03T12:00:00.000Z",
+      });
+
+      const result = await who(db, { query: "peer", ownerAddress: me });
+      const p = result.people.find((x) => x.primaryAddress === "peer@example.com");
+      expect(p).toBeDefined();
+      expect(p!.sentCount + p!.repliedCount).toBe(3);
+    });
+
+    it("sorts by contact rank over fuzzy match: frequent correspondent before rare better lexical match", async () => {
+      const owner = "owner@example.com";
+      const frequentAddr = "sterling.freq@example.com";
+      const frequentNorm = normalizeAddress(frequentAddr);
+      const rareAddr = "rare@example.com";
+      // High volume with owner (contact rank >>)
+      for (let i = 0; i < 15; i++) {
+        await insertMessage(db, {
+          messageId: `<freq-${i}>`,
+          threadId: `th-${i}`,
+          fromAddress: owner,
+          toAddresses: [frequentAddr],
+          date: new Date(2024, 5, i + 1).toISOString(),
+        });
+      }
+      await insertMessage(db, {
+        messageId: "<freq-in>",
+        threadId: "th-in",
+        fromAddress: frequentAddr,
+        toAddresses: [owner],
+        date: "2024-07-01T12:00:00.000Z",
+      });
+      // Rare: strong name match for "sterling", tiny traffic
+      await insertMessage(db, {
+        messageId: "<rare1>",
+        fromAddress: rareAddr,
+        fromName: "Sterling Rarematch",
+        toAddresses: [owner],
+        date: "2024-01-01T12:00:00.000Z",
+      });
+
+      const result = await who(db, { query: "sterling", ownerAddress: owner, limit: 10 });
+      expect(result.people.length).toBeGreaterThanOrEqual(2);
+      expect(result.people[0].primaryAddress).toBe(frequentNorm);
+      expect(result.people[0].contactRank).toBeGreaterThan(result.people[1].contactRank);
+    });
 
     it("counts sent as emails owner sent to person, received as from person to owner, mentioned as person in to/cc but not sender", async () => {
       // I send to Tim and Donna

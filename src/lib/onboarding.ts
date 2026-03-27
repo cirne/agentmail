@@ -19,7 +19,7 @@ Usage:
   zmail rebuild-index              Wipe SQLite and reindex from local maildir (same as schema bump; dev/test)
   zmail ask "<question>" [--verbose]   Answer a natural-language question (zmail orchestrates search/read; needs OpenAI key: ZMAIL_OPENAI_API_KEY or OPENAI_API_KEY)
   zmail search <query> [flags]    Search email (FTS5 full-text search)
-  zmail who <query> [flags]       Find people by address or name (use --help for flags)
+  zmail who [query] [flags]       Find people by address or name; omit query for top contacts (see --help)
   zmail status [--imap]           Show sync and indexing status (--imap for IMAP server comparison, may take 10+ seconds)
   zmail stats                     Show database statistics
   zmail thread <id> [--json]      Fetch thread (text by default; --json for structured output)

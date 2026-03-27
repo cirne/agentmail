@@ -109,7 +109,7 @@ npm run eval         # run eval suite (LLM-based evaluation tests, requires ZMAI
 ### CLI Commands
 
 zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--text] [--result-format auto|full|slim] [--ids-only]
-zmail who <query> [--limit n] [--enrich] [--text]
+zmail who [query] [--limit n] [--enrich] [--text]  (omit query for top contacts)
 zmail read <message_id> [--raw]
 zmail thread <thread_id> [--json] [--raw]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress

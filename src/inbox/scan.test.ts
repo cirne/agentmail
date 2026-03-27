@@ -46,6 +46,60 @@ describe("runInboxScan", () => {
     ]);
   });
 
+  it("orders LLM candidates by sender contact rank when ownerAddress is set", async () => {
+    const db = await createTestDb();
+    const owner = "me@example.com";
+    const friend = "friend@example.com";
+    const bulk = "bulk@example.com";
+    const old = new Date(Date.now() - 20 * 24 * 60 * 60 * 1000).toISOString();
+    for (let i = 0; i < 6; i++) {
+      await insertTestMessage(db, {
+        fromAddress: owner,
+        toAddresses: JSON.stringify([friend]),
+        date: old,
+        subject: "hist",
+      });
+    }
+    await insertTestMessage(db, {
+      fromAddress: friend,
+      toAddresses: JSON.stringify([owner]),
+      date: old,
+      subject: "hist",
+    });
+    const recent = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString();
+    for (let i = 0; i < 25; i++) {
+      await insertTestMessage(db, {
+        fromAddress: bulk,
+        toAddresses: JSON.stringify([owner]),
+        date: recent,
+        subject: "n",
+      });
+    }
+    await insertTestMessage(db, {
+      messageId: "<f-recent@x>",
+      fromAddress: friend,
+      toAddresses: JSON.stringify([owner]),
+      date: recent,
+      subject: "from friend",
+    });
+
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+    let firstInFirstBatch: string | undefined;
+    await runInboxScan(db, {
+      cutoffIso: cutoff,
+      includeNoise: true,
+      ownerAddress: owner,
+      batchSize: 20,
+      classifyBatch: async (batch) => {
+        if (firstInFirstBatch === undefined && batch.length > 0) {
+          firstInFirstBatch = batch[0].messageId;
+        }
+        return [];
+      },
+    });
+    expect(firstInFirstBatch).toBe("<f-recent@x>");
+  });
+
   it("excludes is_noise when includeNoise is false", async () => {
     const db = await createTestDb();
     const d1 = new Date(Date.now() - 30 * 60 * 1000).toISOString();

@@ -1,4 +1,5 @@
 import type { SqliteDatabase } from "~/db";
+import { config } from "~/lib/config";
 import { searchWithMeta } from "~/search";
 import { normalizeMessageId } from "~/mcp";
 import { parseSinceToDate } from "~/sync/parse-since";
@@ -180,6 +181,7 @@ async function executeSearchTool(
     includeThreads,
     filterOr,
     includeNoise,
+    ownerAddress: config.imap.user?.trim() || undefined,
   });
 
   const metadataResults = toMetadataResults(result.results);

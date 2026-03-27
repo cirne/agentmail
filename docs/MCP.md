@@ -55,6 +55,8 @@ Search emails using FTS5 full-text search. The tool **always** returns a JSON **
 
 **Note:** CLI JSON search uses the same slim threshold and adds `--result-format`. Full rows inline the same attachment fields as `list_attachments` except `stored_path`. Use `list_attachments` when you need `stored_path` or are not coming from search.
 
+**Ranking (owner-aware):** When the mailbox owner is configured (`imap.user` / `ZMAIL_EMAIL`), keyword relevance (FTS BM25) and date recency stay primary; matching messages may be reordered slightly using the same per-contact **contact rank** signal as `who` (mailbox interaction score, not personal worth). Filter-only searches use the same rerank. Set `DEBUG_SEARCH=1` to include a `contactRankBoost` field on full rows for tuning.
+
 **Example:**
 ```json
 {
@@ -153,19 +155,19 @@ Retrieve a full conversation thread by thread ID. Returns all messages in the th
 
 ### `who`
 
-Find people by email address or display name. Returns matching identities with sent/received/mentioned counts. Useful for "who is X?" queries.
+Find people by email address or display name. Returns owner-centric interaction counts, `contactRank`, and `lastContact` when the mailbox owner is configured (see note below); otherwise legacy address-centric counts. Sorted by `contactRank` (desc) among matches. Useful for "who is X?" queries.
 
 **Parameters:**
-- `query` (string, required): Search query to match against email addresses or display names
-- `limit` (number, optional): Maximum number of results (default: 50)
+- `query` (string, optional): Substring match on address or display name; omit or use `""` for **top contacts** (by mailbox touch count into the candidate pool, then contact-rank ordering when the owner is configured). Large mailboxes cap how many distinct addresses are considered before merging.
+- `limit` (number, optional): Maximum number of people returned (default: 50)
 - `minSent` (number, optional): Minimum sent count filter (default: 0)
 - `minReceived` (number, optional): Minimum received count filter (default: 0)
 - `includeNoreply` (boolean, optional): Include noreply/bot addresses (default: false)
 - `enrich` (boolean, optional): Use LLM (GPT-4.1 nano) to guess names from email addresses for better accuracy. Requires `ZMAIL_OPENAI_API_KEY` to be set. Adds ~1-2s latency (default: false)
 
-**Returns:** JSON object with `query` and `people` array. Each person has `firstname`, `lastname`, `name`, `primaryAddress`, `addresses`, `phone`, `title`, `company`, `urls`, `sentCount`, `receivedCount`, `mentionedCount`, `lastContact`. May include `hint` field with suggestions (e.g., to use `enrich` flag).
+**Returns:** JSON object with `query` and `people` array. Each person has `firstname`, `lastname`, `name`, `primaryAddress`, `addresses`, `phone`, `title`, `company`, `urls`, `sentCount`, `repliedCount`, `receivedCount`, `mentionedCount`, `contactRank`, `lastContact`. May include `hint` field with suggestions (e.g., to use `enrich` flag).
 
-**Note:** When mailbox owner is configured, counts are relative to the owner: `sentCount` = emails I sent to them, `receivedCount` = emails from them to me, `mentionedCount` = emails where they were in to/cc but not the sender.
+**Note (OPP-027, when mailbox owner is configured):** Counts are owner-centric: `sentCount` = your first outbound to that person in each thread (thread-starts); `repliedCount` = further messages from you to them in threads you already started with them; `receivedCount` = messages from them to you; `mentionedCount` = they appear in **CC only** on messages where they are not the sender. `contactRank` is a log-scaled score from those counts (interaction signal, not “how important the person is”); **people are sorted by `contactRank` first** (fuzzy name/address match is secondary). Without an owner address, legacy address-centric counts are used and `repliedCount` is zero.
 
 **Example:**
 ```json
@@ -320,7 +322,7 @@ Both interfaces share the same underlying index and data. A message synced via `
 ### CLI arguments (quick reference)
 
 - **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--fields csv] [--threads] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date] [--include-noise]`
-- **who:** `zmail who <query> [--limit n] [--min-sent n] [--min-received n] [--all] [--enrich] [--text]`
+- **who:** `zmail who [query] [--limit n] [--min-sent n] [--min-received n] [--all] [--enrich] [--text]` (omit query for top contacts)
 - **status:** `zmail status [--json] [--imap]` — `--imap` compares local DB with IMAP server (CLI-only).
 - **stats:** `zmail stats [--json]`
 - **read:** `zmail read <message_id> [--raw]` (alias: `zmail message`)

@@ -112,6 +112,7 @@ export function createMcpServer() {
         beforeDate,
         includeThreads: includeThreads ?? false,
         includeNoise: includeNoise ?? false,
+        ownerAddress: config.imap.user?.trim() || undefined,
       });
 
       const preference = (resultFormat ?? "auto") as SearchResultFormatPreference;
@@ -357,9 +358,14 @@ export function createMcpServer() {
 
   server.tool(
     "who",
-    "Find people by email address or display name. Returns merged identities with contact info, sent/received/mentioned counts. Useful for 'who is X?' queries.",
+    "Find people by email address or display name. Returns merged identities with contact info, sent/received/mentioned counts. Omit query (or empty string) to list top contacts by mailbox activity / contact rank (indexed-mail signal, not personal worth). Useful for 'who is X?' or address-book style listings.",
     {
-      query: z.string().describe("Search query to match against email addresses or display names"),
+      query: z
+        .string()
+        .optional()
+        .describe(
+          "Substring match on address or display name; omit or leave empty for top contacts (ordered by contact rank when owner is configured)"
+        ),
       limit: z.number().optional().describe("Maximum number of results to return (default: 50)"),
       minSent: z.number().optional().describe("Minimum sent count filter (default: 0)"),
       minReceived: z.number().optional().describe("Minimum received count filter (default: 0)"),
@@ -370,7 +376,7 @@ export function createMcpServer() {
       const db = await getDb();
       const ownerAddress = config.imap.user?.trim() || undefined;
       const result = await who(db, {
-        query,
+        query: query ?? "",
         limit,
         minSent,
         minReceived,

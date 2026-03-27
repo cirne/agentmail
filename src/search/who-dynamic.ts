@@ -1,6 +1,8 @@
 import type { SqliteDatabase } from "~/db";
 import type { WhoPerson, WhoResult } from "~/lib/types";
+import { computeContactRank } from "~/lib/contact-rank";
 import { normalizeAddress, normalizedLocalPart } from "./normalize";
+import { computeOwnerCentricStatsForCandidates } from "./owner-contact-stats";
 import { canonicalFirstName, parseName, parsePersonName } from "./nicknames";
 import { isNoreply } from "./noreply";
 import { extractSignatureData } from "./signature";
@@ -21,6 +23,22 @@ export interface WhoOptions {
 
 const DEFAULT_LIMIT = 50;
 
+/** Cap distinct addresses considered before clustering (large mailboxes / broad queries). */
+export const MAX_WHO_IDENTITY_CANDIDATES = 2000;
+
+const TOUCH_FREQ_CTES = /* sql */ `
+touch AS (
+  SELECT LOWER(from_address) AS address FROM messages
+  UNION ALL
+  SELECT LOWER(j.value) FROM messages m, json_each(m.to_addresses) j
+  UNION ALL
+  SELECT LOWER(j.value) FROM messages m, json_each(m.cc_addresses) j
+),
+freq AS (
+  SELECT address, COUNT(*) AS touches FROM touch GROUP BY address
+)
+`;
+
 const CONSUMER_DOMAINS = new Set([
   "gmail.com",
   "icloud.com",
@@ -40,6 +58,7 @@ interface Identity {
   address: string;
   displayName: string | null;
   sentCount: number;
+  repliedCount: number;
   receivedCount: number;
   mentionedCount: number;
   lastContact: string | null;
@@ -65,63 +84,196 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
     minSent = 0,
     minReceived = 0,
     includeNoreply = false,
+    ownerAddress: ownerAddressOpt,
   } = opts;
 
   const queryLower = query.trim().toLowerCase();
   const pattern = `%${queryLower}%`;
+  const sqlCandidateLimit = Math.min(Math.max(limit, 1) * 10, MAX_WHO_IDENTITY_CANDIDATES);
+  const emptyQuery = queryLower.length === 0;
 
-  const matchingRows = (await (
-    await db.prepare(
-      /* sql */ `
-    WITH all_addresses AS (
-      SELECT DISTINCT LOWER(from_address) as address, from_name as display_name
+  const ownerMode = Boolean(ownerAddressOpt?.trim());
+
+  let matchingRows: Array<{
+    address: string;
+    display_name: string | null;
+    sent_count?: number;
+    received_count?: number;
+    mentioned_count?: number;
+    last_contact?: string | null;
+  }>;
+
+  if (emptyQuery) {
+    if (ownerMode) {
+      matchingRows = (await (
+        await db.prepare(
+          /* sql */ `
+    WITH ${TOUCH_FREQ_CTES},
+    top AS (
+      SELECT address FROM freq ORDER BY touches DESC, address ASC LIMIT ?
+    ),
+    name_hint AS (
+      SELECT LOWER(from_address) AS address, MAX(from_name) AS display_name
       FROM messages
-      WHERE LOWER(from_address) LIKE ? OR (from_name IS NOT NULL AND LOWER(from_name) LIKE ?)
+      WHERE from_name IS NOT NULL
+      GROUP BY LOWER(from_address)
+    )
+    SELECT t.address, h.display_name AS display_name
+    FROM top t
+    LEFT JOIN name_hint h ON h.address = t.address
+  `
+        )
+      ).all(sqlCandidateLimit)) as Array<{ address: string; display_name: string | null }>;
+    } else {
+      matchingRows = (await (
+        await db.prepare(
+          /* sql */ `
+    WITH ${TOUCH_FREQ_CTES},
+    top AS (
+      SELECT address FROM freq ORDER BY touches DESC, address ASC LIMIT ?
+    ),
+    all_addresses AS (
+      SELECT DISTINCT LOWER(m.from_address) AS address, m.from_name AS display_name
+      FROM messages m
+      WHERE LOWER(m.from_address) IN (SELECT address FROM top)
       UNION
-      SELECT DISTINCT LOWER(j.value) as address, NULL as display_name
+      SELECT DISTINCT LOWER(j.value) AS address, NULL AS display_name
       FROM messages m, json_each(m.to_addresses) j
-      WHERE LOWER(j.value) LIKE ?
+      WHERE LOWER(j.value) IN (SELECT address FROM top)
       UNION
-      SELECT DISTINCT LOWER(j.value) as address, NULL as display_name
+      SELECT DISTINCT LOWER(j.value) AS address, NULL AS display_name
       FROM messages m, json_each(m.cc_addresses) j
-      WHERE LOWER(j.value) LIKE ?
+      WHERE LOWER(j.value) IN (SELECT address FROM top)
     ),
     identities AS (
       SELECT 
         a.address,
-        MAX(a.display_name) as display_name,
-        (SELECT COUNT(*) FROM messages m WHERE LOWER(m.from_address) = a.address) as sent_count,
+        MAX(a.display_name) AS display_name,
+        (SELECT COUNT(*) FROM messages m WHERE LOWER(m.from_address) = a.address) AS sent_count,
         (SELECT COUNT(*) FROM messages m 
          WHERE EXISTS (SELECT 1 FROM json_each(m.to_addresses) WHERE LOWER(value) = a.address)
-            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = a.address)) as received_count,
+            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = a.address)) AS received_count,
         (SELECT COUNT(*) FROM messages m 
          WHERE EXISTS (SELECT 1 FROM json_each(m.to_addresses) WHERE LOWER(value) = a.address)
-            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = a.address)) as mentioned_count,
+            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = a.address)) AS mentioned_count,
         (SELECT MAX(date) FROM messages m 
          WHERE LOWER(m.from_address) = a.address
             OR EXISTS (SELECT 1 FROM json_each(m.to_addresses) WHERE LOWER(value) = a.address)
-            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = a.address)) as last_contact
+            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = a.address)) AS last_contact
       FROM all_addresses a
       GROUP BY a.address
     )
     SELECT * FROM identities
-    LIMIT ?
   `
+        )
+      ).all(sqlCandidateLimit)) as Array<{
+        address: string;
+        display_name: string | null;
+        sent_count: number;
+        received_count: number;
+        mentioned_count: number;
+        last_contact: string | null;
+      }>;
+    }
+  } else if (ownerMode) {
+    matchingRows = (await (
+      await db.prepare(
+        /* sql */ `
+    WITH ${TOUCH_FREQ_CTES},
+    all_addresses AS (
+      SELECT DISTINCT LOWER(from_address) AS address, from_name AS display_name
+      FROM messages
+      WHERE LOWER(from_address) LIKE ? OR (from_name IS NOT NULL AND LOWER(from_name) LIKE ?)
+      UNION
+      SELECT DISTINCT LOWER(j.value) AS address, NULL AS display_name
+      FROM messages m, json_each(m.to_addresses) j
+      WHERE LOWER(j.value) LIKE ?
+      UNION
+      SELECT DISTINCT LOWER(j.value) AS address, NULL AS display_name
+      FROM messages m, json_each(m.cc_addresses) j
+      WHERE LOWER(j.value) LIKE ?
+    ),
+    prefilter AS (
+      SELECT a.address, MAX(a.display_name) AS display_name, COALESCE(MAX(f.touches), 0) AS touches
+      FROM all_addresses a
+      LEFT JOIN freq f ON f.address = a.address
+      GROUP BY a.address
+    ),
+    picked AS (
+      SELECT address, display_name FROM prefilter ORDER BY touches DESC, address ASC LIMIT ?
     )
-  ).all(
-    pattern,
-    pattern,
-    pattern,
-    pattern,
-    limit * 10
-  )) as Array<{
-    address: string;
-    display_name: string | null;
-    sent_count: number;
-    received_count: number;
-    mentioned_count: number;
-    last_contact: string | null;
-  }>;
+    SELECT address, display_name FROM picked
+  `
+      )
+    ).all(pattern, pattern, pattern, pattern, sqlCandidateLimit)) as Array<{
+      address: string;
+      display_name: string | null;
+    }>;
+  } else {
+    matchingRows = (await (
+      await db.prepare(
+        /* sql */ `
+    WITH ${TOUCH_FREQ_CTES},
+    all_addresses AS (
+      SELECT DISTINCT LOWER(from_address) AS address, from_name AS display_name
+      FROM messages
+      WHERE LOWER(from_address) LIKE ? OR (from_name IS NOT NULL AND LOWER(from_name) LIKE ?)
+      UNION
+      SELECT DISTINCT LOWER(j.value) AS address, NULL AS display_name
+      FROM messages m, json_each(m.to_addresses) j
+      WHERE LOWER(j.value) LIKE ?
+      UNION
+      SELECT DISTINCT LOWER(j.value) AS address, NULL AS display_name
+      FROM messages m, json_each(m.cc_addresses) j
+      WHERE LOWER(j.value) LIKE ?
+    ),
+    prefilter AS (
+      SELECT a.address, MAX(a.display_name) AS display_name, COALESCE(MAX(f.touches), 0) AS touches
+      FROM all_addresses a
+      LEFT JOIN freq f ON f.address = a.address
+      GROUP BY a.address
+    ),
+    picked AS (
+      SELECT address, display_name FROM prefilter ORDER BY touches DESC, address ASC LIMIT ?
+    ),
+    identities AS (
+      SELECT 
+        p.address,
+        p.display_name AS display_name,
+        (SELECT COUNT(*) FROM messages m WHERE LOWER(m.from_address) = p.address) AS sent_count,
+        (SELECT COUNT(*) FROM messages m 
+         WHERE EXISTS (SELECT 1 FROM json_each(m.to_addresses) WHERE LOWER(value) = p.address)
+            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = p.address)) AS received_count,
+        (SELECT COUNT(*) FROM messages m 
+         WHERE EXISTS (SELECT 1 FROM json_each(m.to_addresses) WHERE LOWER(value) = p.address)
+            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = p.address)) AS mentioned_count,
+        (SELECT MAX(date) FROM messages m 
+         WHERE LOWER(m.from_address) = p.address
+            OR EXISTS (SELECT 1 FROM json_each(m.to_addresses) WHERE LOWER(value) = p.address)
+            OR EXISTS (SELECT 1 FROM json_each(m.cc_addresses) WHERE LOWER(value) = p.address)) AS last_contact
+      FROM picked p
+    )
+    SELECT * FROM identities
+  `
+      )
+    ).all(pattern, pattern, pattern, pattern, sqlCandidateLimit)) as Array<{
+      address: string;
+      display_name: string | null;
+      sent_count: number;
+      received_count: number;
+      mentioned_count: number;
+      last_contact: string | null;
+    }>;
+  }
+
+  let ownerStatsMap: Awaited<ReturnType<typeof computeOwnerCentricStatsForCandidates>> | null = null;
+  if (ownerMode && ownerAddressOpt) {
+    const candidateNorms = new Set<string>();
+    for (const row of matchingRows) {
+      candidateNorms.add(normalizeAddress(row.address));
+    }
+    ownerStatsMap = await computeOwnerCentricStatsForCandidates(db, ownerAddressOpt, candidateNorms);
+  }
 
   // Step 2: Cluster identities dynamically
   const clusters = new Map<string, Cluster>();
@@ -200,13 +352,48 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
       }
     }
     
+    let sentCount: number;
+    let repliedCount: number;
+    let receivedCount: number;
+    let mentionedCount: number;
+    let lastContact: string | null;
+    if (ownerMode && ownerStatsMap) {
+      const s = ownerStatsMap.get(normalized);
+      if (s) {
+        sentCount = s.sentCount;
+        repliedCount = s.repliedCount;
+        receivedCount = s.receivedCount;
+        mentionedCount = s.mentionedCount;
+        lastContact = s.lastContact;
+      } else {
+        sentCount = 0;
+        repliedCount = 0;
+        receivedCount = 0;
+        mentionedCount = 0;
+        lastContact = null;
+      }
+    } else {
+      const legacy = row as unknown as {
+        sent_count: number;
+        received_count: number;
+        mentioned_count: number;
+        last_contact: string | null;
+      };
+      sentCount = legacy.sent_count;
+      repliedCount = 0;
+      receivedCount = legacy.received_count;
+      mentionedCount = legacy.mentioned_count;
+      lastContact = legacy.last_contact;
+    }
+
     cluster.identities.push({
       address: normalized,
       displayName: displayName,
-      sentCount: row.sent_count,
-      receivedCount: row.received_count,
-      mentionedCount: row.mentioned_count,
-      lastContact: row.last_contact,
+      sentCount,
+      repliedCount,
+      receivedCount,
+      mentionedCount,
+      lastContact,
     });
   }
 
@@ -318,12 +505,24 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
     // BUG-013: Apply noreply filter AFTER all checks
     if (!includeNoreply && cluster.isNoreply) continue;
 
-    // Determine primary address (most used)
+    // Primary address: highest per-identity contact rank, then activity
     let primaryAddress = cluster.addresses[0];
+    let maxImp = -1;
     let maxUsage = 0;
     for (const identity of cluster.identities) {
-      const usage = identity.sentCount + identity.receivedCount;
-      if (usage > maxUsage) {
+      const imp = computeContactRank({
+        sentCount: identity.sentCount,
+        repliedCount: identity.repliedCount,
+        receivedCount: identity.receivedCount,
+        mentionedCount: identity.mentionedCount,
+      });
+      const usage =
+        identity.sentCount +
+        identity.repliedCount +
+        identity.receivedCount +
+        identity.mentionedCount;
+      if (imp > maxImp || (imp === maxImp && usage > maxUsage)) {
+        maxImp = imp;
         maxUsage = usage;
         primaryAddress = identity.address;
       }
@@ -339,12 +538,14 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
 
     // Aggregate counts
     let totalSent = 0;
+    let totalReplied = 0;
     let totalReceived = 0;
     let totalMentioned = 0;
     let lastContact: string | null = null;
 
     for (const identity of cluster.identities) {
       totalSent += identity.sentCount;
+      totalReplied += identity.repliedCount;
       totalReceived += identity.receivedCount;
       totalMentioned += identity.mentionedCount;
       if (
@@ -354,6 +555,13 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
         lastContact = identity.lastContact;
       }
     }
+
+    const contactRank = computeContactRank({
+      sentCount: totalSent,
+      repliedCount: totalReplied,
+      receivedCount: totalReceived,
+      mentionedCount: totalMentioned,
+    });
 
     // BUG-012: Apply filters AFTER merging and aggregation
     if (totalSent < minSent || totalReceived < minReceived) {
@@ -429,18 +637,20 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
 
     // Build person object with firstname/lastname if parseable, otherwise use name
     const person: WhoPerson & { _score: number } = {
-      aka,
       primaryAddress,
       addresses: cluster.addresses,
-      phone,
-      title,
-      company,
-      urls,
       sentCount: totalSent,
+      repliedCount: totalReplied,
       receivedCount: totalReceived,
       mentionedCount: totalMentioned,
-      lastContact,
-      _score: score, // Internal scoring for sorting
+      contactRank,
+      _score: score, // Fuzzy tie-breaker only (OPP-027)
+      ...(phone ? { phone } : {}),
+      ...(title ? { title } : {}),
+      ...(company ? { company } : {}),
+      ...(urls.length > 0 ? { urls } : {}),
+      ...(lastContact ? { lastContact } : {}),
+      ...(aka.length > 0 ? { aka } : {}),
     };
 
     if (personName) {
@@ -481,7 +691,12 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
                     delete person.name;
                   } else if (result.firstname || result.lastname) {
                     // Partial name - use name field
-                    person.name = [result.firstname, result.lastname].filter(Boolean).join(" ") || null;
+                    const joined = [result.firstname, result.lastname].filter(Boolean).join(" ");
+                    if (joined) {
+                      person.name = joined;
+                    } else {
+                      delete person.name;
+                    }
                     delete person.firstname;
                     delete person.lastname;
                   } else if (result.name) {
@@ -599,7 +814,7 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
           const aFirstLen = a.firstname?.length || 0;
           const bFirstLen = b.firstname?.length || 0;
           if (bFirstLen !== aFirstLen) return bFirstLen - aFirstLen;
-          return (b.sentCount + b.receivedCount) - (a.sentCount + a.receivedCount);
+          return b.contactRank - a.contactRank;
         });
 
         const merged = matchingPeople[0];
@@ -615,8 +830,15 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
             }
           }
           merged.sentCount += other.sentCount;
+          merged.repliedCount += other.repliedCount;
           merged.receivedCount += other.receivedCount;
           merged.mentionedCount += other.mentionedCount;
+          merged.contactRank = computeContactRank({
+            sentCount: merged.sentCount,
+            repliedCount: merged.repliedCount,
+            receivedCount: merged.receivedCount,
+            mentionedCount: merged.mentionedCount,
+          });
           
           // Use the most complete name
           // Parse other's name if needed
@@ -665,67 +887,57 @@ export async function whoDynamic(db: SqliteDatabase, opts: WhoOptions): Promise<
     people.push(...mergedPeople);
   }
 
-  // Recalculate scores after merging (if merge happened)
+  // Recalculate fuzzy tie-break score after merging (if merge happened)
   for (const person of people) {
     if ((person as WhoPerson & { _score?: number })._score === undefined) {
-      // Recalculate score for merged person
       let score = 0;
       if (person.firstname && person.lastname) score += 10;
       if (person.company) score += 5;
-      score += person.sentCount * 2;
-      score += person.receivedCount;
       (person as WhoPerson & { _score: number })._score = score;
     }
   }
 
-  // Sort by score, then by usage
+  // Sort by contact rank (owner-centric signal), then recency, then fuzzy match
   people.sort((a, b) => {
+    if (b.contactRank !== a.contactRank) return b.contactRank - a.contactRank;
+    const lcA = a.lastContact ?? "";
+    const lcB = b.lastContact ?? "";
+    if (lcB !== lcA) return lcB.localeCompare(lcA);
+    if (a.primaryAddress !== b.primaryAddress) {
+      return a.primaryAddress.localeCompare(b.primaryAddress);
+    }
     const scoreA = (a as WhoPerson & { _score: number })._score || 0;
     const scoreB = (b as WhoPerson & { _score: number })._score || 0;
-    if (scoreB !== scoreA) return scoreB - scoreA;
-    return (
-      b.receivedCount +
-      b.sentCount -
-      (a.receivedCount + a.sentCount)
-    );
+    return scoreB - scoreA;
   });
 
-  // Remove internal score field and filter out null/empty values
+  // Remove internal score field; omit null/empty optional fields for compact JSON
   const finalPeople = people.slice(0, limit).map((p) => {
     const { _score, ...rest } = p as WhoPerson & { _score: number };
-    const cleaned: Partial<WhoPerson> = {
+    const cleaned: Record<string, unknown> = {
       primaryAddress: rest.primaryAddress,
       addresses: rest.addresses,
       sentCount: rest.sentCount,
+      repliedCount: rest.repliedCount,
       receivedCount: rest.receivedCount,
       mentionedCount: rest.mentionedCount,
-      phone: rest.phone ?? null,
-      title: rest.title ?? null,
-      company: rest.company ?? null,
-      lastContact: rest.lastContact ?? null,
+      contactRank: rest.contactRank,
     };
-    
-    // Include firstname/lastname if present, otherwise name
-    // Check if firstname/lastname exist (even if null)
+    if (rest.phone) cleaned.phone = rest.phone;
+    if (rest.title) cleaned.title = rest.title;
+    if (rest.company) cleaned.company = rest.company;
+    if (rest.lastContact) cleaned.lastContact = rest.lastContact;
+    if (rest.aka && rest.aka.length > 0) cleaned.aka = rest.aka;
+    if (rest.urls && rest.urls.length > 0) cleaned.urls = rest.urls;
+
     if (rest.firstname !== undefined || rest.lastname !== undefined) {
-      cleaned.firstname = rest.firstname ?? null;
-      cleaned.lastname = rest.lastname ?? null;
-    } else if (rest.name !== undefined) {
-      cleaned.name = rest.name ?? null;
-    } else {
-      // No name at all - set to null for consistency
-      cleaned.name = null;
+      if (rest.firstname) cleaned.firstname = rest.firstname;
+      if (rest.lastname) cleaned.lastname = rest.lastname;
+    } else if (rest.name) {
+      cleaned.name = rest.name;
     }
-    
-    // Only include aka and urls if they have values
-    if (rest.aka && rest.aka.length > 0) {
-      cleaned.aka = rest.aka;
-    }
-    if (rest.urls && rest.urls.length > 0) {
-      cleaned.urls = rest.urls;
-    }
-    
-    return cleaned as WhoPerson;
+
+    return cleaned as unknown as WhoPerson;
   });
 
   const result: WhoResult = { query: query.trim(), people: finalPeople };

@@ -4,6 +4,9 @@ import { extractSignatureData } from "./signature";
 
 /**
  * Rebuild the people table from messages.
+ *
+ * Note: `clusterIdentities` still uses address-centric sent/received/mentioned stats.
+ * Dynamic `who` (owner-centric OPP-027) may disagree until this path is aligned.
  */
 export async function rebuildPeople(db: SqliteDatabase): Promise<void> {
   await db.exec("DELETE FROM people");

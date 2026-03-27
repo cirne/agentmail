@@ -86,7 +86,7 @@ if (!command) {
   console.log("  zmail inbox              LLM scan of recent mail (notable messages; needs OpenAI key)");
   console.log("  zmail rebuild-index      Rebuild local SQLite index from maildir (dev/test)");
   console.log("  zmail search <query>    Search email — FTS5 full-text search");
-  console.log("  zmail who <query>        Find people by name or address");
+  console.log("  zmail who [query]        Find people by name or address");
   console.log("  zmail status             Show sync and indexing progress");
   console.log("  zmail read <id>          Read a message");
   console.log("");

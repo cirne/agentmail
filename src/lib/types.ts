@@ -87,6 +87,11 @@ export interface SearchResult {
   date: string;
   snippet: string;
   rank: number;
+  /**
+   * When owner-centric search ranking is active: participant contact-rank term subtracted from
+   * combined FTS+date rank (same units as `rank`). OPP-027. Set when `DEBUG_SEARCH=1`.
+   */
+  contactRankBoost?: number;
   /** First ~300 chars of body (always present) to reduce follow-up get_message calls. */
   bodyPreview?: string;
   /** Inline attachment metadata when requested to avoid list_attachments round-trips. */
@@ -96,22 +101,29 @@ export interface SearchResult {
 /** One identity from `zmail who`: merged person with all addresses, contact info, and counts. */
 export interface WhoPerson {
   /** First name (if parseable as person name) */
-  firstname?: string | null;
+  firstname?: string;
   /** Last name (if parseable as person name) */
-  lastname?: string | null;
+  lastname?: string;
   /** Full name (used when name can't be parsed into firstname/lastname, e.g., "Apple, Inc.") */
-  name?: string | null;
-  aka: string[];
+  name?: string;
+  /** Other display names for the same identity (omitted when empty in JSON). */
+  aka?: string[];
   primaryAddress: string;
   addresses: string[];
-  phone: string | null;
-  title: string | null;
-  company: string | null;
-  urls: string[];
+  phone?: string;
+  title?: string;
+  company?: string;
+  urls?: string[];
   sentCount: number;
+  /** Owner→peer replies in existing threads (not the first outbound in that thread). OPP-027. */
+  repliedCount: number;
   receivedCount: number;
+  /** CC-only exposure: peer in cc, not the sender (OPP-027). */
   mentionedCount: number;
-  lastContact: string | null;
+  /** Mailbox interaction rank from indexed mail (shared with search ordering). Higher = stronger signal, not personal worth. */
+  contactRank: number;
+  /** ISO 8601 timestamp of most recent message involving this identity */
+  lastContact?: string;
 }
 
 /** Result of who(db, { query, ... }). */

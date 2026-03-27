@@ -1,6 +1,12 @@
 import type { SqliteDatabase } from "~/db";
 import type { SearchResult } from "~/lib/types";
+import {
+  SEARCH_CONTACT_RANK_BOOST_ALPHA,
+  filterOnlyCombinedRankFromMessageDate,
+} from "~/lib/contact-rank";
 import { indexAttachmentsByMessageId } from "~/attachments/list-for-message";
+import { normalizeAddress } from "./normalize";
+import { computeContactRankMapForAddresses, parseJsonAddresses } from "./owner-contact-stats";
 import { parseSearchQuery } from "./query-parse";
 import { buildFilterClause, buildWhereClause } from "./filter-compiler";
 
@@ -37,6 +43,8 @@ export interface SearchOptions {
   includeThreads?: boolean;
   /** When true, includes noise messages (promotional, social, forums, bulk, spam). Defaults to false (noise excluded). */
   includeNoise?: boolean;
+  /** Mailbox owner (IMAP user). When set, search ranking applies a small participant contact-rank boost (OPP-027). */
+  ownerAddress?: string;
 }
 
 export interface SearchTimings {
@@ -59,6 +67,81 @@ export interface SearchResultSet {
 // fromFilterPattern is now in filter-compiler.ts
 
 const BODY_PREVIEW_LEN = 300;
+
+type FtsRow = SearchResult & { combinedRank: number };
+
+/** After FTS+date ordering, optionally rerank by max participant contact rank (OPP-027). */
+async function applyContactRankRerank(
+  db: SqliteDatabase,
+  ownerAddress: string | undefined,
+  rows: FtsRow[]
+): Promise<SearchResult[]> {
+  if (!ownerAddress?.trim() || rows.length === 0) {
+    return rows.map(({ combinedRank: _c, ...r }) => r);
+  }
+
+  const ownerNorm = normalizeAddress(ownerAddress);
+  const ids = [...new Set(rows.map((r) => r.messageId))];
+  const placeholders = ids.map(() => "?").join(",");
+  const metaRows = (await (
+    await db.prepare(
+      /* sql */ `
+      SELECT message_id AS messageId, from_address AS fromAddress,
+             to_addresses AS toAddresses, cc_addresses AS ccAddresses
+      FROM messages
+      WHERE message_id IN (${placeholders})
+    `
+    )
+  ).all(...ids)) as Array<{
+    messageId: string;
+    fromAddress: string;
+    toAddresses: string;
+    ccAddresses: string;
+  }>;
+
+  const byId = new Map(metaRows.map((m) => [m.messageId, m]));
+  const allAddresses = new Set<string>();
+  for (const m of metaRows) {
+    allAddresses.add(normalizeAddress(m.fromAddress));
+    for (const a of parseJsonAddresses(m.toAddresses)) allAddresses.add(normalizeAddress(a));
+    for (const a of parseJsonAddresses(m.ccAddresses)) allAddresses.add(normalizeAddress(a));
+  }
+  allAddresses.delete(ownerNorm);
+
+  const rankMap = await computeContactRankMapForAddresses(db, ownerAddress, allAddresses);
+  const alpha = SEARCH_CONTACT_RANK_BOOST_ALPHA;
+  const debug = Boolean(process.env.DEBUG_SEARCH);
+
+  const scored = rows.map((r) => {
+    const m = byId.get(r.messageId);
+    let maxRank = 0;
+    if (m) {
+      const parts = new Set<string>();
+      parts.add(normalizeAddress(m.fromAddress));
+      for (const a of parseJsonAddresses(m.toAddresses)) parts.add(normalizeAddress(a));
+      for (const a of parseJsonAddresses(m.ccAddresses)) parts.add(normalizeAddress(a));
+      parts.delete(ownerNorm);
+      for (const p of parts) {
+        maxRank = Math.max(maxRank, rankMap.get(p) ?? 0);
+      }
+    }
+    const finalRank = r.combinedRank - alpha * maxRank;
+    const contactRankBoost = debug ? alpha * maxRank : undefined;
+    return { row: r, finalRank, contactRankBoost };
+  });
+
+  scored.sort((a, b) => {
+    if (a.finalRank !== b.finalRank) return a.finalRank - b.finalRank;
+    return b.row.date.localeCompare(a.row.date);
+  });
+
+  return scored.map(({ row, contactRankBoost }) => {
+    const { combinedRank: _cr, ...rest } = row;
+    const out: SearchResult = { ...rest };
+    if (contactRankBoost !== undefined) out.contactRankBoost = contactRankBoost;
+    return out;
+  });
+}
 
 /** Batch-load attachment metadata (filename order + 1-based index, same as `zmail attachment list`). */
 async function mergeAttachmentMetadata(
@@ -156,8 +239,8 @@ async function filterOnlySearch(
     )
   ).get(...filterClause.params)) as { count: number };
 
-  const sqlLimit = limit ?? -1;
-  const params = [...filterClause.params, sqlLimit, offset];
+  const sqlLimit = limit != null ? limit + offset + 50 : -1;
+  const params = [...filterClause.params, sqlLimit];
   const bodyPreviewSql = `COALESCE(TRIM(SUBSTR(m.body_text, 1, 300)), '') || (CASE WHEN LENGTH(TRIM(m.body_text)) > 300 THEN '…' ELSE '' END)`;
   const rows = (await (
     await db.prepare(
@@ -175,11 +258,19 @@ async function filterOnlySearch(
       FROM messages m
       ${where}
       ORDER BY m.date DESC
-      LIMIT ? OFFSET ?
+      LIMIT ?
     `
     )
   ).all(...params)) as unknown as SearchResult[];
-  return { results: rows, totalCount: countResult.count };
+
+  const withCombined: FtsRow[] = rows.map((r) => ({
+    ...r,
+    combinedRank: filterOnlyCombinedRankFromMessageDate(r.date),
+  }));
+  const reranked = await applyContactRankRerank(db, opts.ownerAddress, withCombined);
+  const results =
+    limit != null ? reranked.slice(offset, offset + limit) : reranked.slice(offset);
+  return { results, totalCount: countResult.count };
 }
 
 /**
@@ -386,7 +477,7 @@ async function ftsSearch(
       END
     `;
     
-    const rows = (await (
+    const rawRows = (await (
       await db.prepare(
         /* sql */ `
         SELECT
@@ -407,9 +498,17 @@ async function ftsSearch(
         LIMIT ?
       `
       )
-    ).all(...params)) as unknown as SearchResult[];
+    ).all(...params)) as unknown as Array<
+      SearchResult & { combined_rank: number }
+    >;
 
-    const results = limit != null ? rows.slice(offset, offset + limit) : rows.slice(offset);
+    const withCombined: FtsRow[] = rawRows.map((r) => {
+      const { combined_rank, ...rest } = r;
+      return { ...rest, combinedRank: combined_rank };
+    });
+
+    const reranked = await applyContactRankRerank(db, opts.ownerAddress, withCombined);
+    const results = limit != null ? reranked.slice(offset, offset + limit) : reranked.slice(offset);
     return { results, totalCount: totalCount.count };
   } catch (err: any) {
     // Catch FTS5 syntax errors and provide user-friendly message
@@ -432,7 +531,7 @@ async function ftsSearch(
 
 /**
  * Unified search function.
- * For filter-only queries (no query text), returns plain SQL results.
+ * Filter-only queries (no query text) use date-based combined rank plus optional contact-rank rerank like FTS.
  */
 export async function search(db: SqliteDatabase, opts: SearchOptions): Promise<SearchResult[]> {
   const result = await searchWithMeta(db, opts);

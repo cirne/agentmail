@@ -3,6 +3,10 @@ import type { RefreshPreviewRow } from "~/lib/refresh-preview";
 import { config } from "~/lib/config";
 import type { SqliteDatabase } from "~/db";
 import { indexAttachmentsByMessageId, type AttachmentIndexedByFilename } from "~/attachments/list-for-message";
+import {
+  inboxCandidatePrefetchLimit,
+  sortRowsBySenderContactRank,
+} from "~/search/owner-contact-stats";
 
 type InboxCandidate = {
   messageId: string;
@@ -90,6 +94,8 @@ async function defaultClassifyBatch(
 export type RunInboxScanOptions = {
   cutoffIso: string;
   includeNoise: boolean;
+  /** Mailbox owner (IMAP user). When set, candidates are ordered by sender contact rank before LLM batches. */
+  ownerAddress?: string;
   candidateCap?: number;
   notableCap?: number;
   batchSize?: number;
@@ -113,6 +119,7 @@ export async function runInboxScan(
   const classify = options.classifyBatch ?? defaultClassifyBatch;
 
   const noiseSql = options.includeNoise ? "" : " AND is_noise = 0";
+  const fetchLimit = inboxCandidatePrefetchLimit(candidateCap);
 
   const rows = (await (
     await db.prepare(
@@ -125,7 +132,7 @@ export async function runInboxScan(
       LIMIT ?
     `
     )
-  ).all(options.cutoffIso, candidateCap)) as Array<{
+  ).all(options.cutoffIso, fetchLimit)) as Array<{
     messageId: string;
     fromAddress: string;
     fromName: string | null;
@@ -138,7 +145,7 @@ export async function runInboxScan(
     db,
     rows.map((r) => r.messageId)
   );
-  const candidates: InboxCandidate[] = rows.map((r) => ({
+  let candidates: InboxCandidate[] = rows.map((r) => ({
     messageId: r.messageId,
     date: r.date,
     fromAddress: r.fromAddress,
@@ -147,6 +154,9 @@ export async function runInboxScan(
     snippet: stripSnippetHtml(r.snippet),
     attachments: attMap.get(r.messageId) ?? [],
   }));
+
+  candidates = await sortRowsBySenderContactRank(db, options.ownerAddress, candidates);
+  candidates = candidates.slice(0, candidateCap);
 
   const byId = new Map(candidates.map((c) => [c.messageId, c]));
   let llmDurationMs = 0;
