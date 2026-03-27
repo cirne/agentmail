@@ -1,6 +1,6 @@
 # OPP-025: Conform to Agent Skills spec — packaging and platform map
 
-**Status:** **Core artifact shipped** (2026-03-26) — [`skills/zmail/`](../../skills/zmail/) has valid YAML frontmatter (`name: zmail`), body + `references/`, and is linked from [AGENTS.md](../../AGENTS.md) as the publishable `/zmail` skill. **Remaining:** automation (`skills-ref validate` in CI or release checklist), manual smoke on Cursor/Claude/OpenClaw, optional README lead-in aligned with AGENTS skill-first ordering.
+**Status:** **Core artifact shipped** (2026-03-26) — [`skills/zmail/`](../../skills/zmail/) has valid YAML frontmatter (`name: zmail`), body + `references/`, and is linked from [AGENTS.md](../../AGENTS.md) as the publishable `/zmail` skill. **ClawHub:** the skill is **listed on [ClawHub](https://clawhub.com)** ([clawhub.ai](https://clawhub.ai)) for OpenClaw-style install / discoverability — treat as **done** for registry publishing. **Remaining:** `skills-ref validate` in CI or release checklist, optional manual smoke on Cursor/Claude, README lead-in aligned with AGENTS skill-first ordering.
 
 **Canonical target:** The **end-user** portable skill at [`skills/zmail/`](../../skills/zmail/) (in-repo; published **via npm package contents** alongside the CLI) should stay **conformant to the [Agent Skills specification](https://agentskills.io/specification.md)** as the spec and hosts evolve — not an informal markdown file. That means: required directory layout, valid `SKILL.md` YAML frontmatter, naming rules, optional `scripts/` / `references/` / `assets/`, and validation (e.g. [`skills-ref validate`](https://github.com/agentskills/agentskills/tree/main/skills-ref) per the spec). **Out of scope for this OPP:** [`.cursor/skills/`](../../.cursor/skills/) in this repo — internal dev skills (`commit`, `db-dev`, `install-local`, `process-feedback`), not the publishable **`/zmail`** user skill.
 
@@ -100,8 +100,8 @@ Per [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills):
 **Target state:**
 
 1. **Onboarding** leads with **spec-conformant skill + CLI**; MCP under **Optional: MCP**.
-2. **npm** ships the skill directory via `package.json` `files`; documented paths for **Cursor, Claude Code, and OpenClaw** (`~/.openclaw/skills` / workspace `skills/`, or ClawHub publish flow if we choose it).
-3. **OpenClaw:** document **skill folder** install alongside optional **MCP**; call out **gating** (`requires.bins: ["zmail"]`) if we add OpenClaw-specific `metadata`.
+2. **npm** ships the skill directory alongside the CLI; documented paths for **Cursor, Claude Code, and OpenClaw** (`~/.openclaw/skills` / workspace `skills/`), plus **ClawHub** for discoverable install ([clawhub.com](https://clawhub.com) / [clawhub.ai](https://clawhub.ai)) — **published.**
+3. **OpenClaw:** document **skill folder** install alongside optional **MCP**; call out **gating** (`requires.bins: ["zmail"]`) if we add OpenClaw-specific `metadata`. ClawHub satisfies the “install from registry” path for many users.
 4. **No rushed MCP removal** — narrative and ordering first; validate skill flows in real sessions before any breaking change.
 
 **Phasing (suggested):**
@@ -111,7 +111,7 @@ Per [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills):
 | **0 — Now** | This doc; **`skills/zmail/`** layout + frontmatter **done**; `skills-ref validate` still optional. |
 | **1** | **`skills/zmail/`** in repo + npm — **done** (verify `npm pack` / published tarball includes `skills/`). Contributors dogfood via **personal** `~/.cursor/skills/zmail` — **never** replace this repo’s internal `.cursor/skills/*` dev folders with the user skill. |
 | **2** | AGENTS.md: **skill + CLI first** — **done** (Key documents). README: still mixed; align when convenient. |
-| **3** | OpenClaw: verify skill paths + optional gating metadata; keep MCP docs for users who want both. |
+| **3** | OpenClaw / **ClawHub listing** — **done** (zmail skill published for install / discoverability). |
 | **4** | Reassess MCP emphasis vs metrics. |
 
 ---
@@ -124,9 +124,9 @@ Per [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills):
    - Optional `references/` for deep links to repo docs (progressive disclosure per spec).  
    - **npm:** tarball already includes `skills/zmail` (no `files` whitelist today); document copy to `~/.cursor/skills/zmail`, `~/.claude/skills/zmail`, and OpenClaw **`~/.openclaw/skills/zmail`** or **`<workspace>/skills/zmail`**.
 
-2. **OpenClaw**  
+2. **OpenClaw / ClawHub**  
    - Same **spec-conformant folder** as other hosts; optionally add **`metadata.openclaw`** (single-line JSON per OpenClaw docs) for `requires.bins: ["zmail"]` once global/npm install guarantees `PATH`.  
-   - Optional: publish or document **ClawHub** install for discoverability — still the same `SKILL.md` tree, not a second format.
+   - **ClawHub:** skill **published** ([clawhub.com](https://clawhub.com) / [clawhub.ai](https://clawhub.ai)) — same `SKILL.md` tree as repo/npm, not a second format.
 
 3. **Optional CLI helper (later)**  
    - e.g. `zmail skill-path` or `zmail skill-install --target cursor|claude|openclaw` — opt-in only (no silent writes to home).
@@ -158,10 +158,10 @@ Per [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills):
 - [x] Spec-shaped **`skills/zmail/`** (`SKILL.md` + `references/`) in repository.  
 - [ ] Shipped skill directory passes **`skills-ref validate`** (or adopted equivalent) in CI or pre-publish.  
 - [ ] Manual smoke: copy into Cursor + Claude Code skill dirs; discovery via description.  
-- [ ] Manual smoke (OpenClaw): install skill into `~/.openclaw/skills` or workspace `skills/`; confirm load + optional bin gating.  
+- [x] **ClawHub listing** — zmail skill published ([clawhub.com](https://clawhub.com) / [clawhub.ai](https://clawhub.ai)) for install / discoverability.  
+- [ ] Manual smoke (optional): copy skill into Cursor / Claude Code dirs; OpenClaw via local path or ClawHub install — confirm load + optional bin gating on a target release (version noted if we formalize).  
 - [x] AGENTS.md: skill + CLI called out in Key documents (skill-first narrative).  
-- [ ] README: lead with skill + CLI before MCP (optional polish).  
-- [ ] OpenClaw: skill install path + optional MCP verified against a current OpenClaw release (version noted).
+- [ ] README: lead with skill + CLI before MCP (optional polish).
 
 ---
 
