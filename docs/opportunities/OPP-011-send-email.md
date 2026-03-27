@@ -77,7 +77,7 @@ Add send capability via SMTP (send-as-user through Gmail/Outlook/Fastmail). Same
 3. **MCP:** Optional `rewrite_draft` / `edit_draft` tools matching CLI semantics.
 4. **OAuth2 SMTP** for providers that disable app passwords (follow-up opp or section of this doc).
 5. **IMAP Append to Drafts** so local drafts appear in Gmail Drafts UI (optional).
-6. **Phase 3 (vision):** Voice profile from sent history; “Sent via zmail” tagline; deeper intent-to-action flows.
+6. **Phase 3 (vision):** Voice / compose context from sent history — see [OPP-029](OPP-029-compose-voice-context-from-sent-mail.md); “Sent via zmail” tagline; deeper intent-to-action flows.
 7. **Signatures (key requirement):** See [Key requirement: configurable signatures](#key-requirement-configurable-signatures) below.
 
 ---
@@ -112,7 +112,7 @@ Markdown with YAML frontmatter — see `src/send/draft-store.ts`. **Forward** dr
 
 1. **Send only** — Shipped: `zmail send`, MCP `send_email`.
 2. **Draft + confirm** — Shipped: `zmail draft …`, `zmail send <draft-id>`, MCP `create_draft` / `send_draft` / `list_drafts`. Optional tagline **not** shipped.
-3. **Voice profile** — Not started.
+3. **Voice / compose context** — Not started; spec [OPP-029](OPP-029-compose-voice-context-from-sent-mail.md).
 
 **Note on round-trips:** Answering mail is covered by `zmail ask` for orchestration ([ASK.md](../ASK.md)).
 
