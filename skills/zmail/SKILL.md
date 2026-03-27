@@ -12,7 +12,7 @@ compatibility: >-
   Node.js 20+; npm; `zmail` on PATH after global install. Network: IMAP, OpenAI (ask/inbox/setup),
   optional enrich providers. Disk: ~/.zmail (SQLite + maildir). Native addon: better-sqlite3 (rebuilt on first run if needed).
 metadata:
-  version: "0.1.1"
+  version: "0.1.2"
   homepage: "https://github.com/cirne/zmail"
   repository: "https://github.com/cirne/zmail"
   openclaw:
