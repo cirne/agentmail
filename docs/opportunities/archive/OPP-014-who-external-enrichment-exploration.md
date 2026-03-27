@@ -1,6 +1,8 @@
 # OPP-014: External Enrichment for `zmail who` — Exploration
 
-**Status:** Exploration — Exa tested, accuracy insufficient. Alternatives evaluated.
+**Archived:** 2026-03-26 — **exploration complete** (findings retained). Exa `--enrich` behavior and limitations are documented below; follow-on provider work (e.g. Tavily) belongs under [OPP-012](../OPP-012-who-smart-address-book.md) / [OPP-015](../OPP-015-who-enhanced-signature-extraction.md) if prioritized.
+
+**Status (historical):** Exploration — Exa tested, accuracy insufficient. Alternatives evaluated.
 
 **Problem:** `zmail who` extracts contact info from email signatures (title, company, phone, URLs), but this data is often missing or stale. External enrichment could add current LinkedIn/Twitter/GitHub profiles and up-to-date professional information, making `who` a more complete address book.
 
@@ -120,6 +122,6 @@
 
 ## References
 
-- Related: [OPP-012](OPP-012-who-smart-address-book.md) — Smart Address Book (includes signature extraction)
+- Related: [OPP-012](../OPP-012-who-smart-address-book.md) — Smart Address Book (includes signature extraction)
 - Exa docs: https://docs.exa.ai/reference/search
 - Tavily docs: https://docs.tavily.com/examples/quick-tutorials/linkedin-profile-search

@@ -139,7 +139,7 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 **Full-text search:** SQLite FTS5. Handles millions of emails with sub-100ms queries. No external service, runs in-process, trivially backed up as a single file.
 
-**Vector / semantic search (deferred):** Current implementation is FTS-only ([OPP-019](opportunities/OPP-019-fts-first-retire-semantic-default.md)). LanceDB and embedding generation may be reintroduced later; design assumed LanceDB embedded on volume, S3 backend for Phase 3.
+**Vector / semantic search (deferred):** Current implementation is FTS-only ([OPP-019 archived](opportunities/archive/OPP-019-fts-first-retire-semantic-default.md)). LanceDB and embedding generation may be reintroduced later; design assumed LanceDB embedded on volume, S3 backend for Phase 3.
 
 ---
 
@@ -402,7 +402,7 @@ We do **not** introduce async job IDs or a job queue for sync unless we later ne
 | Raw email (MIME) | `.eml` file in `maildir/` | No | Canonical artifact — everything rebuilds from this |
 | `body_text` | `.eml` file | **Yes** — `messages.body_text` | Required for FTS5. The external-content FTS5 table (`content='messages'`) reads from this column for indexing and `snippet()` generation. Removing it would break full-text search. |
 | `body_html` | `.eml` file | **No** | Not indexed, not searched. Parse from `.eml` on demand when rendering is needed. |
-| Embeddings | (deferred) LanceDB | No | Current implementation is FTS-only; vector layer removed (OPP-019). |
+| Embeddings | (deferred) LanceDB | No | Current implementation is FTS-only; vector layer removed ([OPP-019 archived](opportunities/archive/OPP-019-fts-first-retire-semantic-default.md)). |
 | Metadata (from, to, subject, date, labels) | `.eml` headers | **Yes** — `messages.*` columns | Needed for filtering, sorting, and display without parsing `.eml` on every query. |
 
 **Rationale:** The guiding principle is: the raw `.eml` store is the durable artifact; SQLite is a rebuildable index (ADR-002). Data should only be duplicated into SQLite when it is required for indexing or high-frequency queries. `body_text` qualifies because FTS5 cannot function without it. `body_html` does not — it's never searched and can be parsed from the `.eml` on the rare occasions it's needed. Metadata columns (from, to, subject, date) qualify because they're used in WHERE/ORDER BY/JOIN on nearly every query.
@@ -415,7 +415,7 @@ We do **not** introduce async job IDs or a job queue for sync unless we later ne
 
 **See also:** [SYNC.md](./SYNC.md) — Detailed sync implementation, optimization history, and performance analysis.
 
-**Current implementation:** Sync only. Embedding/indexing and hybrid search have been removed (FTS-first architecture, [OPP-019](opportunities/OPP-019-fts-first-retire-semantic-default.md)). The following describes the prior design; it may be restored or reimplemented later.
+**Current implementation:** Sync only. Embedding/indexing and hybrid search have been removed (FTS-first architecture, [OPP-019 archived](opportunities/archive/OPP-019-fts-first-retire-semantic-default.md)). The following describes the prior design; it may be restored or reimplemented later.
 
 **Decision (prior design):** `zmail sync` and `zmail refresh` are the user-facing sync commands. Both launched sync and indexing concurrently via `Promise.all` in a single thread:
 
@@ -435,7 +435,7 @@ zmail refresh  (forward sync)
               - Only fetches new messages since last sync
 ```
 
-**Single-threaded.** Sync runs in one process; embedding/indexing pipeline has been removed (OPP-019).
+**Single-threaded.** Sync runs in one process; embedding/indexing pipeline has been removed ([OPP-019 archived](opportunities/archive/OPP-019-fts-first-retire-semantic-default.md)).
 
 This replaces an earlier multi-worker design that used Bun Workers. That design was abandoned due to SQLite single-writer contention and Bun Worker stability issues. The async-pipelined approach achieves the same throughput for I/O-bound work with a much simpler execution model.
 

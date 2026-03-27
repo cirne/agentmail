@@ -121,7 +121,7 @@ High. Currently agents get basic contact info but miss structured details that a
 
 ## Alternatives Considered
 
-- External enrichment (OPP-014) — Adds dependency, may be stale; signature data is often more current
+- External enrichment ([OPP-014 archived](archive/OPP-014-who-external-enrichment-exploration.md)) — Adds dependency, may be stale; signature data is often more current
 - Manual contact management — Doesn't scale, goes stale
 - Current approach — Missing valuable structured data that's already in signatures
 
@@ -142,4 +142,4 @@ High. Currently agents get basic contact info but miss structured details that a
 - Vision (agent-first): [VISION.md](../VISION.md)
 - Related: [OPP-012](OPP-012-who-smart-address-book.md) — Smart Address Book (includes signature extraction)
 - Related: [BUG-014](../bugs/archive/BUG-014-who-signature-parser-noise.md) — Signature Parser Noise (boilerplate filtering)
-- Related: [OPP-014](OPP-014-who-external-enrichment-exploration.md) — External Enrichment (alternative approach)
+- Related: [OPP-014 archived](archive/OPP-014-who-external-enrichment-exploration.md) — External Enrichment (alternative approach)

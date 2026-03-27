@@ -1,8 +1,8 @@
 # OPP-025: Conform to Agent Skills spec — packaging and platform map
 
-**Status:** Open (research + proposal). No implementation commitment yet.
+**Status:** **Core artifact shipped** (2026-03-26) — [`skills/zmail/`](../../skills/zmail/) has valid YAML frontmatter (`name: zmail`), body + `references/`, and is linked from [AGENTS.md](../../AGENTS.md) as the publishable `/zmail` skill. **Remaining:** automation (`skills-ref validate` in CI or release checklist), manual smoke on Cursor/Claude/OpenClaw, optional README lead-in aligned with AGENTS skill-first ordering.
 
-**Canonical target:** The **end-user** portable skill at [`skills/zmail/`](../../skills/zmail/) (shipped in-repo and in npm) should **conform to the [Agent Skills specification](https://agentskills.io/specification.md)** — not an informal markdown file. That means: required directory layout, valid `SKILL.md` YAML frontmatter, naming rules, optional `scripts/` / `references/` / `assets/`, and validation (e.g. [`skills-ref validate`](https://github.com/agentskills/agentskills/tree/main/skills-ref) per the spec). **Out of scope for this OPP:** [`.cursor/skills/`](../../.cursor/skills/) in this repo — internal dev skills (`commit`, `db-dev`, `install-local`, `process-feedback`), not the publishable **`/zmail`** user skill.
+**Canonical target:** The **end-user** portable skill at [`skills/zmail/`](../../skills/zmail/) (in-repo; published **via npm package contents** alongside the CLI) should stay **conformant to the [Agent Skills specification](https://agentskills.io/specification.md)** as the spec and hosts evolve — not an informal markdown file. That means: required directory layout, valid `SKILL.md` YAML frontmatter, naming rules, optional `scripts/` / `references/` / `assets/`, and validation (e.g. [`skills-ref validate`](https://github.com/agentskills/agentskills/tree/main/skills-ref) per the spec). **Out of scope for this OPP:** [`.cursor/skills/`](../../.cursor/skills/) in this repo — internal dev skills (`commit`, `db-dev`, `install-local`, `process-feedback`), not the publishable **`/zmail`** user skill.
 
 **Problem (reframed):** zmail is agent-first (CLI, MCP, docs), but products disagree on **where** skills live and **what else** they support **beyond** the [Agent Skills](https://agentskills.io/) baseline (extra frontmatter, gating, registries). If we own **one spec-conformant skill tree**, we get a clear bar for CI/docs and **one folder** to copy into Cursor, Claude Code, and OpenClaw — with small, documented deltas where a host’s parser or OpenClaw-specific `metadata` matters.
 
@@ -108,9 +108,9 @@ Per [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills):
 
 | Phase | What changes |
 |-------|----------------|
-| **0 — Now** | This doc; optional experiment with spec layout + `skills-ref validate`. |
-| **1** | Canonical spec-conformant **`skills/zmail/`** (`/zmail`) in repo + npm tarball; optional: contributors dogfood via **personal** `~/.cursor/skills/zmail` — **never** replace this repo’s internal `.cursor/skills/*` dev folders with the user skill. |
-| **2** | AGENTS.md / README: **skill + CLI first**; MCP advanced. |
+| **0 — Now** | This doc; **`skills/zmail/`** layout + frontmatter **done**; `skills-ref validate` still optional. |
+| **1** | **`skills/zmail/`** in repo + npm — **done** (verify `npm pack` / published tarball includes `skills/`). Contributors dogfood via **personal** `~/.cursor/skills/zmail` — **never** replace this repo’s internal `.cursor/skills/*` dev folders with the user skill. |
+| **2** | AGENTS.md: **skill + CLI first** — **done** (Key documents). README: still mixed; align when convenient. |
 | **3** | OpenClaw: verify skill paths + optional gating metadata; keep MCP docs for users who want both. |
 | **4** | Reassess MCP emphasis vs metrics. |
 
@@ -155,10 +155,12 @@ Per [OpenClaw — Skills](https://docs.openclaw.ai/tools/skills):
 ## Test / acceptance criteria
 
 - [x] Opportunity doc + index entry in [OPPORTUNITIES.md](../OPPORTUNITIES.md).  
-- [ ] Shipped skill directory passes **`skills-ref validate`** (or adopted equivalent).  
+- [x] Spec-shaped **`skills/zmail/`** (`SKILL.md` + `references/`) in repository.  
+- [ ] Shipped skill directory passes **`skills-ref validate`** (or adopted equivalent) in CI or pre-publish.  
 - [ ] Manual smoke: copy into Cursor + Claude Code skill dirs; discovery via description.  
 - [ ] Manual smoke (OpenClaw): install skill into `~/.openclaw/skills` or workspace `skills/`; confirm load + optional bin gating.  
-- [ ] AGENTS.md / README: skill + CLI before MCP.  
+- [x] AGENTS.md: skill + CLI called out in Key documents (skill-first narrative).  
+- [ ] README: lead with skill + CLI before MCP (optional polish).  
 - [ ] OpenClaw: skill install path + optional MCP verified against a current OpenClaw release (version noted).
 
 ---

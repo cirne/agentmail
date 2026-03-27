@@ -6,8 +6,8 @@ Modern email systems are human-first — designed around inbox browsing and manu
 
 ## What it does
 
-- Syncs email from IMAP (Gmail-first) into local storage (`~/.zmail/data/maildir`, `~/.zmail/data/zmail.db`, `~/.zmail/data/vectors`)
-- Indexes for FTS + semantic retrieval and exposes CLI + MCP interfaces
+- Syncs email from IMAP (Gmail-first) into local storage (`~/.zmail/data/maildir`, SQLite index at `~/.zmail/data/zmail.db`)
+- Indexes for **FTS5** full-text search and exposes CLI + MCP interfaces
 - Supports agent-optimized shortlist → hydrate workflows via CLI search controls
 
 ## Quick start

@@ -1,12 +1,14 @@
 # OPP-020: Answer Engine — Local Agent for Faster Email Queries
 
-**Status:** Proposed experiment. **Created:** 2026-03-08. **Updated:** 2026-03-08.
+**Status:** **Phase 1 (CLI) shipped** — `zmail ask` runs the internal pipeline (`src/ask/`). **Open:** MCP single-tool exposure (`ask_email` or similar), formal bakeoff vs Gmail MCP latency targets, optional shortcuts/tuning. **Updated:** 2026-03-26.
+
+**Created:** 2026-03-08.
 
 **Problem:** zmail matches or slightly lags Gmail MCP in bakeoff wall-clock time despite faster individual tool execution. The bottleneck is the orchestrating agent: high tool count and complex tool interface force use of a high-power/slower LLM (e.g. Opus 4.6). Each round costs 15-25s. A typical query takes 3-4 rounds (search → read → follow-up → synthesize) = ~50-100s. The vast majority of that time is LLM deliberation, not tool execution.
 
 **Constraint:** Optimizing zmail's primitive tools cannot fix this. The only path to meaningful improvement is to move orchestration inside zmail: a faster/smaller LLM focused on email Q&A, with a purpose-built internal tool interface, so the user (or a future agent interface) sees a single "ask" and gets an answer — with zero or one external LLM round.
 
-**Proposed direction:** Make zmail an **answer engine**. Expose a single interface (e.g. `zmail ask "<question>"`) that returns a synthesized answer. All multi-step orchestration runs inside zmail: an internal micro-agent loop with email-native tools, a tiny context, and a fast/cheap model. External interface (MCP tool, agent harness, UI) is deferred; the prototype is CLI-only. Success is validated by re-running the same bakeoff questions and achieving **at least 50% latency improvement vs Google MCP** (e.g. ~50s → ~25s), with room for further gains. zmail may later become the agent that manages email (and calendar); the UI or agent interface comes later.
+**Direction:** zmail is an **answer engine** for the CLI: `zmail ask "<question>"` returns a synthesized answer; orchestration runs inside zmail (`src/ask/agent.ts`). **Still deferred:** exposing the same pipeline as an MCP tool so outer agents get one round instead of many primitive calls. Success criteria (e.g. ≥50% wall-clock vs Gmail MCP on bakeoff questions) remain useful for validation when we re-run benchmarks.
 
 ---
 
@@ -58,7 +60,7 @@ The interface between the internal LLM and zmail is **entirely different** from 
 - **No prescriptive flow:** the model decides order and how many steps. Aim for as few turns as possible; no hard cap.
 - **Swappable LLM provider:** easy to support (e.g. OpenAI, Anthropic). No dependency on Pi or other harnesses; we own the loop.
 
-External interface (MCP tool, agent harness, richer CLI) is **deferred**. For the prototype, the only surface we expose is `zmail ask "<question>"`.
+**MCP:** Primitive tools remain the MCP surface; a dedicated `ask`-style MCP tool is **still deferred**. The primary shipped surface for the answer engine is **`zmail ask "<question>"`** (CLI).
 
 ### Why the internal model is fast
 
@@ -118,9 +120,9 @@ The answer engine avoids overfitting to specific test cases (e.g., "try apple.co
 
 ---
 
-## What gets returned (Phase 1: CLI only)
+## What gets returned (CLI)
 
-Stream the answer to stdout as the model generates. Optionally include timing or metadata (e.g. pipeline ms, model used) for bakeoff comparison — same questions, measure wall clock vs Google MCP.
+Stream the answer to stdout as the model generates (`zmail ask`). Optionally include timing or metadata (e.g. pipeline ms, model used) for bakeoff comparison — same questions, measure wall clock vs Google MCP.
 
 Example:
 
@@ -139,7 +141,7 @@ Here are the key tech stories from your newsletters this week:
 Sources: TLDR (Mar 7, Mar 6), The Information (Mar 7), ...
 ```
 
-When we later expose an external interface (e.g. MCP `ask_email`), we can return structured JSON (answer, sources, searchesRun, pipelineMs) so callers can cite or drill deeper. Deferred for Phase 1.
+When we expose an MCP interface (e.g. `ask_email`), we can return structured JSON (answer, sources, searchesRun, pipelineMs) so callers can cite or drill deeper — still **deferred** (see Phase 2).
 
 ---
 
@@ -157,11 +159,11 @@ Body previews, batch reads, attachment indicators — these reduce rounds from 3
 
 **These improvements also help the answer engine** — richer search results mean the internal pipeline has more to work with before needing follow-up queries.
 
-### 3. Answer engine with current semantic search (rejected)
+### 3. Answer engine with semantic / hybrid search (rejected for the shipped stack)
 
-Branching off main (which had LanceDB + per-query OpenAI embeddings) was considered. The reasoning: if zmail controls the pipeline, embedding latency (~500ms) is hidden inside a 2-5s operation.
+Historically, LanceDB + per-query embeddings were considered; embedding latency could be hidden inside a longer pipeline.
 
-**Rejected because:** The current semantic implementation (LanceDB + OpenAI API per query) is the wrong architecture regardless. If semantic search is reintroduced for the answer engine, it should use:
+**Rejected because:** The hybrid semantic stack was removed in favor of FTS-only ([archived OPP-019](archive/OPP-019-fts-first-retire-semantic-default.md)). If semantic search is **reintroduced** for `ask`, prefer:
 - **sqlite-vec** — embeddings in SQLite, one file, no LanceDB dependency
 - **Local or index-time embeddings** — no per-query API call
 - Tight integration with the query planner, not generic hybrid RRF merge
@@ -180,31 +182,20 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 
 ## Phasing
 
-### Phase 1: Validate the architecture (the experiment)
+### Phase 1: Validate the architecture (CLI) — **delivered**
 
-**Goal:** Re-run the same bakeoff questions with `zmail ask`. Achieve **at least 50% latency improvement vs Google MCP** (e.g. ~50s → ~25s). Prove that a faster/smaller LLM plus a purpose-built internal tool interface can beat the current multi-round, high-tool-count approach.
+**Shipped:** `zmail ask <question>` (`src/ask/`): internal micro-agent loop with email-native tools, FTS-backed search, streaming answer to stdout, verbose mode for timings.
 
-**Scope:**
-- `zmail ask <question>` CLI command (only external interface for the prototype)
-- Internal micro-agent loop: fast LLM (e.g. GPT-4.1 mini) with tool-calling; no hardcoded pipeline
-- Purpose-built internal tools: email-native, information-dense (search, get_messages, who, get_thread as needed)
-- Streaming answer to stdout; optional timing/metadata for bakeoff comparison
-- Swappable LLM provider kept simple (no Pi or external harness)
+**Still useful:** Re-run bakeoff questions and measure wall clock **vs Google MCP** (≥50% improvement was the original bar; treat as ongoing evaluation, not blocking).
 
-**Success criteria:**
-- Same bakeoff questions as before; wall clock **≥50% lower than Google MCP** (e.g. ≤25s where Gmail was ~50s)
-- Answer quality acceptable (good enough to trust for the tested questions)
-- Room for further improvement (e.g. tuning tools, context, or model) without redesign
-
-**Non-goals for Phase 1:**
-- MCP `ask_email` or any external agent interface (defer until CLI validates)
-- Rule-based intent shortcuts (add later if useful)
-- Semantic search / embeddings
-- Production-grade error handling or polish
+**Original non-goals that remain open:**
+- MCP `ask_email` or equivalent — still deferred ([OPP-023](OPP-023-ask-only-interface.md) discusses full removal of primitives)
+- Rule-based intent shortcuts — optional later
+- Semantic search / embeddings — out of scope (FTS-only; see archived [OPP-019](archive/OPP-019-fts-first-retire-semantic-default.md))
 
 ### Phase 2: External interface + tuning
 
-- Expose `ask` as MCP tool or other agent interface if desired
+- Expose `ask` as MCP tool or other agent interface (not yet in `src/mcp/`)
 - Add rule-based shortcuts for high-frequency patterns if data supports it
 - Tune internal tools and prompts based on Phase 1 usage
 - Decide strategy for primitive tools (keep alongside ask, or make ask the default)
@@ -221,7 +212,7 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 ### Benefits
 
 - **Target: ≥50% latency improvement vs Google MCP** on same bakeoff questions (e.g. ~50s → ~25s), with room to go lower
-- **CLI-first** — validate without building MCP or agent UI; external interface comes later
+- **CLI shipped** — `zmail ask` is the validated path; MCP wrapper for the same pipeline is optional next step
 - **Model control** — zmail uses a fast/cheap model for the task; no dependency on a heavy orchestrator (Opus, etc.)
 - **Purpose-built internal tools** — email-native, information-dense; not a generic tool library
 - **Streaming** — answers appear progressively
@@ -246,8 +237,8 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 | Item | Impact |
 |------|--------|
 | **OPP-018** (reduce round-trips) | **Archived** (phase 1 done). [archive/OPP-018-reduce-agent-round-trips.md](archive/OPP-018-reduce-agent-round-trips.md) — richer search + batch read still help the answer engine's internal pipeline. |
-| **OPP-019** (FTS-first) | Confirmed and reinforced. The answer engine uses FTS for retrieval. Semantic search deferred to Phase 3. |
-| **OPP-002** (local embeddings) | Deferred. If semantic is reintroduced, sqlite-vec + local model is the path, not the prior LanceDB approach. |
+| **OPP-019** (FTS-first) | **Implemented** (archived). Answer engine uses FTS for retrieval; vector pipeline removed. |
+| **OPP-002** (local embeddings) | **Archived / superseded** unless vector retrieval returns; then sqlite-vec + local model over LanceDB. |
 | **BUG-016** (exhaustive search) | Still relevant — the answer engine's spending/receipt intents need exhaustive `from:` queries. Domain auto-routing fix benefits both architectures. |
 | **STRATEGY.md** | May need updating. The answer engine shifts zmail from "queryable dataset for agents" toward "intelligent email assistant." The local-index moat argument still holds — the answer engine runs on the local index. |
 
@@ -256,7 +247,7 @@ Deterministic pipelines for common patterns (`zmail news`, `zmail spending`, `zm
 ## References
 
 - Bakeoff performance data: [OPP-018](archive/OPP-018-reduce-agent-round-trips.md) (archived), BUG-016 (same questions to be re-run for Phase 1 validation)
-- FTS-first decision: OPP-019
+- FTS-first decision: [ARCHIVED OPP-019](archive/OPP-019-fts-first-retire-semantic-default.md)
 - STRATEGY.md — competitive positioning
 - VISION.md — "just works in the agent" user promise
 - Prior art: Perplexity (search → synthesize), Phind (code search → answer), RAG pipelines generally

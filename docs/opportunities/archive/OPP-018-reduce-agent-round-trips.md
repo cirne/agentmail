@@ -138,6 +138,6 @@ In Bakeoff #3 and #4, agents always read newsletters in full — the snippet jus
 - Supporting data: `../../../ztest/feedback/submitted/bakeoff-001-rudy-funds.md`, `bakeoff-003-news-headlines.md`
 - Related: [BUG-016](../../bugs/archive/BUG-016-bakeoff-incomplete-coverage-critical.md) — exhaustive search coverage
 - Related: [BUG-017](../../bugs/BUG-017-semantic-recall-gap-intent-queries.md) — semantic recall gap
-- Related: [OPP-002](../OPP-002-local-embeddings.md) — local embeddings (eliminates 500–800ms embedding round-trip)
+- Related: [OPP-002 archived](OPP-002-local-embeddings.md) — local embeddings (historical; archived — FTS-only today)
 - MCP server: `src/mcp/index.ts`
 - CLI search: `src/cli/index.ts`

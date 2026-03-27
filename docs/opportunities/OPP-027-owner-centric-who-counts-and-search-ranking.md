@@ -114,5 +114,5 @@ Search computes **`combined_rank = fts_rank - dateBoost`** and orders by that (`
 
 - [OPP-012](OPP-012-who-smart-address-book.md) — smart address book; proposed `relationship` score partially overlaps (implement owner-centric counts first, then relationship score can wrap them).
 - [OPP-001](OPP-001-personalization.md) — user context for search; contact boosts are complementary (structural vs lexical personalization).
-- [OPP-019](OPP-019-fts-first-retire-semantic-default.md) — FTS-first retrieval; this opp strengthens FTS ranking without adding embeddings.
+- [OPP-019 archived](archive/OPP-019-fts-first-retire-semantic-default.md) — FTS-first retrieval; this opp strengthens FTS ranking without adding embeddings.
 - [OPP-021](OPP-021-ask-spam-promo-awareness.md) — spam/promotional awareness for ask/search; **refresh/inbox** work here may combine **noise filters** with **regular-correspondent protection** so human mail is not dropped with bulk.

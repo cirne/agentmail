@@ -78,7 +78,7 @@ The search, read, who, attachment functions in `src/search/`, `src/messages/`, `
 | Loss | Severity | Mitigation |
 |------|----------|------------|
 | **Structured JSON output** — agents can't get a JSON array of search results to render in a UI or process programmatically | Medium | Phase 2: add structured output mode to `ask` (e.g. `--json` returns `{ answer, sources: [...], messages: [...] }`). Or keep `search` as a hidden/internal debug command. |
-| **Offline/no-API-key usage** — primitives work without OpenAI; `ask` requires `ZMAIL_OPENAI_API_KEY` | Medium | Prerequisite: solve before removing primitives. Options: (a) require API key for all query features (acceptable for agent-first product), (b) local model fallback (OPP-002), (c) keep a minimal `search --offline` escape hatch. |
+| **Offline/no-API-key usage** — primitives work without OpenAI; `ask` requires `ZMAIL_OPENAI_API_KEY` | Medium | Prerequisite: solve before removing primitives. Options: (a) require API key for all query features (acceptable for agent-first product), (b) local model fallback (if vector search returns; [OPP-002 archived](archive/OPP-002-local-embeddings.md)), (c) keep a minimal `search --offline` escape hatch. |
 | **Debugging opaqueness** — can't `search` then `read` to verify what `ask` sees | Low | `ask --verbose` already shows the full pipeline (searches run, messages fetched, context assembled). Enhance verbose output if needed. |
 | **Raw data access** — `attachment read --raw` for binary extraction, `read --raw` for EML | Low | These are rare power-user operations. Could keep as hidden/undocumented commands or add `ask --raw-attachment <id>` if needed. |
 | **`who` as structured contact lookup** — returns JSON with addresses, phone, title, counts | Low | `ask "who is X?"` returns the same info as prose. If structured contact data is needed later (OPP-012, OPP-015), expose a dedicated `contacts` command rather than the current `who`. |
@@ -87,7 +87,7 @@ The search, read, who, attachment functions in `src/search/`, `src/messages/`, `
 
 The most significant tradeoff is that removing primitives makes zmail entirely dependent on an OpenAI API key for any query functionality. Today, a user can `zmail search` and `zmail read` without any API key. After this change, `zmail ask` is the only query path and it requires `ZMAIL_OPENAI_API_KEY`.
 
-**Assessment:** For an agent-first product where the primary consumer is an LLM (which itself costs money to run), requiring a cheap API key ($0.003/query) is acceptable. Users who install zmail already have API keys. If this becomes a barrier, local models (OPP-002) or a future free tier could address it.
+**Assessment:** For an agent-first product where the primary consumer is an LLM (which itself costs money to run), requiring a cheap API key ($0.003/query) is acceptable. Users who install zmail already have API keys. If this becomes a barrier, local models or a future free tier could address it (see [OPP-002 archived](archive/OPP-002-local-embeddings.md) only if vector/embeddings return).
 
 ---
 

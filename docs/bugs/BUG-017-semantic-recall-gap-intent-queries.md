@@ -1,6 +1,6 @@
 # BUG-017: Semantic Recall Gap for Intent-Based Queries — Agent-Reported
 
-**Status:** Open. **Resolution path confirmed by Bakeoff #5 (2026-03-07)** — FTS + agent query decomposition fixes this. The root cause is semantic search as the default, not a fundamental search recall problem. See [OPP-019](../../opportunities/OPP-019-fts-first-retire-semantic-default.md).
+**Status:** Open. **Resolution path confirmed by Bakeoff #5 (2026-03-07)** — FTS + agent query decomposition fixes this. The root cause is semantic search as the default, not a fundamental search recall problem. See [OPP-019 archived](../../opportunities/archive/OPP-019-fts-first-retire-semantic-default.md).
 
 **Design lens:** [Agent-first](../../VISION.md) — When a user asks a vague, intent-based question like "who is that entrepreneur I met last week?", zmail must connect signal across heterogeneous email types (Zoom invites, Otter.ai shares, follow-up emails, investor intros). Missing a person who exists in the data is a quality failure that makes zmail unreliable for personal memory queries.
 
@@ -74,7 +74,7 @@ The semantic search fetches top-100 from LanceDB and slices to the limit (defaul
 
 In Bakeoff #5 (rematch, FTS-only), all three zmail interfaces found Marcio Nunes. The agents decomposed the vague query into keyword-rich searches (`"meeting OR zoom OR call"`, `"entrepreneur OR startup OR founder"`), which FTS matched instantly. zmail MCP even found a second entrepreneur (Sarah Findlay) that Gmail missed.
 
-**The fix for BUG-017 is not to improve semantic search — it's to stop relying on it as the default.** With FTS as the default, agents naturally do query decomposition that covers the vocabulary space semantic embeddings were supposed to cover. See [OPP-019](../../opportunities/OPP-019-fts-first-retire-semantic-default.md).
+**The fix for BUG-017 is not to improve semantic search — it's to stop relying on it as the default.** With FTS as the default, agents naturally do query decomposition that covers the vocabulary space semantic embeddings were supposed to cover. See [OPP-019 archived](../../opportunities/archive/OPP-019-fts-first-retire-semantic-default.md).
 
 ## References
 
@@ -82,5 +82,5 @@ In Bakeoff #5 (rematch, FTS-only), all three zmail interfaces found Marcio Nunes
 - Related architecture: BUG-016 (exhaustive enumeration gap — same root problem for different query type)
 - Bakeoff failure: `../ztest/feedback/submitted/bakeoff-002-entrepreneur-meeting.md`
 - Bakeoff confirmation: `../ztest/feedback/submitted/bakeoff-005-entrepreneur-rematch.md`
-- Resolution: [OPP-019](../../opportunities/OPP-019-fts-first-retire-semantic-default.md) — FTS-first architecture
+- Resolution: [OPP-019 archived](../../opportunities/archive/OPP-019-fts-first-retire-semantic-default.md) — FTS-first architecture
 - Relevant code: `src/search/index.ts` — `searchWithMeta`, `vectorSearchFromEmbedding`

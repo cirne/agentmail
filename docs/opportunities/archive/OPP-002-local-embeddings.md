@@ -1,6 +1,8 @@
 # OPP-002: Local Embeddings — Eliminate Search Latency and OpenAI Dependency
 
-**Problem:** The primary bottleneck for semantic search is generating the query embedding. Every search incurs a network round-trip to the OpenAI API (100–300ms) before the vector lookup even begins. This is wasteful for the search-time case: query strings are short (typically < 20 tokens), so the actual compute is trivial — we're paying for the round-trip, not the work.
+**Archived:** 2026-03-26 — **superseded / no longer relevant** for the current product: search is FTS-only ([ARCHITECTURE.md](../../ARCHITECTURE.md)); the LanceDB + embedding pipeline was removed ([OPP-019](OPP-019-fts-first-retire-semantic-default.md)). Revisit only if vector / semantic retrieval is reintroduced as an opt-in path.
+
+**Problem (historical):** The primary bottleneck for semantic search is generating the query embedding. Every search incurs a network round-trip to the OpenAI API (100–300ms) before the vector lookup even begins. This is wasteful for the search-time case: query strings are short (typically < 20 tokens), so the actual compute is trivial — we're paying for the round-trip, not the work.
 
 Additionally, requiring `OPENAI_API_KEY` is a friction point for open-source users who want full privacy or offline operation.
 

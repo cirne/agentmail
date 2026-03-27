@@ -1,6 +1,8 @@
 # OPP-019: FTS-First Architecture — Retire Semantic Search as Default
 
-**Status:** Strategic decision — confirmed by empirical bakeoff testing (2026-03-07).
+**Archived:** 2026-03-26 — **implemented** in codebase (FTS-only search; LanceDB / per-query embeddings removed). Canonical current-state detail: [ARCHITECTURE.md](../../ARCHITECTURE.md).
+
+**Status (historical):** Strategic decision — confirmed by empirical bakeoff testing (2026-03-07). The “Proposed direction” section below records rationale and bakeoff evidence; shipped behavior is FTS-only without hybrid/`--semantic` flags.
 
 **Problem:** Semantic (vector) search was designed for the wrong user model. zmail was built with the assumption that *the search engine* must understand user intent — hence hybrid semantic+FTS as the default. But in an agent-first architecture, **the agent IS the semantic layer.** The agent converts vague user intent into concrete keyword queries before ever calling zmail. This makes built-in semantic search redundant at best, and actively harmful at worst.
 
@@ -152,9 +154,9 @@ What remains: SQLite FTS5 — zero external dependencies, single file, determini
 
 ## References
 
-- Bakeoff #2 (semantic failure): `../ztest/feedback/submitted/bakeoff-002-entrepreneur-meeting.md`
-- Bakeoff #5 (FTS confirmation): `../ztest/feedback/submitted/bakeoff-005-entrepreneur-rematch.md`
-- Related architecture: [ARCHITECTURE.md](../ARCHITECTURE.md) — ADR-006 (embedding/search strategy) should be updated to reflect this decision
-- Superseded by this: [OPP-002](OPP-002-local-embeddings.md) (local embeddings) — reduced priority
-- Resolved by this: [BUG-017](../bugs/BUG-017-semantic-recall-gap-intent-queries.md) (semantic recall gap)
-- Simplified by this: [BUG-016](../bugs/BUG-016-bakeoff-incomplete-coverage-critical.md) (exhaustive enumeration — domain routing becomes the clean fix)
+- Bakeoff #2 (semantic failure): `../../../ztest/feedback/submitted/bakeoff-002-entrepreneur-meeting.md` (sibling repo `ztest`, if present)
+- Bakeoff #5 (FTS confirmation): `../../../ztest/feedback/submitted/bakeoff-005-entrepreneur-rematch.md`
+- Related architecture: [ARCHITECTURE.md](../../ARCHITECTURE.md) — embedding/vector layer deferred; FTS-only documented
+- Superseded by this: [OPP-002](OPP-002-local-embeddings.md) (local embeddings for vector search — archived as superseded)
+- Resolved by this: [BUG-017](../../bugs/BUG-017-semantic-recall-gap-intent-queries.md) (semantic recall gap)
+- Simplified by this: [BUG-016](../../bugs/BUG-016-bakeoff-incomplete-coverage-critical.md) (exhaustive enumeration — domain routing becomes the clean fix)

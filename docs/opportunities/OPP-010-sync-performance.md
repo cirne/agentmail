@@ -1,5 +1,7 @@
 # OPP-010: Sync / Refresh Performance — 5x Faster Incremental Updates
 
+**Status (2026-03-26):** **Milestone achieved** — “nothing new” refresh dropped from ~42s to ~8.2s; STATUS-before-open, EXAMINE, parallel connect, batch/pipeline work shipped (see [SYNC.md](../SYNC.md)). **Still tracked here:** backfill throughput (wire saturation), IDLE / persistent connections, TLS reuse, and other ideas below. **Historical:** baseline numbers below included an embedding indexer tail; zmail is now FTS-only ([OPP-019 archived](../archive/OPP-019-fts-first-retire-semantic-default.md)), so sync no longer waits on embedding API indexing.
+
 **Problem:** Initial analysis (2026-03-06) showed a refresh on a fast fiber connection (650 Mbps) syncing 33 new messages took ~42 seconds at 50 KB/s effective throughput. We were not network-bound — the bottleneck was IMAP protocol chattiness.
 
 **Original baseline (2026-03-06, Gmail, 33 messages, 2 MB):**
@@ -9,7 +11,7 @@
 | Start → IMAP connected | ~16s | Fresh TLS handshake + AUTHENTICATE every run |
 | IMAP connected → UIDs found | ~20s | Mailbox SELECT + SEARCH on `[Gmail]/All Mail` |
 | fetchAll (33 msgs, 2 MB) | ~6s | Actual data transfer |
-| Indexing (concurrency 2) | ~44s | OpenAI embedding API, overlaps with sync |
+| Indexing (concurrency 2) | ~44s | *(Historical — embedding indexer since removed; see archived [OPP-019](../archive/OPP-019-fts-first-retire-semantic-default.md).)* |
 | **Total** | **~42s** | **36s of pure overhead before data arrives** |
 
 **Current performance (after optimizations):**
@@ -53,16 +55,12 @@ Gmail's `[Gmail]/All Mail` is a virtual folder containing every message across a
 
 ---
 
-## Theory 3: Indexing concurrency is too low
+## Theory 3: Indexing concurrency (historical)
 
-Indexing runs at `INDEXER_CONCURRENCY=2` (2 concurrent OpenAI embedding API calls in flight). The indexer is already pipeline-parallelized with sync (starts immediately), but finishes 2.5s after sync — it's the tail.
+**Update:** The OpenAI embedding indexer described here was part of the old hybrid-search stack and has been **removed** ([archived OPP-019](../archive/OPP-019-fts-first-retire-semantic-default.md)). Sync today finishes with **FTS indexing in SQLite** only — no separate embedding tail. This section is kept as context for why older profiles showed a long “indexing” phase.
 
-For a larger batch or slower network day, indexing could be the dominant constraint.
-
-**Ideas:**
-- **Increase default concurrency to 5–8.** The OpenAI embeddings endpoint is rate-limited by tokens, not connections. At `text-embedding-3-small` with typical email batches, 5–8 concurrent requests is well within rate limits and roughly linear in throughput. This is already env-var configurable (`INDEXER_CONCURRENCY`); just change the default.
-- **Larger embedding batch size.** `BATCH_SIZE=100` messages per OpenAI call. For small refreshes (33 messages), we make 1 call. For backfill of thousands, batching larger reduces per-request overhead. Consider adaptive batch sizing based on token count rather than message count.
-- **Local embeddings (see OPP-002).** Switching to a local model (`bge-small-en-v1.5` via transformers.js) eliminates the API round-trip entirely. At ~50ms/message on CPU vs. ~200ms API round-trip, indexing 40 messages drops from ~44s to ~2s.
+**Ideas (historical — if embeddings return):**
+- Higher embedding concurrency, larger batch sizes, or local embeddings — see archived [OPP-002](../archive/OPP-002-local-embeddings.md).
 
 ---
 
@@ -95,12 +93,12 @@ Every new message calls `writeFileSync(absPath, raw, "binary")` before inserting
 | 1 | `STATUS` check before `SELECT` (skip if no new mail) | ✅ Done | 20–36s saved when inbox unchanged |
 | 2 | Parallel connect during startup | ✅ Done | ~6s overlap achieved |
 | 3 | EXAMINE instead of SELECT | ✅ Done | 2.4x faster mailbox open |
-| 4 | Increase `INDEXER_CONCURRENCY` default to 5 | ✅ Done | 2x indexing speed |
+| 4 | Increase `INDEXER_CONCURRENCY` default to 5 | ✅ Done (historical embedding pipeline; since removed) | 2x indexing speed when embeddings existed |
 | 5 | Phase instrumentation | ✅ Done | Full visibility into bottlenecks |
 | 6 | Increase batch size for backward sync | ✅ Done | 4-10x fewer round-trips |
 | 7 | Pipeline fetch + parse + insert | ✅ Done | 2-3x throughput for large syncs |
 | 8 | IMAP IDLE / persistent connection | ⏸️ Deferred | 16s per poll (daemon use-case) |
-| 9 | Local embeddings (OPP-002) | ⏸️ Deferred | 20x indexing speed |
+| 9 | Local embeddings ([OPP-002 archived](../archive/OPP-002-local-embeddings.md)) | ⏸️ N/A while FTS-only | Only if vector search returns |
 
 **Achievement:** Items 1-3 together cut a "nothing new" refresh from 42s to 8.2s — **5x faster** ✅
 
@@ -478,7 +476,7 @@ Based on the 60d sync analysis, we're using <1% of available bandwidth. To appro
 2. **Parallel batch fetching** — Fetch 2-3 batches concurrently (requires connection pooling, may hit IMAP server limits)
 3. **IMAP IDLE** — Persistent connection for daemon mode (eliminates 12s TLS reconnect)
 4. **Larger batch sizes** — Test 400-500 for very large backfills (1y+)
-5. **Local embeddings (OPP-002)** — 20x indexing speed improvement
+5. **Local embeddings** ([OPP-002 archived](../archive/OPP-002-local-embeddings.md)) — only relevant if vector indexing returns
 
 ### 📊 Performance Trajectory
 

@@ -194,7 +194,7 @@ answer = ask_zmail("who is marcio nunes and how do I know him?")
 }
 ```
 
-**Note:** MCP tool integration is **deferred** until CLI prototype validates performance. See [OPP-020](../opportunities/OPP-020-answer-engine-local-agent.md) for phasing.
+**Note:** **`zmail ask` is shipped** on the CLI. A dedicated MCP tool wrapping the same pipeline (`ask_email` or similar) is **still deferred** — see [OPP-020](../opportunities/OPP-020-answer-engine-local-agent.md) for Phase 2.
 
 ### Pattern 3: Hybrid Approach
 
@@ -287,10 +287,9 @@ zmail ask "your question" 2>/dev/null
 
 See [OPP-020](../opportunities/OPP-020-answer-engine-local-agent.md) for roadmap:
 
-- **Phase 2:** MCP `ask_email` tool for programmatic access
-- **Phase 2:** Structured JSON output (answer + sources + metadata)
-- **Phase 2:** Rule-based shortcuts for common patterns
-- **Phase 3:** Semantic search integration (if needed)
+- **Phase 1 (done):** CLI `zmail ask` with internal pipeline
+- **Phase 2 (open):** MCP `ask_email` tool (or equivalent), structured JSON output, rule-based shortcuts
+- **Phase 3 (only if needed):** Vector / semantic retrieval — product is FTS-only today ([OPP-019 archived](../opportunities/archive/OPP-019-fts-first-retire-semantic-default.md))
 
 ---
 
