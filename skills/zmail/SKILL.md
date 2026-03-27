@@ -44,7 +44,10 @@ Use this block to keep **ClawHub / OpenClaw registry fields** aligned with the s
 | **On PATH** | Global npm `bin` must be on **`PATH`**, or use **`npx @cirne/zmail`** for one-off invocations. |
 | **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and optional **`zmail who --enrich`**. |
 | **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, and **`who --enrich`** can send **email-derived content** (subjects, snippets, bodies, addresses) to **OpenAI** or other APIs—only use if the **mailbox owner** accepts that. Primitives **`search` / `read` / `thread` / `attachment`** (without enrich) are local index + disk only once mail is synced. |
-| **Persistence & destructive actions** | Data lives under **`ZMAIL_HOME`** (default **`~/.zmail`**). **`zmail setup --clean --yes`** wipes config + data there—**irreversible** without a backup. |
+| **Credentials on disk** | Secrets live under **`ZMAIL_HOME/.env`** (and non-secret settings in **`config.json`**). They are used only to talk to **your** IMAP host and (when configured) **OpenAI**—not to third-party analytics or the zmail project. Treat **`.env`** like any password file (permissions, backups, don’t paste into chats). |
+| **IMAP / send posture** | **Read-only today:** zmail syncs and indexes mail; it does **not** implement **SMTP send** in this release. Normal sync is a **local cache** of what remains on the server—deleting local data (see below) does not remove server-side mail. |
+| **MCP (optional)** | **`zmail mcp`** uses **stdio** JSON-RPC only (stdin/stdout)—**no** in-process HTTP server or listening TCP port for MCP. |
+| **Persistence & local wipe** | Config and a **local** copy of mail (SQLite index + maildir cache under **`data/`**) live under **`ZMAIL_HOME`** (default **`~/.zmail`**). **`zmail setup --clean --yes`** removes that local tree and rewrites config—it does **not** delete mail on the **IMAP server**; after setup, run **`zmail sync`** to **rebuild** the local cache from IMAP. You still lose unsaved **local-only** state (e.g. extracted-attachment cache, any data not on the server). |
 | **Shell safety** | Invoke **`zmail`** with **argument arrays** (or careful quoting). **Never** paste untrusted mail text or chat content into a **`sh -c "zmail …"`** string—**command-injection** risk. |
 
 OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://docs.openclaw.ai/tools/creating-skills): **`bins`** = executables expected on **`PATH`** (**`zmail`** exists only **after** the global install step). **`config`** lists environment variables this workflow expects for a configured mailbox (mirror the same in ClawHub package metadata if the UI has separate fields).
@@ -98,7 +101,7 @@ If app passwords are disabled (workspace policy, account type), the user must us
 
 - **When:** Real terminal with TTY; user is present to answer prompts.
 - **Run:** `zmail wizard`  
-  Optional: `--no-validate` (skip live IMAP/OpenAI checks), `--clean` (wipe existing config/data; may prompt unless `--yes`).
+  Optional: `--no-validate` (skip live IMAP/OpenAI checks), `--clean` (wipe local config + cached mail under `ZMAIL_HOME`; IMAP unchanged; may prompt unless `--yes`).
 - **If stdin is not a TTY** (agents, CI, pipes): wizard **exits** with a message to use **`zmail setup`** instead.
 - Wizard walks through email, IMAP app password, OpenAI key, default sync window, and can **start background sync** at the end.
 
@@ -138,7 +141,7 @@ zmail setup
 |------|--------|
 | `--no-validate` | Skip IMAP and OpenAI validation (faster/offline-ish write of config only). |
 | `--default-since <spec>` | Default sync window in config (e.g. `7d`, `1y`). Default if omitted: `1y`. |
-| `--clean --yes` | Delete existing `config.json`, `.env`, and `data/` under `ZMAIL_HOME`, then write new config (**destructive**). |
+| `--clean --yes` | Delete existing `config.json`, `.env`, and `data/` under `ZMAIL_HOME`, then write new config. **Local only**—IMAP mailbox unchanged; resync rebuilds the index/cache. |
 
 If any required value is missing, `zmail setup` prints what’s missing and exits—fix env/flags and retry.
 
