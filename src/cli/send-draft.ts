@@ -18,9 +18,13 @@ import {
   rewriteDraftWithInstruction,
   composeNewDraftFromInstruction,
   draftRecordToJsonObject,
+  buildDraftListJsonPayload,
+  draftListSlimHint,
   type DraftFrontmatter,
   type DraftRecord,
 } from "~/send";
+import { resolveSearchJsonFormat, type SearchResultFormatPreference } from "~/search/search-json-format";
+import { parseCliResultFormatMode } from "~/lib/result-format-cli";
 import { DEV_SEND_ALLOWLIST } from "~/send/recipients";
 
 function getFlag(args: string[], flag: string): string | undefined {
@@ -34,6 +38,31 @@ function getFlag(args: string[], flag: string): string | undefined {
 
 function hasFlag(args: string[], flag: string): boolean {
   return args.includes(flag);
+}
+
+/**
+ * Strips `--result-format <m>` from draft list args (same flag and values as `zmail search`; space-separated only).
+ */
+function stripDraftListResultFormatFlags(args: string[]): {
+  resultFormat: SearchResultFormatPreference;
+  rest: string[];
+} {
+  const rest: string[] = [];
+  let resultFormat: SearchResultFormatPreference = "auto";
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i]!;
+    if (a === "--result-format") {
+      const v = args[i + 1];
+      if (!v || v.startsWith("-")) {
+        throw new Error("Missing value for --result-format");
+      }
+      resultFormat = parseCliResultFormatMode(v);
+      i++;
+      continue;
+    }
+    rest.push(a);
+  }
+  return { resultFormat, rest };
 }
 
 /** Human-readable draft for `zmail draft view --text`. */
@@ -228,7 +257,9 @@ function printSendResult(result: Awaited<ReturnType<typeof sendSimpleMessage>>, 
 export function draftUsage(): void {
   console.error("Usage:");
   console.error("  <id> is the draft file stem under data/drafts/ (e.g. project-update_a1b2c3d4); .md optional when passing it to send.");
-  console.error("  zmail draft list [--text]     JSON: id, path, kind, subject (path = read with read_file)");
+  console.error(
+    "  zmail draft list [--text] [--result-format <m>]   auto | full | slim — JSON row shape (default: auto; auto uses slim when >50 drafts); full rows include bodyPreview"
+  );
   console.error("  zmail draft view <id> [--text] [--with-body]   JSON: path + headers; omit body unless --with-body");
   console.error("  zmail draft new --to <addrs> --subject <s> [--body <t> | --body-file <path>] [--with-body] [--text]");
   console.error("  zmail draft new --to <addrs> --instruction <text> [--with-body] [--text]   (LLM compose)");
@@ -257,12 +288,35 @@ export async function runDraftCli(args: string[]): Promise<void> {
   const withBody = hasFlag(rest, "--with-body");
 
   if (sub === "list") {
+    let resultFormat: SearchResultFormatPreference;
+    let listRest: string[];
+    try {
+      ({ resultFormat, rest: listRest } = stripDraftListResultFormatFlags(rest));
+    } catch (err) {
+      draftUsage();
+      console.error(err instanceof Error ? `\n${err.message}` : String(err));
+      process.exit(1);
+    }
+    const forceText = hasFlag(listRest, "--text");
+    const asJsonList = !forceText;
     const rows = listDrafts(dataDir);
-    if (asJson) {
-      console.log(JSON.stringify({ drafts: rows }, null, 2));
+    if (asJsonList) {
+      console.log(JSON.stringify(buildDraftListJsonPayload(rows, resultFormat), null, 2));
     } else {
+      const fmt = resolveSearchJsonFormat({
+        resultCount: rows.length,
+        preference: resultFormat,
+        allowAutoSlim: true,
+      });
       for (const r of rows) {
         console.log(`${r.id}\t${r.kind}\t${r.subject ?? ""}\t${r.path}`);
+        if (fmt === "full" && r.bodyPreview.trim()) {
+          const preview = r.bodyPreview.replace(/\n/g, " ").slice(0, 120);
+          console.log(`    ${preview}${r.bodyPreview.length > 120 ? "…" : ""}`);
+        }
+      }
+      if (fmt === "slim" && rows.length > 0) {
+        console.log(`\n${draftListSlimHint()}`);
       }
     }
     return;

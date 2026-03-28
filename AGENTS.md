@@ -121,7 +121,7 @@ zmail rebuild-index              # Wipe SQLite and reindex from local maildir (d
 zmail attachment list <message_id> [--text]
 zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]
 zmail send [--to addr --subject s] [--raw] [<draft-id>]   # SMTP; saved draft under data/drafts/ (.md optional); optional ZMAIL_SEND_TEST=1 for dev/test allowlist
-zmail draft new|reply|forward|list|view|edit|rewrite [--help]   # Local drafts (data/drafts/); edit = LLM instruction, rewrite = replace body
+zmail draft new|reply|forward|list|view|edit|rewrite [--help]   # Local drafts (data/drafts/); list JSON: slim/full like search (--result-format); bodyPreview when full; edit = LLM instruction, rewrite = replace body
 zmail mcp  # Start MCP server (stdio)
 ```
 

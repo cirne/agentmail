@@ -1,6 +1,6 @@
 {
   "name": "@cirne/zmail",
-  "version": "0.2.0",
+  "version": "0.2.0-alpha.20260327.223712",
   "description": "Agent-first email system — sync, index, and search email for AI agents",
   "scripts": {
     "dev": "tsx src/index.ts",

@@ -11,6 +11,8 @@ import {
   normalizeDraftFilename,
   subjectToSlug,
   DRAFT_SUBJECT_SLUG_MAX,
+  DRAFT_LIST_BODY_PREVIEW_LEN,
+  draftBodyPreview,
 } from "./draft-store";
 
 describe("draft-store", () => {
@@ -58,6 +60,14 @@ describe("draft-store", () => {
     expect(list.length).toBe(1);
     expect(list[0].id).toBe("d1");
     expect(list[0].path).toMatch(/d1\.md$/);
+    expect(list[0].bodyPreview).toBe("b");
+  });
+
+  it("draftBodyPreview truncates like search bodyPreview", () => {
+    const long = "x".repeat(DRAFT_LIST_BODY_PREVIEW_LEN + 10);
+    expect(draftBodyPreview(long).length).toBe(DRAFT_LIST_BODY_PREVIEW_LEN + 1);
+    expect(draftBodyPreview(long).endsWith("…")).toBe(true);
+    expect(draftBodyPreview("  hi  ")).toBe("hi");
   });
 
   it("serializeDraftMarkdown produces parseable document", () => {

@@ -14,6 +14,7 @@ import { logger, SYNC_LOG_PATH } from "~/lib/logger";
 import { CLI_USAGE } from "~/lib/onboarding";
 import { parseSinceToDate } from "~/sync/parse-since";
 import type { SearchResult, WhoResult } from "~/lib/types";
+import { parseCliResultFormatMode } from "~/lib/result-format-cli";
 import type { SqliteDatabase } from "~/db";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
@@ -377,11 +378,7 @@ function parseSearchArgs(rawArgs: string[]): ParsedSearchArgs {
       continue;
     }
     if (arg === "--result-format") {
-      const mode = readValue(arg).toLowerCase();
-      if (mode !== "auto" && mode !== "full" && mode !== "slim") {
-        throw new Error(`Invalid --result-format: "${mode}". Use auto, full, or slim.`);
-      }
-      parsed.resultFormat = mode as SearchResultFormatPreference;
+      parsed.resultFormat = parseCliResultFormatMode(readValue(arg));
       continue;
     }
     if (arg === "--fields") {

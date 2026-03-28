@@ -35,6 +35,7 @@ import {
   composeForwardDraftBody,
   composeNewDraftFromInstruction,
   loadForwardSourceExcerpt,
+  buildDraftListJsonPayload,
   type DraftFrontmatter,
 } from "~/send";
 
@@ -64,6 +65,9 @@ export const MCP_CREATE_DRAFT_PARAM_KEYS: readonly string[] = [
 
 /** Param keys for send_draft MCP tool. */
 export const MCP_SEND_DRAFT_PARAM_KEYS: readonly string[] = ["draftId", "dryRun"];
+
+/** Param keys for list_drafts MCP tool — keep in sync with schema. */
+export const MCP_LIST_DRAFTS_PARAM_KEYS: readonly string[] = ["resultFormat"];
 
 /**
  * Param keys for search_mail tool. Used by CLI/MCP sync test; keep in sync with the tool schema and SearchOptions.
@@ -745,12 +749,19 @@ export function createMcpServer() {
 
   server.tool(
     "list_drafts",
-    "List local drafts. Each row includes id, absolute path to the .md file (read with read_file), kind, subject. id matches .md stem; .md optional when passing to send_draft.",
-    {},
-    async () => {
+    "List local drafts. JSON includes drafts, returned, format (slim|full), and hint when slim. With resultFormat auto (default), more than 50 drafts use slim rows (id, path, kind, subject); otherwise rows include bodyPreview (trimmed prefix of the Markdown body, same length idea as search). resultFormat full forces bodyPreview for large lists; slim omits it. id matches .md stem; .md optional when passing to send_draft.",
+    {
+      resultFormat: z
+        .enum(["auto", "full", "slim"])
+        .optional()
+        .describe("Row shape: auto (default) uses slim when more than 50 drafts; full always includes bodyPreview; slim always omits it"),
+    },
+    async ({ resultFormat }) => {
       const rows = listDrafts(config.dataDir);
+      const preference = (resultFormat ?? "auto") as SearchResultFormatPreference;
+      const payload = buildDraftListJsonPayload(rows, preference);
       return {
-        content: [{ type: "text", text: JSON.stringify({ drafts: rows }, null, 2) }],
+        content: [{ type: "text", text: JSON.stringify(payload, null, 2) }],
       };
     }
   );

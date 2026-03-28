@@ -27,7 +27,7 @@ Usage:
   zmail attachment list <message_id>   List attachments (use message_id from search)
   zmail attachment read <message_id> <index>|<filename>   Read by index (1-based) or filename
   zmail send [--to ... --subject ...] [--raw] [<draft-id>] [--dry-run]   SMTP send-as-user; send a saved draft by id under data/drafts/ (.md optional; archives to data/sent/). Optional ZMAIL_SEND_TEST=1 restricts To/Cc/Bcc to lewiscirne+zmail@gmail.com when testing sends
-  zmail draft …                 Compose locally; see zmail draft --help (list/view: JSON includes absolute path; body omitted unless --with-body; --text = full human-readable)
+  zmail draft …                 Compose locally; see zmail draft --help (list: JSON slim/full + bodyPreview like search; view: path + headers; body omitted unless --with-body; --text = human-readable)
   zmail mcp                       Start MCP server (stdio)
 
 Draft + send (core loop): zmail draft reply … (or new with --subject, or new --instruction for LLM subject+body) → zmail draft edit <id> "…" to refine with the LLM → zmail send <draft-id> --dry-run then zmail send <draft-id>. Same pipeline via MCP: create_draft, send_draft.

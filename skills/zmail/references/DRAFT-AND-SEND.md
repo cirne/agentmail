@@ -101,7 +101,7 @@ zmail draft forward --message-id '<message-id>' --to 'team@example.com' --body $
 ### View
 
 ```bash
-zmail draft list [--text]              # all drafts: id, kind, subject
+zmail draft list [--text] [--result-format auto|full|slim]   # JSON: id, path, kind, subject; bodyPreview when full (auto slim if >50 drafts; same flag as search)
 zmail draft view <id> [--text] [--with-body]
 ```
 

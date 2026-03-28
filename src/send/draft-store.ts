@@ -6,6 +6,19 @@ import { parse as parseYaml, stringify as stringifyYaml } from "yaml";
 /** Max length of the subject-derived slug before `_` and the 8-char unique suffix. */
 export const DRAFT_SUBJECT_SLUG_MAX = 40;
 
+/** Match search `bodyPreview` length for agent-friendly list output (`zmail draft list`). */
+export const DRAFT_LIST_BODY_PREVIEW_LEN = 300;
+
+/**
+ * Trimmed body prefix for list JSON (same idea as search bodyPreview: fixed max + ellipsis if longer).
+ */
+export function draftBodyPreview(body: string, maxLen = DRAFT_LIST_BODY_PREVIEW_LEN): string {
+  const t = body.trim();
+  if (t.length === 0) return "";
+  if (t.length <= maxLen) return t;
+  return `${t.slice(0, maxLen)}…`;
+}
+
 const SUFFIX_ALPHABET = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
 
 export type DraftKind = "new" | "reply" | "forward";
@@ -174,12 +187,19 @@ export function createDraftId(dataDir: string, subject: string): string {
   throw new Error("Could not allocate a unique draft id");
 }
 
-export function listDrafts(
-  dataDir: string
-): Array<{ id: string; path: string; subject?: string; kind: DraftKind }> {
+/** Row from {@link listDrafts}; `bodyPreview` is omitted in slim JSON (CLI/MCP). */
+export interface DraftListRow {
+  id: string;
+  path: string;
+  subject?: string;
+  kind: DraftKind;
+  bodyPreview: string;
+}
+
+export function listDrafts(dataDir: string): DraftListRow[] {
   const dir = draftsDir(dataDir);
   if (!existsSync(dir)) return [];
-  const out: Array<{ id: string; path: string; subject?: string; kind: DraftKind }> = [];
+  const out: DraftListRow[] = [];
   for (const name of readdirSync(dir)) {
     if (!name.endsWith(".md")) continue;
     const id = name.replace(/\.md$/, "");
@@ -190,6 +210,7 @@ export function listDrafts(
         path: d.path,
         subject: d.frontmatter.subject,
         kind: d.frontmatter.kind,
+        bodyPreview: draftBodyPreview(d.body),
       });
     } catch {
       // skip invalid

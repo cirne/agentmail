@@ -278,7 +278,19 @@ Send a draft by **`draftId`** (same pipeline as CLI `zmail send <draft-id>`). On
 
 ### `list_drafts`
 
-List local drafts: `id` (stem of the `.md` file), `kind`, `subject`.
+List local drafts. Returns a JSON **object** (same envelope idea as `search_mail`):
+
+- `drafts` — array of rows (shape depends on `format`)
+- `returned` — length of `drafts`
+- `format` — `"slim"` or `"full"`
+- `hint` — present when `format` is `slim`; points to `draft view` / reading the file / `resultFormat: "full"` for `bodyPreview`
+
+**Slim vs full:** With `resultFormat: "auto"` (default), if there are **more than 50** drafts, each row is **slim**: `id`, `path` (absolute `.md` path), `kind`, `subject` (if present). Otherwise each row is **full**, adding **`bodyPreview`** (trimmed Markdown body prefix, same length idea as search `bodyPreview`). Use `resultFormat: "full"` to force full rows for large lists, or `resultFormat: "slim"` to force slim rows for small lists.
+
+**Parameters:**
+- `resultFormat` (string, optional): `"auto"` | `"full"` | `"slim"` — same semantics as `search_mail` (default: `auto`).
+
+**CLI parity:** `zmail draft list [--result-format <m>]` uses the same flag and values as `zmail search` (`auto` \| `full` \| `slim`; space-separated value only).
 
 ---
 
@@ -318,7 +330,7 @@ List local drafts: `id` (stem of the `.md` file), `kind`, `subject`.
    { "tool": "create_draft", "arguments": { "kind": "reply", "sourceMessageId": "<id-from-search>", "body": "Thanks — sounds good.\n" } }
    ```
 
-2. **List drafts** (get `draftId` if needed):
+2. **List drafts** (get `draftId` if needed; optional `resultFormat: "full"` when many drafts):
    ```json
    { "tool": "list_drafts", "arguments": {} }
    ```
@@ -375,7 +387,8 @@ Both interfaces share the same underlying index and data. A message synced via `
 
 ### CLI arguments (quick reference)
 
-- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--fields csv] [--threads] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date] [--include-noise]`
+- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--result-format auto|full|slim] [--fields csv] [--threads] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date] [--include-noise]`
+- **draft list:** `zmail draft list [--text] [--result-format auto|full|slim]` — JSON slim/full + `bodyPreview` when full (same threshold and flag semantics as search)
 - **who:** `zmail who [query] [--limit n] [--min-sent n] [--min-received n] [--all] [--enrich] [--text]` (omit query for top contacts)
 - **status:** `zmail status [--json] [--imap]` — `--imap` compares local DB with IMAP server (CLI-only).
 - **stats:** `zmail stats [--json]`
