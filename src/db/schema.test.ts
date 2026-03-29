@@ -51,6 +51,7 @@ describe("database schema", () => {
       const names = cols.map((c) => c.name);
       expect(names).toContain("owner_pid");
       expect(names).toContain("is_running");
+      expect(names).toContain("sync_lock_started_at");
     });
   });
 

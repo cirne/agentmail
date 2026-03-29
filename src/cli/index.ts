@@ -7,6 +7,7 @@ import {
 } from "~/search/search-json-format";
 import { who } from "~/search/who";
 import { runSync } from "~/sync";
+import { isSyncLockHeld, type SyncLockRow } from "~/lib/process-lock";
 import { getDb } from "~/db";
 import { startMcpServer } from "~/mcp";
 import { config, requireImapConfig } from "~/lib/config";
@@ -830,11 +831,11 @@ async function main() {
       // Background mode (default): spawn subprocess, wait until data flows, then exit
       const db = await getDb();
 
-      const syncRow = (await (await db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1")).get()) as
-        | { is_running: number; owner_pid: number | null }
-        | undefined;
-      if (syncRow?.is_running) {
-        console.log(`Sync already running (PID: ${syncRow.owner_pid})\n`);
+      const syncRow = (await (
+        await db.prepare("SELECT is_running, owner_pid, sync_lock_started_at FROM sync_summary WHERE id = 1")
+      ).get()) as SyncLockRow | undefined;
+      if (isSyncLockHeld(syncRow)) {
+        console.log(`Sync already running (PID: ${syncRow!.owner_pid})\n`);
         await printStatus(db);
         process.exit(0);
       }

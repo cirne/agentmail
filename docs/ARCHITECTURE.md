@@ -303,7 +303,7 @@ Each window fetches, parses, and indexes completely before the next begins. IMAP
 sync_windows  (id, phase, window_start, window_end, status,
                messages_found, messages_synced, started_at, completed_at)
 sync_summary  (earliest_synced_date, latest_synced_date, total_messages,
-               last_sync_at, is_running, owner_pid)
+               last_sync_at, is_running, owner_pid, sync_lock_started_at)
 ```
 
 ---
@@ -441,14 +441,15 @@ This replaces an earlier multi-worker design that used Bun Workers. That design 
 
 **DB-backed indexing queue (removed).** The prior design tracked indexing per-message via an `embedding_state` column (pending → claimed → done/failed). That column and the indexer have been removed.
 
-**PID-based advisory locks.** Each subsystem has a singleton status row (`sync_summary`, `indexing_status`) with `is_running` and `owner_pid` columns. Before starting:
+**PID-based advisory locks.** Each subsystem has a singleton status row (`sync_summary`, `indexing_status`) with `is_running` and `owner_pid` columns. Sync also stores `sync_lock_started_at` (UTC `datetime('now')` when the lock is taken) for hung-process recovery.
 
-1. Read `is_running` and `owner_pid`.
-2. If locked and `owner_pid` is alive (`kill(pid, 0)`), exit early — another instance is running.
+1. Read `is_running`, `owner_pid`, and `sync_lock_started_at` (see `~/lib/process-lock`: `isSyncLockHeld`, `acquireLock`).
+2. If locked and `owner_pid` is alive and the lock is younger than **one hour**, exit early — another instance is running (`zmail sync` / `runSync` pre-check and background `zmail sync` use the same rule as `acquireLock`).
 3. If locked but `owner_pid` is dead, take over the lock (log a warning, reset stale state).
-4. On completion or error, clear `is_running` and `owner_pid`.
+4. If locked, `owner_pid` is alive, but the lock is **older than one hour**, signal the prior owner (`SIGTERM`, then `SIGKILL` after a short wait) and take over the lock.
+5. On completion or error, clear `is_running`, `owner_pid`, and `sync_lock_started_at`.
 
-This replaces timestamp-based staleness detection. PID checks are instantaneous and deterministic — no arbitrary timeout windows, no false positives from slow runs, no false negatives from clock skew.
+PID checks catch exited/crashed owners immediately. The one-hour cap catches hung syncs (e.g. stuck IMAP) without unbounded blocking. Existing databases gain `sync_lock_started_at` via `ALTER TABLE` on open when the column is missing (no `user_version` bump for this additive column).
 
 **Availability:** Synced messages are immediately available for FTS5 search and direct fetch.
 

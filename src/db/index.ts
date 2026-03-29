@@ -83,6 +83,10 @@ export async function getDb(): Promise<SqliteDatabase> {
   raw.exec(SCHEMA);
   raw.exec(`PRAGMA user_version = ${SCHEMA_VERSION}`);
   raw.exec("INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0)");
+  const syncSummaryCols = raw.prepare("PRAGMA table_info(sync_summary)").all() as { name: string }[];
+  if (!syncSummaryCols.some((c) => c.name === "sync_lock_started_at")) {
+    raw.exec("ALTER TABLE sync_summary ADD COLUMN sync_lock_started_at TEXT");
+  }
 
   _db = wrapBetterSqlite3(raw);
 

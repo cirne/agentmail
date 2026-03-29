@@ -4,7 +4,7 @@ import { fileURLToPath } from "url";
 import { ImapFlow } from "imapflow";
 import { config, requireImapConfig } from "~/lib/config";
 import { getDb } from "~/db";
-import { acquireLock, releaseLock } from "~/lib/process-lock";
+import { acquireLock, isSyncLockHeld, releaseLock, type SyncLockRow } from "~/lib/process-lock";
 import { parseRawMessage } from "./parse-message";
 import { parseSinceToDate } from "./parse-since";
 import { createFileLogger, SYNC_LOG_PATH, setLogger, type FileLogger } from "~/lib/logger";
@@ -144,13 +144,12 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
     await (
       await db.prepare("UPDATE sync_summary SET target_start_date = ?, sync_start_earliest_date = ? WHERE id = 1")
     ).run(fromDate, currentEarliest?.earliest_synced_date ?? null);
-    const syncRunningCheck = (await (await db.prepare("SELECT is_running, owner_pid FROM sync_summary WHERE id = 1")).get()) as
-      | { is_running: number; owner_pid: number | null }
-      | undefined;
-    const isRunning = syncRunningCheck?.is_running === 1;
-    
-    if (isRunning) {
-      fileLogger.info("Sync already running, exiting", { ownerPid: syncRunningCheck.owner_pid });
+    const syncRunningCheck = (await (
+      await db.prepare("SELECT is_running, owner_pid, sync_lock_started_at FROM sync_summary WHERE id = 1")
+    ).get()) as SyncLockRow | undefined;
+
+    if (isSyncLockHeld(syncRunningCheck)) {
+      fileLogger.info("Sync already running, exiting", { ownerPid: syncRunningCheck!.owner_pid });
       logProgress("Another sync is already in progress; skipped.");
       const durationMs = Date.now() - startTime;
       phaseMs("runSync_exit_early");

@@ -89,7 +89,8 @@ export const SCHEMA = /* sql */ `
     total_messages       INTEGER NOT NULL DEFAULT 0,
     last_sync_at         TEXT,
     is_running           INTEGER NOT NULL DEFAULT 0,
-    owner_pid            INTEGER
+    owner_pid            INTEGER,
+    sync_lock_started_at TEXT
   );
 
   -- FTS5 full-text search index over message subjects and bodies
