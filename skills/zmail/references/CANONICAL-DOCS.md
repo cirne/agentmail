@@ -10,11 +10,11 @@ This file is for the **end-user `/zmail` skill** (`skills/zmail/`). For **develo
 
 **Discovery order (recommended):**
 
-1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — full overview, including when to use **`zmail ask`** vs **`search` / `read` / `thread` / `who` / `attachment` / `inbox`**, the **draft + send** loop (`zmail draft`, `zmail send <draft-id>`), and where to read more (`docs/ASK.md`, `docs/MCP.md`). For agent-oriented compose/send detail, see **`skills/zmail/references/DRAFT-AND-SEND.md`** (with **`SKILL.md`** § Agent workflow).
+1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — short command list (same text as **`CLI_USAGE`** in **`src/lib/onboarding.ts`**). Workflows (e.g. **`zmail ask`** vs primitives, **draft + send**, MCP): **`docs/ASK.md`**, **`docs/MCP.md`**, **`skills/zmail/references/DRAFT-AND-SEND.md`**, **`SKILL.md`** § Agent workflow.
 2. **`zmail <command> --help`** — flags and examples for that command (e.g. `zmail search --help`, `zmail who --help`, `zmail attachment list --help`).
 3. **Run a command** and read the **structured output** — zmail **embeds hints** so you learn the next step without opening docs (see below).
 
-The long-form help string is maintained in code as **`CLI_USAGE`** in **`src/lib/onboarding.ts`** (same text the CLI prints). When in doubt, compare this skill or `AGENTS.md` to that file.
+Top-level help is maintained in code as **`CLI_USAGE`** in **`src/lib/onboarding.ts`** (same text the CLI prints). When in doubt, compare this skill or `AGENTS.md` to that file.
 
 ---
 
@@ -55,4 +55,4 @@ Paths below are relative to the **repository root** or the **installed `@cirne/z
 
 ## MCP
 
-For a **persistent tool** connection (instead of subprocess CLI), run **`zmail mcp`** and use the tools described in **`docs/MCP.md`**. CLI and MCP share the same index; **help text and `CLI_USAGE`** still describe the underlying concepts (e.g. ask vs search).
+For a **persistent tool** connection (instead of subprocess CLI), run **`zmail mcp`** and use the tools described in **`docs/MCP.md`**. CLI and MCP share the same index; conceptual detail (e.g. ask vs primitives) lives in **`docs/ASK.md`** and this skill, not in top-level **`zmail --help`**.
