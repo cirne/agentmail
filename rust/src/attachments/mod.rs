@@ -4,38 +4,97 @@ use calamine::{Data, Reader};
 use rusqlite::Connection;
 use std::io::Cursor;
 
-/// Best-effort text/markdown extraction by MIME type.
-pub fn extract_attachment(bytes: &[u8], mime: &str, _filename: &str) -> Option<String> {
+/// Best-effort text/markdown extraction by MIME type and filename (same order as Node extractors).
+pub fn extract_attachment(bytes: &[u8], mime: &str, filename: &str) -> Option<String> {
     let m = mime.to_lowercase();
-    match m.as_str() {
-        "text/csv" | "application/csv" | "text/comma-separated-values" => {
-            String::from_utf8(bytes.to_vec()).ok()
-        }
-        "text/html" => {
-            let s = String::from_utf8(bytes.to_vec()).ok()?;
-            htmd::convert(&s).ok()
-        }
-        "text/plain" => String::from_utf8(bytes.to_vec()).ok(),
-        "application/pdf" => pdf_extract::extract_text_from_mem(bytes).ok(),
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => xlsx_to_csv(bytes),
-        "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => {
-            docx_to_text(bytes)
-        }
-        _ => None,
+    let name = filename.to_lowercase();
+
+    // PDF — MIME only (matches Node PdfExtractor)
+    if m == "application/pdf" {
+        return pdf_extract::extract_text_from_mem(bytes).ok();
+    }
+
+    // DOCX
+    if m == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        || name.ends_with(".docx")
+    {
+        return docx_to_text(bytes);
+    }
+
+    // XLSX / XLS
+    if m == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        || m == "application/vnd.ms-excel"
+        || name.ends_with(".xlsx")
+        || name.ends_with(".xls")
+    {
+        return xlsx_to_csv(bytes);
+    }
+
+    // CSV
+    if m == "text/csv"
+        || m == "application/csv"
+        || m == "text/comma-separated-values"
+        || name.ends_with(".csv")
+    {
+        return String::from_utf8(bytes.to_vec()).ok();
+    }
+
+    // HTML
+    if m == "text/html" || name.ends_with(".html") || name.ends_with(".htm") {
+        let s = String::from_utf8(bytes.to_vec()).ok()?;
+        return htmd::convert(&s).ok();
+    }
+
+    // Plain text
+    if m == "text/plain" || name.ends_with(".txt") {
+        return String::from_utf8(bytes.to_vec()).ok();
+    }
+
+    None
+}
+
+fn mime_binary_stub(filename: &str, size_bytes: usize) -> String {
+    let size_mb = size_bytes as f64 / (1024.0 * 1024.0);
+    format!(
+        "[Binary attachment: {filename}, {:.2} MB — no text extraction available]",
+        size_mb
+    )
+}
+
+fn escape_csv_field(s: &str) -> String {
+    if s.contains(',') || s.contains('"') || s.contains('\n') || s.contains('\r') {
+        format!("\"{}\"", s.replace('"', "\"\""))
+    } else {
+        s.to_string()
     }
 }
 
 fn xlsx_to_csv(bytes: &[u8]) -> Option<String> {
     let mut wb = calamine::open_workbook_auto_from_rs(Cursor::new(bytes)).ok()?;
-    let name = wb.sheet_names().first()?.clone();
-    let range = wb.worksheet_range(&name).ok()?;
-    let mut out = String::new();
-    for row in range.rows() {
-        let parts: Vec<String> = row.iter().map(format_cell).collect();
-        out.push_str(&parts.join(","));
-        out.push('\n');
+    let names = wb.sheet_names().to_vec();
+    if names.is_empty() {
+        return None;
     }
-    Some(out)
+    let multi = names.len() > 1;
+    let mut sheets_out = Vec::new();
+    for name in &names {
+        let range = wb.worksheet_range(name).ok()?;
+        let mut rows = Vec::new();
+        for row in range.rows() {
+            let parts: Vec<String> = row
+                .iter()
+                .map(|c| escape_csv_field(&format_cell(c)))
+                .collect();
+            rows.push(parts.join(","));
+        }
+        let body = rows.join("\n");
+        if multi {
+            sheets_out.push(format!("## Sheet: {name}\n\n{body}"));
+        } else {
+            sheets_out.push(body);
+        }
+    }
+    Some(sheets_out.join("\n\n"))
 }
 
 fn format_cell(c: &Data) -> String {
@@ -77,7 +136,7 @@ fn docx_to_text(bytes: &[u8]) -> Option<String> {
     }
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentListRow {
     pub id: i64,
@@ -86,6 +145,9 @@ pub struct AttachmentListRow {
     pub size: i64,
     pub extracted: bool,
     pub index: i64,
+    /// Relative path under maildir (not part of Node list JSON; used by CLI `attachment read`).
+    #[serde(skip_serializing)]
+    pub stored_path: String,
 }
 
 pub fn list_attachments_for_message(
@@ -93,7 +155,7 @@ pub fn list_attachments_for_message(
     message_id: &str,
 ) -> rusqlite::Result<Vec<AttachmentListRow>> {
     let mut stmt = conn.prepare(
-        "SELECT id, filename, mime_type, size, extracted_text FROM attachments WHERE message_id = ?1 ORDER BY id",
+        "SELECT id, filename, mime_type, size, extracted_text, stored_path FROM attachments WHERE message_id = ?1 ORDER BY id",
     )?;
     let rows = stmt.query_map([message_id], |row| {
         Ok((
@@ -102,11 +164,12 @@ pub fn list_attachments_for_message(
             row.get::<_, String>(2)?,
             row.get::<_, i64>(3)?,
             row.get::<_, Option<String>>(4)?,
+            row.get::<_, String>(5)?,
         ))
     })?;
     let mut out = Vec::new();
     for (i, r) in rows.enumerate() {
-        let (id, filename, mime_type, size, ext) = r?;
+        let (id, filename, mime_type, size, ext, stored_path) = r?;
         out.push(AttachmentListRow {
             id,
             filename,
@@ -114,6 +177,7 @@ pub fn list_attachments_for_message(
             size,
             extracted: ext.is_some(),
             index: (i + 1) as i64,
+            stored_path,
         });
     }
     Ok(out)
@@ -129,7 +193,7 @@ pub fn read_stored_file(stored_path: &str, data_dir: &std::path::Path) -> std::i
     std::fs::read(p)
 }
 
-/// Extract text, optionally persist to `attachments.extracted_text`.
+/// Extract text (or MIME-style stub), optionally persist to `attachments.extracted_text`.
 pub fn extract_and_cache(
     conn: &Connection,
     attachment_id: i64,
@@ -137,15 +201,63 @@ pub fn extract_and_cache(
     mime: &str,
     filename: &str,
     cache: bool,
-) -> rusqlite::Result<Option<String>> {
-    let text = extract_attachment(bytes, mime, filename);
+) -> rusqlite::Result<String> {
+    let text = extract_attachment(bytes, mime, filename)
+        .unwrap_or_else(|| mime_binary_stub(filename, bytes.len()));
     if cache {
-        if let Some(ref t) = text {
-            conn.execute(
-                "UPDATE attachments SET extracted_text = ?1 WHERE id = ?2",
-                rusqlite::params![t, attachment_id],
-            )?;
-        }
+        conn.execute(
+            "UPDATE attachments SET extracted_text = ?1 WHERE id = ?2",
+            rusqlite::params![&text, attachment_id],
+        )?;
     }
     Ok(text)
+}
+
+/// Read extracted text (with cache behavior aligned to Node `extractAndCache`).
+pub fn read_attachment_text(
+    conn: &Connection,
+    data_dir: &std::path::Path,
+    attachment_id: i64,
+    cache_extracted: bool,
+    no_cache: bool,
+) -> Result<String, String> {
+    if no_cache {
+        conn.execute(
+            "UPDATE attachments SET extracted_text = NULL WHERE id = ?1",
+            [attachment_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let (filename, mime, stored_path, extracted_text): (String, String, String, Option<String>) = conn
+        .query_row(
+            "SELECT filename, mime_type, stored_path, extracted_text FROM attachments WHERE id = ?1",
+            [attachment_id],
+            |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                ))
+            },
+        )
+        .map_err(|e| e.to_string())?;
+
+    let use_cached =
+        cache_extracted && !no_cache && extracted_text.as_ref().is_some_and(|s| !s.is_empty());
+    if use_cached {
+        return Ok(extracted_text.unwrap());
+    }
+
+    let bytes = read_stored_file(&stored_path, data_dir).map_err(|e| e.to_string())?;
+    extract_and_cache(
+        conn,
+        attachment_id,
+        &bytes,
+        &mime,
+        &filename,
+        cache_extracted,
+    )
+    .map_err(|e| e.to_string())
 }

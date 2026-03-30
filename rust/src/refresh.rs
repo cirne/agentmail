@@ -26,6 +26,8 @@ pub struct RefreshPreviewRow {
     pub subject: String,
     pub snippet: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<RefreshPreviewAttachment>>,
 }
 
@@ -88,6 +90,7 @@ pub fn load_refresh_new_mail(
                 subject: subj,
                 date,
                 snippet: strip_html_tags(&snippet),
+                note: None,
                 attachments: None,
             },
         )
@@ -134,6 +137,15 @@ pub fn build_refresh_json_value(
     sync: &SyncResult,
     new_mail: &[RefreshPreviewRow],
 ) -> serde_json::Value {
+    build_refresh_json_value_with_extras(sync, new_mail, None)
+}
+
+/// Full refresh-style JSON plus optional extras (`candidatesScanned`, `llmDurationMs` for inbox).
+pub fn build_refresh_json_value_with_extras(
+    sync: &SyncResult,
+    new_mail: &[RefreshPreviewRow],
+    extras: Option<serde_json::Value>,
+) -> serde_json::Value {
     let mut v = serde_json::json!({
         "synced": sync.synced,
         "messagesFetched": sync.messages_fetched,
@@ -146,7 +158,37 @@ pub fn build_refresh_json_value(
     if let Some(true) = sync.early_exit {
         v["earlyExit"] = serde_json::json!(true);
     }
+    if let Some(serde_json::Value::Object(m)) = extras {
+        for (k, val) in m {
+            v[k] = val;
+        }
+    }
     v
+}
+
+/// Inbox / refresh-style JSON: full sync metrics, or scan-only (`newMail` + extras) when `omit_refresh_metrics`.
+pub fn build_inbox_style_json(
+    sync: &SyncResult,
+    new_mail: &[RefreshPreviewRow],
+    candidates_scanned: usize,
+    llm_duration_ms: u64,
+    omit_refresh_metrics: bool,
+) -> serde_json::Value {
+    if omit_refresh_metrics {
+        return serde_json::json!({
+            "newMail": new_mail,
+            "candidatesScanned": candidates_scanned,
+            "llmDurationMs": llm_duration_ms,
+        });
+    }
+    build_refresh_json_value_with_extras(
+        sync,
+        new_mail,
+        Some(serde_json::json!({
+            "candidatesScanned": candidates_scanned,
+            "llmDurationMs": llm_duration_ms,
+        })),
+    )
 }
 
 pub fn print_refresh_text(sync: &SyncResult, new_mail: &[RefreshPreviewRow]) {
@@ -187,5 +229,112 @@ pub fn print_refresh_text(sync: &SyncResult, new_mail: &[RefreshPreviewRow]) {
             }
         }
         println!("{SEP}");
+    }
+}
+
+const MESSAGE_SEPARATOR: &str =
+    "────────────────────────────────────────────────────────────────────────";
+const TEXT_WRAP_WIDTH: usize = 100;
+
+fn wrap_line(line: &str, width: usize) -> Vec<String> {
+    if line.len() <= width {
+        return vec![line.to_string()];
+    }
+    let mut out = Vec::new();
+    let mut rest = line;
+    while rest.len() > width {
+        let mut break_at = rest[..width].rfind(' ').unwrap_or(width);
+        if break_at <= width / 2 {
+            break_at = width;
+        }
+        out.push(rest[..break_at].trim_end().to_string());
+        rest = rest[break_at..].trim_start();
+    }
+    if !rest.is_empty() {
+        out.push(rest.to_string());
+    }
+    out
+}
+
+fn print_indented_block(title: &str, body: &str) {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return;
+    }
+    println!("{title}");
+    for para in trimmed.split('\n') {
+        for wrapped in wrap_line(para, TEXT_WRAP_WIDTH) {
+            println!("  {wrapped}");
+        }
+    }
+}
+
+/// Text output for `zmail inbox` / refresh-style (`src/cli/refresh-output.ts` `printRefreshStyleOutput`).
+pub fn print_inbox_style_text(
+    sync: &SyncResult,
+    new_mail: &[RefreshPreviewRow],
+    preview_title: &str,
+    omit_refresh_metrics: bool,
+) {
+    println!();
+    if !omit_refresh_metrics {
+        if sync.early_exit == Some(true) {
+            println!("No new messages (skipped fetch).");
+        }
+        println!("Refresh metrics:");
+        println!(
+            "  messages:  {} new, {} fetched",
+            sync.synced, sync.messages_fetched
+        );
+        let mb = (sync.bytes_downloaded as f64) / (1024.0 * 1024.0);
+        let kbps = sync.bandwidth_bytes_per_sec / 1024.0;
+        let sec = (sync.duration_ms as f64) / 1000.0;
+        println!(
+            "  downloaded: {:.2} MB ({} bytes)",
+            mb, sync.bytes_downloaded
+        );
+        println!("  bandwidth: {:.1} KB/s", kbps);
+        println!(
+            "  throughput: {} msg/min",
+            sync.messages_per_minute.round() as i64
+        );
+        println!("  duration:  {sec:.2}s");
+    }
+    if omit_refresh_metrics && new_mail.is_empty() {
+        println!("No notable messages in this window.");
+    }
+    if !new_mail.is_empty() {
+        println!();
+        println!("{preview_title}");
+        for m in new_mail {
+            println!();
+            println!("{MESSAGE_SEPARATOR}");
+            let from_line = match &m.from_name {
+                Some(n) if !n.is_empty() => format!("{n} <{}>", m.from_address),
+                _ => format!("<{}>", m.from_address),
+            };
+            println!("Date:    {}", m.date);
+            println!("From:    {from_line}");
+            println!("Subject: {}", m.subject);
+            println!("Id:      {}", m.message_id);
+            if let Some(ref atts) = m.attachments {
+                if !atts.is_empty() {
+                    println!("Attachments:");
+                    for a in atts {
+                        println!(
+                            "  {}. {} ({})",
+                            a.index, a.filename, a.mime_type
+                        );
+                    }
+                }
+            }
+            if let Some(ref note) = m.note {
+                let one: String = note.split_whitespace().collect::<Vec<_>>().join(" ");
+                println!("Note:    {one}");
+            }
+            print_indented_block("Preview:", &m.snippet);
+        }
+        println!();
+        println!("{MESSAGE_SEPARATOR}");
     }
 }

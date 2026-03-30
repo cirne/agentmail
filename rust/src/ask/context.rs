@@ -185,7 +185,7 @@ fn assemble_context_inner(
                 if text.is_none() && !stored_path.is_empty() {
                     match read_stored_file(&stored_path, data_dir) {
                         Ok(bytes) => {
-                            text = extract_and_cache(
+                            let mut t = extract_and_cache(
                                 conn,
                                 id,
                                 &bytes,
@@ -193,19 +193,14 @@ fn assemble_context_inner(
                                 &filename,
                                 cache_extracted,
                             )?;
-                            if let Some(ref t) = text {
-                                let mut t = t.clone();
-                                if t.len() > MAX_EXTRACTED_TEXT_CHARS {
-                                    if verbose {
-                                        eprintln!(
-                                            "zmail ask: truncating extracted attachment text"
-                                        );
-                                    }
-                                    t.truncate(MAX_EXTRACTED_TEXT_CHARS);
-                                    t.push_str("\n[... truncated ...]");
+                            if t.len() > MAX_EXTRACTED_TEXT_CHARS {
+                                if verbose {
+                                    eprintln!("zmail ask: truncating extracted attachment text");
                                 }
-                                text = Some(t);
+                                t.truncate(MAX_EXTRACTED_TEXT_CHARS);
+                                t.push_str("\n[... truncated ...]");
                             }
+                            text = Some(t);
                         }
                         Err(e) => {
                             text = Some(format!("[Failed to read attachment: {e}]"));

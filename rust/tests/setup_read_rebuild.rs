@@ -7,7 +7,8 @@ use std::process::Command;
 use tempfile::tempdir;
 use zmail::{
     db, open_memory, persist_message, rebuild_from_maildir, rebuild_from_maildir_sequential,
-    resolve_setup_email, search_with_meta, write_setup, ParsedMessage, SearchOptions, SetupArgs,
+    resolve_setup_email, search_with_meta, write_setup, write_zmail_config_and_env,
+    ParsedMessage, SearchOptions, SetupArgs, WriteZmailParams,
 };
 
 const MAILBOX: &str = "[Gmail]/All Mail";
@@ -19,8 +20,33 @@ fn setup_writes_config_json() {
     let raw = fs::read_to_string(dir.path().join("config.json")).unwrap();
     let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
     assert_eq!(v["imap"]["user"], "alice@test.com");
+    assert_eq!(v["sync"]["defaultSince"], "1y");
+    assert_eq!(v["sync"]["mailbox"], "");
+    assert_eq!(v["sync"]["excludeLabels"], serde_json::json!(["Trash", "Spam"]));
     let dotenv = fs::read_to_string(dir.path().join(".env")).unwrap();
     assert!(dotenv.contains("ZMAIL_IMAP_PASSWORD=secret"));
+}
+
+#[test]
+fn write_zmail_wizard_shape_matches_node() {
+    let dir = tempdir().unwrap();
+    write_zmail_config_and_env(&WriteZmailParams {
+        home: dir.path(),
+        email: "bob@corp.example",
+        password: "pw",
+        openai_key: Some("sk-test"),
+        imap_host: "imap.corp.example",
+        imap_port: 993,
+        default_since: "7d",
+    })
+    .unwrap();
+    let raw = fs::read_to_string(dir.path().join("config.json")).unwrap();
+    let v: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    assert_eq!(v["imap"]["host"], "imap.corp.example");
+    assert_eq!(v["imap"]["port"], 993);
+    assert_eq!(v["sync"]["defaultSince"], "7d");
+    assert_eq!(v["sync"]["mailbox"], "");
+    assert_eq!(v["sync"]["excludeLabels"], serde_json::json!(["Trash", "Spam"]));
 }
 
 #[test]

@@ -34,6 +34,11 @@ fn draft_store_roundtrip() {
         to: Some("bob@x.com".into()),
         subject: Some("Hi".into()),
         cc: None,
+        bcc: None,
+        in_reply_to: None,
+        references: None,
+        kind: None,
+        source_message_id: None,
     };
     let p = write_draft(dir.path(), "abc", &meta, "Body here\n").unwrap();
     let d = read_draft(&p).unwrap();
@@ -49,6 +54,11 @@ fn draft_list_slim_vs_full() {
         to: Some("t@t.com".into()),
         subject: Some("Subj".into()),
         cc: None,
+        bcc: None,
+        in_reply_to: None,
+        references: None,
+        kind: None,
+        source_message_id: None,
     };
     write_draft(dir.path(), "d1", &meta, "long body text").unwrap();
     let slim = list_drafts(dir.path(), false).unwrap();

@@ -1,5 +1,8 @@
 //! `ZMAIL_SEND_TEST` recipient allowlist.
 
+/// When `ZMAIL_SEND_TEST=1`, only this address may receive mail (mirrors `recipients.ts`).
+pub const DEV_SEND_ALLOWLIST: &str = "lewiscirne+zmail@gmail.com";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SendTestMode {
     Off,
@@ -11,6 +14,50 @@ pub fn parse_send_test_mode() -> SendTestMode {
         Ok(v) if v == "1" || v.eq_ignore_ascii_case("true") => SendTestMode::On,
         _ => SendTestMode::Off,
     }
+}
+
+/// Extract bare email from `Name <addr@x>` or `addr@x`.
+pub fn extract_email_address(raw: &str) -> String {
+    let trimmed = raw.trim();
+    if let Some(start) = trimmed.find('<') {
+        if let Some(end) = trimmed.rfind('>') {
+            if end > start {
+                return trimmed[start + 1..end].trim().to_string();
+            }
+        }
+    }
+    trimmed.to_string()
+}
+
+fn normalize_for_compare(addr: &str) -> String {
+    extract_email_address(addr).to_lowercase()
+}
+
+/// When `ZMAIL_SEND_TEST` is set, returns Err unless every recipient matches [`DEV_SEND_ALLOWLIST`].
+pub fn assert_send_recipients_allowed(recipients: &[String]) -> Result<(), String> {
+    if parse_send_test_mode() == SendTestMode::Off {
+        return Ok(());
+    }
+    let allowed = normalize_for_compare(DEV_SEND_ALLOWLIST);
+    for addr in recipients {
+        if addr.trim().is_empty() {
+            continue;
+        }
+        if normalize_for_compare(addr) != allowed {
+            return Err(format!(
+                "Send blocked: recipient \"{addr}\" is not allowed when ZMAIL_SEND_TEST is set. Only {DEV_SEND_ALLOWLIST} is permitted, or unset ZMAIL_SEND_TEST to send to other addresses."
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Split comma/semicolon-separated addresses (shell `zmail send --to` style).
+pub fn split_address_list(s: &str) -> Vec<String> {
+    s.split([',', ';'])
+        .map(|x| x.trim().to_string())
+        .filter(|x| !x.is_empty())
+        .collect()
 }
 
 /// When send-test is on, only these addresses are allowed (mirrors TS allowlist shape).

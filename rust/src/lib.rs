@@ -5,6 +5,7 @@ pub mod ask_stub;
 pub mod attachments;
 pub mod config;
 pub mod db;
+pub mod inbox;
 pub mod inbox_window;
 pub mod mail_read;
 pub mod mcp;
@@ -13,6 +14,7 @@ pub mod refresh;
 pub mod search;
 pub mod send;
 pub mod setup;
+pub mod wizard;
 pub mod status;
 pub mod sync;
 pub mod thread_view;
@@ -22,8 +24,8 @@ pub use ask_stub::{
     ask_rejects_old_explicit_year, ask_rejects_stale_date_range, draft_rewrite_stub,
 };
 pub use attachments::{
-    extract_and_cache, extract_attachment, list_attachments_for_message, read_stored_file,
-    AttachmentListRow,
+    extract_and_cache, extract_attachment, list_attachments_for_message, read_attachment_text,
+    read_stored_file, AttachmentListRow,
 };
 pub use config::{
     load_config, resolve_openai_api_key, resolve_smtp_settings, Config, ConfigJson,
@@ -33,12 +35,18 @@ pub use db::message_persist::{fts_match_count, persist_attachments_from_parsed, 
 pub use db::{
     apply_schema, journal_mode, list_user_tables, open_file, open_memory, DbError, SCHEMA_VERSION,
 };
+pub use inbox::{
+    inbox_candidate_prefetch_limit, run_inbox_scan, InboxBatchClassifier, InboxCandidate,
+    InboxNotablePick, MockInboxClassifier, OpenAiInboxClassifier, RunInboxScanError,
+    RunInboxScanOptions, RunInboxScanResult,
+};
 pub use inbox_window::parse_inbox_window_to_iso_cutoff;
 pub use mail_read::{read_message_bytes, resolve_raw_path};
 pub use mcp::{handle_request_line, tool_schemas_stable, JsonRpcRequest, TOOL_NAMES};
 pub use rebuild_index::{rebuild_from_maildir, rebuild_from_maildir_sequential};
 pub use refresh::{
-    build_refresh_json_value, load_refresh_new_mail, print_refresh_text, RefreshPreviewRow,
+    build_inbox_style_json, build_refresh_json_value, build_refresh_json_value_with_extras,
+    load_refresh_new_mail, print_inbox_style_text, print_refresh_text, RefreshPreviewRow,
 };
 pub use search::{
     canonical_first_name, contact_rank_simple, convert_to_or_query, escape_fts5_query,
@@ -50,20 +58,28 @@ pub use search::{
     WhoOptions, WhoPerson, WhoResult, SEARCH_AUTO_SLIM_THRESHOLD,
 };
 pub use send::{
-    extract_threading_headers, filter_recipients_send_test, list_drafts, plan_send, read_draft,
-    resolve_smtp_for_imap_host, write_draft, DraftFile, DraftMeta, SendPlan, SendTestMode,
+    extract_threading_headers, filter_recipients_send_test, list_drafts, load_threading_from_source_message,
+    normalize_message_id, plan_send, read_draft, resolve_smtp_for_imap_host, send_draft_by_id,
+    send_simple_message, split_address_list, verify_smtp_credentials, write_draft, DraftFile,
+    DraftMeta, SendPlan, SendResult, SendSimpleFields, SendTestMode,
 };
 pub use setup::{
-    collect_stats, resolve_setup_email, resolve_setup_password, write_setup, SetupArgs, StatsJson,
+    clean_zmail_home, collect_stats, derive_imap_settings, load_existing_env_secrets,
+    load_existing_wizard_config, mask_secret, parse_dotenv_secrets, resolve_setup_email,
+    resolve_setup_password, validate_imap_credentials, validate_openai_key, write_setup,
+    write_zmail_config_and_env, DerivedImap, ExistingEnvSecrets, ExistingWizardConfig, SetupArgs,
+    StatsJson, WriteZmailParams,
 };
+pub use wizard::{run_wizard, WizardOptions};
 pub use status::{format_time_ago, get_status, print_status_text, StatusData};
 pub use sync::{
     acquire_lock, connect_imap_session, filter_uids_after, forward_uid_range, is_process_alive,
     is_sync_lock_held, oldest_message_date_for_folder, parse_raw_message, parse_since_to_date,
     release_lock, resolve_sync_mailbox, resolve_sync_since_ymd, run_sync,
     run_sync_with_parallel_imap_connect, same_calendar_day, should_early_exit_forward,
-    sync_log_path, write_maildir_message, FakeImapTransport, FetchedMessage, ImapStatusData,
-    LockResult, MaildirWrite, ParsedAttachment, ParsedMessage, RealImapTransport, RunSyncError,
-    SyncDirection, SyncFileLogger, SyncImapTransport, SyncLockRow, SyncOptions, SyncResult,
+    spawn_sync_background_detached, sync_log_path, write_maildir_message, FakeImapTransport,
+    FetchedMessage, ImapStatusData, LockResult, MaildirWrite, ParsedAttachment, ParsedMessage,
+    RealImapTransport, RunSyncError, SyncDirection, SyncFileLogger, SyncImapTransport, SyncLockRow,
+    SyncOptions, SyncResult,
 };
 pub use thread_view::{list_thread_messages, ThreadMessageRow};

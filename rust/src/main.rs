@@ -1,18 +1,24 @@
 //! zmail CLI binary — Rust port.
 
 use clap::{Parser, Subcommand};
+use regex::Regex;
 use std::collections::HashMap;
+use std::io::{IsTerminal, Read, Write};
 use std::path::PathBuf;
-use std::process::Stdio;
+use std::sync::OnceLock;
 use zmail::{
-    build_refresh_json_value, collect_stats, connect_imap_session, db, handle_request_line,
-    is_sync_lock_held, list_thread_messages, load_config, load_refresh_new_mail,
-    print_refresh_text, print_status_text, read_message_bytes, rebuild_from_maildir,
-    resolve_openai_api_key, resolve_search_json_format, resolve_setup_email,
-    resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd, run_ask,
-    search_result_to_slim_json_row, search_with_meta, status, sync_log_path, who, write_setup,
-    LoadConfigOptions, RunAskOptions, SearchOptions, SearchResultFormatPreference, SetupArgs,
-    SyncDirection, SyncFileLogger, SyncLockRow, SyncOptions, WhoOptions,
+    build_inbox_style_json, build_refresh_json_value, collect_stats, connect_imap_session, db,
+    handle_request_line, list_attachments_for_message, list_thread_messages,
+    load_config, load_refresh_new_mail, parse_inbox_window_to_iso_cutoff, print_inbox_style_text,
+    print_refresh_text, print_status_text, read_attachment_text, read_message_bytes,
+    read_stored_file, rebuild_from_maildir, resolve_openai_api_key, resolve_search_json_format,
+    resolve_setup_email, resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd,
+    run_ask, run_inbox_scan, run_wizard, search_result_to_slim_json_row, search_with_meta,
+    send_draft_by_id, send_simple_message, split_address_list, spawn_sync_background_detached,
+    status, validate_imap_credentials, validate_openai_key, verify_smtp_credentials,
+    who, write_setup, LoadConfigOptions, OpenAiInboxClassifier, RunAskOptions, RunInboxScanOptions,
+    SearchOptions, SearchResultFormatPreference, SendSimpleFields, SetupArgs, SyncDirection,
+    SyncFileLogger, SyncOptions, WhoOptions, WizardOptions,
 };
 
 #[derive(Parser)]
@@ -89,10 +95,23 @@ enum Commands {
     /// Rebuild SQLite index from maildir tree
     #[command(name = "rebuild-index")]
     RebuildIndex,
+    /// List or read message attachments (extracted text / CSV)
+    #[command(name = "attachment")]
+    Attachment {
+        #[command(subcommand)]
+        sub: AttachmentCmd,
+    },
     /// MCP server (JSON-RPC lines on stdin)
     Mcp,
-    /// Interactive setup (stub — prefer `zmail setup`)
-    Wizard,
+    /// Interactive TUI setup (prompts; use `zmail setup` for agents)
+    Wizard {
+        #[arg(long)]
+        no_validate: bool,
+        #[arg(long)]
+        clean: bool,
+        #[arg(long)]
+        yes: bool,
+    },
     /// Sync and search readiness
     Status {
         /// JSON output
@@ -125,12 +144,93 @@ enum Commands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// Send mail via SMTP (same IMAP credentials; optional `ZMAIL_SEND_TEST=1` guard)
+    Send {
+        /// Saved draft id (`data/drafts/{id}.md`) when not using `--to` / `--subject`
+        draft_id: Option<String>,
+        #[arg(long)]
+        to: Option<String>,
+        #[arg(long)]
+        subject: Option<String>,
+        #[arg(long)]
+        body: Option<String>,
+        #[arg(long)]
+        cc: Option<String>,
+        #[arg(long)]
+        bcc: Option<String>,
+        #[arg(long)]
+        dry_run: bool,
+        #[arg(long)]
+        text: bool,
+    },
+    /// LLM notable-mail scan for a time window (requires ZMAIL_OPENAI_API_KEY)
+    Inbox {
+        /// Rolling window e.g. 24h, 3d (optional; use `--since` or config default for YYYY-MM-DD)
+        window: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        refresh: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        include_noise: bool,
+        #[arg(long)]
+        text: bool,
+    },
+}
+
+#[derive(Subcommand)]
+enum AttachmentCmd {
+    /// List attachments for a message (JSON unless --text)
+    List {
+        message_id: String,
+        #[arg(long)]
+        text: bool,
+    },
+    /// Print extracted text (or raw bytes with --raw)
+    Read {
+        message_id: String,
+        /// 1-based index or exact filename
+        index_or_name: String,
+        #[arg(long)]
+        raw: bool,
+        #[arg(long)]
+        no_cache: bool,
+    },
 }
 
 fn zmail_home_path() -> PathBuf {
     std::env::var("ZMAIL_HOME")
         .map(PathBuf::from)
         .unwrap_or_else(|_| dirs::home_dir().expect("HOME").join(".zmail"))
+}
+
+/// Node `parseInboxCliArgs`: `--since` wins; else optional positional `^\d+[dhmwy]?$` only.
+fn inbox_rolling_window_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)^\d+[dhmwy]?$").expect("regex"))
+}
+
+fn resolve_inbox_window_spec(since: Option<String>, window: Option<String>) -> Option<String> {
+    if let Some(s) = since {
+        return Some(s);
+    }
+    window.filter(|w| inbox_rolling_window_re().is_match(w.trim()))
+}
+
+fn empty_sync_result() -> zmail::SyncResult {
+    zmail::SyncResult {
+        synced: 0,
+        messages_fetched: 0,
+        bytes_downloaded: 0,
+        duration_ms: 0,
+        bandwidth_bytes_per_sec: 0.0,
+        messages_per_minute: 0.0,
+        log_path: String::new(),
+        early_exit: None,
+        new_message_ids: None,
+    }
 }
 
 fn print_sync_foreground_metrics(r: &zmail::SyncResult) {
@@ -225,94 +325,14 @@ fn run_sync_foreground_refresh(
     Ok(r)
 }
 
-fn run_sync_background(
-    cfg: &zmail::Config,
-    since_override: Option<&str>,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let home = zmail_home_path();
-    if cfg.imap_user.trim().is_empty() || cfg.imap_password.trim().is_empty() {
-        return Err("IMAP user/password required. Run `zmail setup`.".into());
+fn format_attachment_size(n: i64) -> String {
+    if n >= 1024 * 1024 {
+        format!("{:.2} MB", n as f64 / (1024.0 * 1024.0))
+    } else if n >= 1024 {
+        format!("{:.2} KB", n as f64 / 1024.0)
+    } else {
+        format!("{n} B")
     }
-    let conn = db::open_file(cfg.db_path())?;
-    let lock_row: Option<SyncLockRow> = conn
-        .query_row(
-            "SELECT is_running, owner_pid, sync_lock_started_at FROM sync_summary WHERE id = 1",
-            [],
-            |row| {
-                Ok(SyncLockRow {
-                    is_running: row.get(0)?,
-                    owner_pid: row.get(1)?,
-                    sync_lock_started_at: row.get(2)?,
-                })
-            },
-        )
-        .ok();
-    if is_sync_lock_held(lock_row.as_ref()) {
-        println!(
-            "Sync already running (PID: {:?})\n",
-            lock_row.and_then(|r| r.owner_pid)
-        );
-        print_status_text(&conn)?;
-        return Ok(());
-    }
-    drop(conn);
-
-    let mut auth = connect_imap_session(
-        &cfg.imap_host,
-        cfg.imap_port,
-        &cfg.imap_user,
-        &cfg.imap_password,
-    )?;
-    let _ = auth.logout();
-
-    let exe = std::env::current_exe()?;
-    let mut cmd = std::process::Command::new(&exe);
-    cmd.arg("sync").arg("--foreground");
-    if let Some(s) = since_override {
-        if !s.is_empty() {
-            cmd.arg("--since").arg(s);
-        }
-    }
-    cmd.stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        // Match Node `detached: true`: new session so the child is not tied to our TTY.
-        unsafe {
-            cmd.pre_exec(|| {
-                if libc::setsid() == -1 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
-        }
-    }
-
-    let pid = {
-        let child = cmd.spawn()?;
-        child.id()
-    };
-
-    let log = sync_log_path(&home);
-    let empty_index: i64 = {
-        let c = db::open_file(cfg.db_path())?;
-        c.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?
-    };
-
-    println!();
-    println!("Sync running in background.");
-    println!("  PID:    {pid}");
-    println!("  Log:    {}", log.display());
-    println!("  Status: zmail status");
-    if empty_index == 0 {
-        println!();
-        println!("Initial sync can take a while — tail the log or run `zmail status`.");
-        println!("When messages appear, try: zmail search \"invoice\"  |  zmail who \"name\"");
-    }
-    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -343,7 +363,51 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             write_setup(&home, &em, &pw, openai_key.as_deref())?;
             if !no_validate {
-                eprintln!("Note: credential validation not yet implemented in Rust port.");
+                let cfg = load_config(LoadConfigOptions {
+                    home: Some(home.clone()),
+                    env: None,
+                });
+                print!("Validating IMAP... ");
+                std::io::stdout().flush().ok();
+                if validate_imap_credentials(
+                    &cfg.imap_host,
+                    cfg.imap_port,
+                    &cfg.imap_user,
+                    &cfg.imap_password,
+                )
+                .is_err()
+                {
+                    println!("Failed");
+                    eprintln!("Could not connect to IMAP. Check your credentials.");
+                    std::process::exit(1);
+                }
+                println!("OK");
+                print!("Validating SMTP... ");
+                std::io::stdout().flush().ok();
+                if verify_smtp_credentials(&cfg.imap_host, &cfg.imap_user, &cfg.imap_password)
+                    .is_err()
+                {
+                    println!("Failed");
+                    eprintln!("Could not verify SMTP. Check your credentials and network.");
+                    std::process::exit(1);
+                }
+                println!("OK");
+                let Some(api_key) = resolve_openai_api_key(&LoadConfigOptions {
+                    home: Some(home.clone()),
+                    env: None,
+                }) else {
+                    println!("Failed");
+                    eprintln!("OpenAI API key missing after setup.");
+                    std::process::exit(1);
+                };
+                print!("Validating OpenAI API key... ");
+                std::io::stdout().flush().ok();
+                if validate_openai_key(&api_key).is_err() {
+                    println!("Failed");
+                    eprintln!("Invalid API key.");
+                    std::process::exit(1);
+                }
+                println!("OK");
             }
             println!("Wrote config under {}", home.display());
         }
@@ -390,6 +454,153 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     verbose,
                 },
             ))?;
+        }
+        Commands::Send {
+            draft_id,
+            to,
+            subject,
+            body,
+            cc,
+            bcc,
+            dry_run,
+            text,
+        } => {
+            let cfg = load_config(LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            });
+            if cfg.imap_user.trim().is_empty() || cfg.imap_password.is_empty() {
+                eprintln!("IMAP user/password required. Run `zmail setup`.");
+                std::process::exit(1);
+            }
+            let conn = db::open_file(cfg.db_path())?;
+            let use_json = !text;
+            if let (Some(to_s), Some(subj)) = (to.as_ref(), subject.as_ref()) {
+                let mut body_text = body.clone().unwrap_or_default();
+                if body_text.is_empty() && !std::io::stdin().is_terminal() {
+                    let mut buf = String::new();
+                    std::io::stdin().read_to_string(&mut buf)?;
+                    body_text = buf;
+                }
+                let fields = SendSimpleFields {
+                    to: split_address_list(to_s),
+                    cc: cc
+                        .as_ref()
+                        .map(|s| split_address_list(s))
+                        .filter(|v| !v.is_empty()),
+                    bcc: bcc
+                        .as_ref()
+                        .map(|s| split_address_list(s))
+                        .filter(|v| !v.is_empty()),
+                    subject: subj.clone(),
+                    text: body_text,
+                    in_reply_to: None,
+                    references: None,
+                };
+                let result = send_simple_message(&cfg, &fields, dry_run)?;
+                if use_json {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                } else {
+                    print!(
+                        "ok={} messageId={}",
+                        result.ok, result.message_id
+                    );
+                    if result.dry_run == Some(true) {
+                        print!(" dryRun=true");
+                    }
+                    println!();
+                    if let Some(ref r) = result.smtp_response {
+                        println!("{r}");
+                    }
+                }
+            } else if let Some(id) = draft_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+                let result = send_draft_by_id(&conn, &cfg, &cfg.data_dir, id, dry_run)?;
+                if use_json {
+                    println!("{}", serde_json::to_string_pretty(&result)?);
+                } else {
+                    print!(
+                        "ok={} messageId={}",
+                        result.ok, result.message_id
+                    );
+                    if result.dry_run == Some(true) {
+                        print!(" dryRun=true");
+                    }
+                    println!();
+                    if let Some(ref r) = result.smtp_response {
+                        println!("{r}");
+                    }
+                }
+            } else {
+                eprintln!(
+                    "Usage: zmail send --to <addr> --subject <s> [--body <text>] [--cc ...] [--bcc ...] [--dry-run]"
+                );
+                eprintln!("       zmail send <draft-id>");
+                std::process::exit(1);
+            }
+        }
+        Commands::Inbox {
+            window,
+            since,
+            refresh: do_refresh,
+            force,
+            include_noise,
+            text: force_text,
+        } => {
+            let cfg = load_config(LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            });
+            let Some(api_key) = resolve_openai_api_key(&LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            }) else {
+                eprintln!("zmail inbox requires an LLM API key.");
+                eprintln!("Set ZMAIL_OPENAI_API_KEY or run 'zmail setup' with --openai-key.");
+                std::process::exit(1);
+            };
+            let window_spec = resolve_inbox_window_spec(since, window);
+            let spec = window_spec.unwrap_or_else(|| cfg.inbox_default_window.clone());
+            let cutoff_iso = match parse_inbox_window_to_iso_cutoff(&spec) {
+                Ok(s) => s,
+                Err(e) => {
+                    eprintln!("{e}");
+                    std::process::exit(1);
+                }
+            };
+            let mut sync_result = empty_sync_result();
+            if do_refresh {
+                sync_result = run_sync_foreground_refresh(&cfg, force)?;
+            }
+            let conn = db::open_file(cfg.db_path())?;
+            let owner = (!cfg.imap_user.trim().is_empty()).then(|| cfg.imap_user.clone());
+            let opts = RunInboxScanOptions {
+                cutoff_iso,
+                include_noise,
+                owner_address: owner,
+                candidate_cap: None,
+                notable_cap: None,
+                batch_size: None,
+            };
+            let mut classifier = OpenAiInboxClassifier::new(&api_key);
+            let rt = tokio::runtime::Runtime::new()?;
+            let scan = rt.block_on(run_inbox_scan(&conn, &opts, &mut classifier))?;
+            let json = build_inbox_style_json(
+                &sync_result,
+                &scan.new_mail,
+                scan.candidates_scanned,
+                scan.llm_duration_ms,
+                !do_refresh,
+            );
+            if force_text {
+                print_inbox_style_text(
+                    &sync_result,
+                    &scan.new_mail,
+                    "Inbox:",
+                    !do_refresh,
+                );
+            } else {
+                println!("{}", serde_json::to_string_pretty(&json)?);
+            }
         }
         Commands::Stats { json } => {
             let cfg = load_config(LoadConfigOptions {
@@ -442,6 +653,132 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
         }
+        Commands::Attachment { sub } => {
+            let cfg = load_config(LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            });
+            let conn = db::open_file(cfg.db_path())?;
+            let cache = cfg.attachments_cache_extracted_text;
+            match sub {
+                AttachmentCmd::List { message_id, text } => {
+                    let exists = conn
+                        .query_row(
+                            "SELECT 1 FROM messages WHERE message_id = ?1",
+                            [&message_id],
+                            |_| Ok(1),
+                        )
+                        .is_ok();
+                    if !exists {
+                        if text {
+                            println!("No attachments found.");
+                        } else {
+                            println!("[]");
+                        }
+                        return Ok(());
+                    }
+                    let rows = list_attachments_for_message(&conn, &message_id)?;
+                    if text {
+                        if rows.is_empty() {
+                            println!("No attachments found.");
+                        } else {
+                            println!("Attachments for {message_id}:\n");
+                            println!(
+                                "  {:>4}  {:<40}  {:<38}  {:>9}  {}",
+                                "#", "FILENAME", "MIME TYPE", "SIZE", "EXTRACTED"
+                            );
+                            println!("  {}", "-".repeat(100));
+                            for r in &rows {
+                                let size_str = format_attachment_size(r.size);
+                                let fname = if r.filename.len() > 40 {
+                                    format!("{}...", &r.filename[..37])
+                                } else {
+                                    format!("{:<40}", r.filename)
+                                };
+                                let mime = if r.mime_type.len() > 38 {
+                                    format!("{}...", &r.mime_type[..35])
+                                } else {
+                                    format!("{:<38}", r.mime_type)
+                                };
+                                println!(
+                                    "  {:>4}  {}  {}  {:>9}  {}",
+                                    r.index,
+                                    fname,
+                                    mime,
+                                    size_str,
+                                    if r.extracted { "yes" } else { "no" }
+                                );
+                            }
+                        }
+                    } else {
+                        let json_rows: Vec<serde_json::Value> = rows
+                            .iter()
+                            .enumerate()
+                            .map(|(i, a)| {
+                                serde_json::json!({
+                                    "index": i + 1,
+                                    "filename": &a.filename,
+                                    "mimeType": &a.mime_type,
+                                    "size": a.size,
+                                    "extracted": a.extracted,
+                                })
+                            })
+                            .collect();
+                        println!("{}", serde_json::to_string_pretty(&json_rows)?);
+                    }
+                }
+                AttachmentCmd::Read {
+                    message_id,
+                    index_or_name,
+                    raw,
+                    no_cache,
+                } => {
+                    let rows = list_attachments_for_message(&conn, &message_id)?;
+                    if rows.is_empty() {
+                        eprintln!("No attachments found for message.");
+                        std::process::exit(1);
+                    }
+                    let att =
+                        if let Ok(n) = index_or_name.parse::<usize>() {
+                            if n >= 1 && n <= rows.len() {
+                                &rows[n - 1]
+                            } else {
+                                eprintln!(
+                                    "No attachment \"{}\" in this message. Use index 1-{}",
+                                    index_or_name,
+                                    rows.len()
+                                );
+                                std::process::exit(1);
+                            }
+                        } else if let Some(a) =
+                            rows.iter().find(|a| a.filename == index_or_name.as_str())
+                        {
+                            a
+                        } else {
+                            eprintln!(
+                                "No attachment \"{}\" in this message. Use index 1-{} or exact filename.",
+                                index_or_name,
+                                rows.len()
+                            );
+                            std::process::exit(1);
+                        };
+                    if raw {
+                        let bytes = read_stored_file(&att.stored_path, &cfg.data_dir)?;
+                        std::io::stdout().write_all(&bytes)?;
+                    } else {
+                        let text = read_attachment_text(
+                            &conn,
+                            &cfg.data_dir,
+                            att.id,
+                            cache,
+                            no_cache,
+                        )
+                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                        println!("{text}");
+                    }
+                }
+            }
+        }
         Commands::RebuildIndex => {
             let cfg = load_config(LoadConfigOptions {
                 home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
@@ -460,19 +797,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 env: None,
             });
             let conn = db::open_file(cfg.db_path())?;
+            let cache = cfg.attachments_cache_extracted_text;
             let stdin = std::io::stdin();
             for line in stdin.lines() {
                 let line = line?;
                 if line.trim().is_empty() {
                     continue;
                 }
-                let resp = handle_request_line(&conn, &cfg.data_dir, &line);
+                let resp = handle_request_line(&conn, &cfg.data_dir, cache, &line);
                 println!("{resp}");
             }
         }
-        Commands::Wizard => {
-            eprintln!("Use: zmail setup --email you@x.com --password app-pass [--no-validate]");
-            std::process::exit(1);
+        Commands::Wizard {
+            no_validate,
+            clean,
+            yes,
+        } => {
+            let home = std::env::var("ZMAIL_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|_| dirs::home_dir().expect("HOME").join(".zmail"));
+            run_wizard(WizardOptions {
+                home,
+                no_validate,
+                clean,
+                yes,
+            })?;
         }
         Commands::Who {
             query,
@@ -597,7 +946,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let r = run_sync_foreground_backward(&cfg, since_spec)?;
                 print_sync_foreground_metrics(&r);
             } else {
-                run_sync_background(&cfg, since_spec)?;
+                let home = zmail_home_path();
+                spawn_sync_background_detached(&home, &cfg, since_spec)?;
             }
         }
         Commands::Refresh {

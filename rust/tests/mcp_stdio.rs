@@ -43,7 +43,7 @@ fn mcp_search_mail_returns_json() {
         "params": { "name": "search_mail", "arguments": { "query": "needle" } }
     }))
     .unwrap();
-    let out = handle_request_line(&conn, &data_dir(), &line);
+    let out = handle_request_line(&conn, &data_dir(), false, &line);
     assert!(out.contains("needle"), "{}", out);
 }
 
@@ -63,7 +63,7 @@ fn mcp_get_message_by_id() {
         "params": { "name": "get_message_by_id", "arguments": { "messageId": "mid-mcp" } }
     }))
     .unwrap();
-    let out = handle_request_line(&conn, &data_dir(), &line);
+    let out = handle_request_line(&conn, &data_dir(), false, &line);
     assert!(out.contains("mid-mcp"));
 }
 
@@ -82,7 +82,7 @@ fn mcp_get_thread() {
         "params": { "name": "get_thread", "arguments": { "threadId": "t1" } }
     }))
     .unwrap();
-    let out = handle_request_line(&conn, &data_dir(), &line);
+    let out = handle_request_line(&conn, &data_dir(), false, &line);
     assert!(out.contains("a@b") || out.contains(r#"\"a\""#));
 }
 
@@ -95,7 +95,7 @@ fn mcp_who_top_contacts() {
         "params": { "name": "who_contacts", "arguments": { "query": "" } }
     }))
     .unwrap();
-    let _ = handle_request_line(&conn, &data_dir(), &line);
+    let _ = handle_request_line(&conn, &data_dir(), false, &line);
 }
 
 #[test]
@@ -107,7 +107,7 @@ fn mcp_get_status() {
         "params": { "name": "get_status", "arguments": {} }
     }))
     .unwrap();
-    let out = handle_request_line(&conn, &data_dir(), &line);
+    let out = handle_request_line(&conn, &data_dir(), false, &line);
     assert!(out.contains("0") || out.contains("content"));
 }
 
@@ -120,8 +120,39 @@ fn mcp_get_stats() {
         "params": { "name": "get_stats", "arguments": {} }
     }))
     .unwrap();
-    let out = handle_request_line(&conn, &data_dir(), &line);
+    let out = handle_request_line(&conn, &data_dir(), false, &line);
     assert!(out.contains("messageCount") || out.contains("message"));
+}
+
+#[test]
+fn mcp_read_attachment_extracts_csv() {
+    let conn = open_memory().unwrap();
+    let d = data_dir();
+    let csv_path = d.join("attachments").join("m-read").join("a.csv");
+    std::fs::create_dir_all(csv_path.parent().unwrap()).unwrap();
+    std::fs::write(&csv_path, b"x,y").unwrap();
+    conn.execute(
+        "INSERT INTO messages (message_id, thread_id, folder, uid, from_address, to_addresses, cc_addresses, subject, body_text, date, raw_path)
+         VALUES ('mr', 'mr', 'f', 1, 'a@b', '[]', '[]', 's', 'b', 'd', 'p')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO attachments (message_id, filename, mime_type, size, stored_path) VALUES ('mr', 'a.csv', 'text/csv', 3, ?1)",
+        [format!("attachments/m-read/a.csv")],
+    )
+    .unwrap();
+    let id: i64 = conn
+        .query_row("SELECT id FROM attachments WHERE message_id = 'mr'", [], |r| r.get(0))
+        .unwrap();
+    let line = serde_json::to_string(&json!({
+        "jsonrpc": "2.0",
+        "method": "tools/call",
+        "params": { "name": "read_attachment", "arguments": { "attachmentId": id } }
+    }))
+    .unwrap();
+    let out = handle_request_line(&conn, &d, false, &line);
+    assert!(out.contains("x,y") || out.contains(r#"x,y"#), "{}", out);
 }
 
 #[test]
@@ -144,7 +175,7 @@ fn mcp_list_attachments() {
         "params": { "name": "list_attachments", "arguments": { "messageId": "ma" } }
     }))
     .unwrap();
-    let out = handle_request_line(&conn, &data_dir(), &line);
+    let out = handle_request_line(&conn, &data_dir(), false, &line);
     assert!(out.contains("f"));
 }
 
@@ -152,23 +183,30 @@ fn mcp_list_attachments() {
 fn mcp_create_draft_send_dry_run() {
     let conn = open_memory().unwrap();
     let d = data_dir();
+    std::fs::create_dir_all(d.join("drafts")).unwrap();
+    let draft_path = d.join("drafts").join("mcp-test.md");
+    std::fs::write(
+        &draft_path,
+        "---\nto: test@example.com\nsubject: hi\n---\nBody\n",
+    )
+    .unwrap();
     let line = serde_json::to_string(&json!({
         "jsonrpc": "2.0",
         "method": "tools/call",
-        "params": { "name": "send_draft", "arguments": { "dryRun": true } }
+        "params": { "name": "send_draft", "arguments": { "draftId": "mcp-test", "dryRun": true } }
     }))
     .unwrap();
-    let out = handle_request_line(&conn, &d, &line);
-    assert!(out.contains("dry_run"));
+    let out = handle_request_line(&conn, &d, false, &line);
+    assert!(out.contains("dryRun") || out.contains("dry_run"), "{}", out);
 }
 
 #[test]
 fn mcp_initialize_lists_tools() {
     let conn = open_memory().unwrap();
     let init = r#"{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}"#;
-    let r1 = handle_request_line(&conn, &data_dir(), init);
+    let r1 = handle_request_line(&conn, &data_dir(), false, init);
     assert!(r1.contains("serverInfo"));
     let list = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#;
-    let r2 = handle_request_line(&conn, &data_dir(), list);
+    let r2 = handle_request_line(&conn, &data_dir(), false, list);
     assert!(r2.contains("search_mail"));
 }

@@ -10,6 +10,17 @@ pub struct DraftMeta {
     pub subject: Option<String>,
     #[serde(default)]
     pub cc: Option<String>,
+    #[serde(default)]
+    pub bcc: Option<String>,
+    #[serde(default)]
+    pub in_reply_to: Option<String>,
+    #[serde(default)]
+    pub references: Option<String>,
+    /// e.g. `"reply"` — triggers threading from `source_message_id` when set
+    #[serde(default)]
+    pub kind: Option<String>,
+    #[serde(default, rename = "sourceMessageId")]
+    pub source_message_id: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -78,6 +89,22 @@ pub struct DraftListFull {
     pub body_preview: Option<String>,
 }
 
+/// Strip optional `.md` suffix for paths and CLI ids (mirrors TS `normalizeDraftFilename`).
+pub fn normalize_draft_filename(id: &str) -> String {
+    id.trim().trim_end_matches(".md").to_string()
+}
+
+/// After a successful SMTP send, move `drafts/{stem}.md` → `sent/{stem}.md` under `data_dir`.
+pub fn archive_draft_to_sent(data_dir: &Path, draft_id: &str) -> std::io::Result<PathBuf> {
+    let base = normalize_draft_filename(draft_id);
+    let src = data_dir.join("drafts").join(format!("{base}.md"));
+    let sent = data_dir.join("sent");
+    fs::create_dir_all(&sent)?;
+    let dest = sent.join(format!("{base}.md"));
+    fs::rename(&src, &dest)?;
+    Ok(dest)
+}
+
 pub fn list_drafts(dir: &Path, full: bool) -> std::io::Result<Vec<serde_json::Value>> {
     let mut out = Vec::new();
     if !dir.is_dir() {
@@ -124,6 +151,11 @@ mod tests {
             to: Some("bob@x.com".into()),
             subject: Some("Hi".into()),
             cc: None,
+            bcc: None,
+            in_reply_to: None,
+            references: None,
+            kind: None,
+            source_message_id: None,
         };
         let path = write_draft(dir.path(), "abc", &meta, "Body\n").unwrap();
         let d = read_draft(&path).unwrap();

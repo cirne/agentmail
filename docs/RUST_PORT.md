@@ -18,7 +18,7 @@ This document is the **single place** for (1) remaining work toward parity and r
 
 ### Production validation
 
-- Run the Rust binary against real `ZMAIL_HOME` + IMAP and compare to Node for **sync**, **refresh**, and JSON/text outputs for **search**, **who**, **read**, **thread**, **status**, **`ask`**, **MCP** — especially edge cases (large mailboxes, provider quirks, date boundaries).
+- Run the Rust binary against real `ZMAIL_HOME` + IMAP and compare to Node for **sync**, **refresh**, and JSON/text outputs for **search**, **who**, **read**, **thread**, **status**, **`ask`**, **`inbox`**, **MCP** — especially edge cases (large mailboxes, provider quirks, date boundaries).
 - Integration tests under `rust/tests/` are necessary but not sufficient (ADR-025 checkpoint).
 
 ### Feature parity — CLI
@@ -28,16 +28,16 @@ The Rust binary currently focuses on core read/sync/index flows. **Not exposed a
 | Area | Notes |
 |------|--------|
 | **`zmail ask`** | **Implemented:** Nano → context assembly → Mini (`gpt-4.1-nano` / `gpt-4.1-mini`), matching Node’s architecture; requires `ZMAIL_OPENAI_API_KEY`. Automated LLM-as-judge parity is still Node (`ask.eval.test.ts`); **`search` `includeThreads`** in the investigation tool is not wired in Rust yet (short-term parity gap). |
-| **`zmail inbox`** | Window parsing exists; no full notable-mail scan. |
-| **`zmail attachment` `list` / `read`** | Extraction libraries exist; no dedicated CLI subcommands. |
-| **`zmail send` / `zmail draft` `*`** | Draft storage helpers exist; **SMTP send** returns an error unless `dry_run` (`send::plan_send`). |
-| **`zmail wizard`** | Interactive wizard not implemented; `setup` writes files only. |
-| **Setup validation** | IMAP/OpenAI checks after `zmail setup` not implemented in Rust (Node validates unless `--no-validate`). |
+| **`zmail inbox`** | **Implemented:** notable-mail scan (`gpt-4.1-nano`, same system prompt and JSON contract as Node), flags `[<window>] --since --refresh --force --include-noise --text`; code in [`rust/src/inbox/scan.rs`](../rust/src/inbox/scan.rs). Bakeoff vs Node on real mailboxes still recommended. |
+| **`zmail attachment` `list` / `read`** | **Implemented:** `zmail attachment list <message_id>` (JSON or `--text`), `zmail attachment read <message_id> <index|filename> [--raw] [--no-cache]` — same supported formats as Node (PDF, DOCX, XLSX/XLS, HTML, CSV, TXT); best-effort vs Node’s mammoth/ExcelJS stack (see risks). |
+| **`zmail send` / `zmail draft` `*`** | **SMTP send implemented** in Rust (lettre, STARTTLS/SMTPS per config; optional `ZMAIL_SEND_TEST` allowlist; `zmail send --to` / `--subject` / `--cc` / `--bcc`, draft id send, archive to `data/sent/`). Full `zmail draft *` subcommand parity (new/reply/forward/edit/rewrite/list/view) remains Node-first — see [Rust send: edge cases not yet ported](#rust-send-edge-cases-not-yet-ported) for raw RFC 822 send. |
+| **`zmail wizard`** | **Implemented:** Printed ASCII banner + inquire prompts + indicatif spinners during checks. Parity with Node: `--no-validate`, `--clean`, `--yes`; same config shape and optional background sync. Intentional UX upgrade vs Node’s line-based prompts. |
+| **Setup validation** | `zmail setup` runs IMAP, SMTP, and OpenAI checks when validation is enabled (unless `--no-validate`), matching Node. |
 | **Flags** | Examples: search **`--ids-only`**, who **`--enrich`**, thread **`--raw`**, status **`--imap`** — not all mirrored on the Rust CLI. |
 
 ### Feature parity — MCP (`rust/src/mcp`)
 
-Tool **names** align with the contract, but several handlers are **minimal or stubbed** (e.g. simplified `get_status`, stub strings for some attachment/draft paths). Full behavioral parity with Node MCP is tracked alongside [BUG-025](bugs/BUG-025-mcp-cli-parity-alignment-skill.md) (Node-first) and should be re-checked for Rust before cutover.
+Tool **names** align with the contract; **`read_attachment`** now runs the same extraction/cache path as the CLI (passes `attachments.cacheExtractedText` from config). Several handlers remain **minimal** (e.g. simplified `get_status`). Full behavioral parity with Node MCP is tracked alongside [BUG-025](bugs/BUG-025-mcp-cli-parity-alignment-skill.md) (Node-first) and should be re-checked for Rust before cutover.
 
 ### Data / behavior parity
 
@@ -77,10 +77,10 @@ These are **acceptable by default** unless we explicitly decide to match Node.
 |------|--------|
 | **IMAP crate maturity** | Dependency on **`imap` `3.0.0-alpha.*`** — pre-1.0 API and possible bugfix churn. Behavior vs **imapflow** (Node) may differ on edge cases (IDLE, extensions, error recovery). |
 | **TLS** | **`native-tls`** (platform TLS) vs **rustls** — tradeoffs in trust stores, platform behavior, and supply chain; worth revisiting if users hit TLS or cert issues on niche platforms. |
-| **Attachment / office stack** | Rust uses **pdf-extract**, **docx-rs**, **calamine**, **htmd**, etc. Parity with Node’s **ExcelJS** / **mailparser** pipeline is **best-effort** — formatting, edge-case files, or malformed documents may diverge. |
+| **Attachment / office stack** | Rust uses **pdf-extract**, **docx-rs** (paragraph text; Node **mammoth** yields Markdown), **calamine** (XLSX/XLS → CSV with quoted fields and multi-sheet `## Sheet:` headers), **htmd** (HTML → Markdown). Unsupported binaries get the same **stub line** as Node (`[Binary attachment: …]`). Parity with Node’s **ExcelJS** / **mailparser** pipeline is still **best-effort** on edge-case or malformed files. |
 | **Provider quirks** | Gmail and others sometimes need workarounds developed against the **Node** client first; Rust sync must be **bakeoff-tested** so divergences are caught early. |
 | **Dual implementation** | Until cutover, fixes may land in **one** codebase first — [BUGS.md](BUGS.md) notes that active bugs often refer to the **published Node** CLI; Rust regressions need explicit tracking. |
-| **LLM features** | **OpenAI**-backed flows (`ask`, `draft edit`, `inbox`, optional **`who --enrich`**) depend on Node’s TS stack today; reimplementing in Rust implies new HTTP clients, prompt management, and eval coverage — scope as its own milestone, not a side effect of sync/search. |
+| **LLM features** | **`ask`** and **`inbox`** are implemented in Rust (`async-openai`); **`draft edit`** and optional **`who --enrich`** remain Node-first. Automated eval parity for `ask` is still Node (`ask.eval.test.ts`). |
 
 ---
 
@@ -92,3 +92,7 @@ These are **acceptable by default** unless we explicitly decide to match Node.
 | [OPP-030](opportunities/OPP-030-rust-port-cutover.md) | Packaging sequence and cutover. |
 | [AGENTS.md](../AGENTS.md#rust-port-in-repo) | How to build and run Rust from the monorepo. |
 | [rust/README.md](../rust/README.md) | Short developer pointer into `rust/`. |
+
+## Rust send: edge cases not yet ported
+
+Node **`zmail send --raw`** (RFC 822 from **stdin** or **`--file <path>`**) is **not** implemented in the Rust CLI yet. Rust supports plain **`--to` / `--subject` / `--body`** (and optional stdin body when piped), **`zmail send <draft-id>`**, and the same optional recipient guard via **`ZMAIL_SEND_TEST`**. For raw-message send, use the Node CLI or add a small wrapper until this is ported.

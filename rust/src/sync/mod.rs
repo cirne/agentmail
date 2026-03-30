@@ -12,6 +12,7 @@ pub mod run;
 pub mod sync_log;
 pub mod transport;
 pub mod windows;
+pub mod background_spawn;
 
 pub use error::RunSyncError;
 pub use maildir::{write_maildir_message, MaildirWrite};
@@ -33,3 +34,4 @@ pub use windows::{
     filter_uids_after, forward_uid_range, last_uid_for_folder, oldest_message_date_for_folder,
     same_calendar_day,
 };
+pub use background_spawn::spawn_sync_background_detached;
