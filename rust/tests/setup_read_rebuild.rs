@@ -1,4 +1,4 @@
-//! Phase 5 — setup, stats, read, thread, rebuild-index.
+//! Integration tests: `setup` writes, env fallbacks, read/thread CLI, rebuild-index from maildir.
 
 use std::collections::HashSet;
 use std::fs;

@@ -1,4 +1,4 @@
-//! Phase 1 checkpoint tests (see Rust port plan).
+//! Integration tests: config loading, SQLite schema, FTS/WAL, `zmail status` CLI.
 
 use std::collections::HashMap;
 use std::process::Command;

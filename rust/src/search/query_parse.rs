@@ -91,3 +91,156 @@ pub fn parse_search_query(raw: &str) -> ParsedSearchQuery {
     result.query = query;
     result
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn empty_input() {
+        let r = parse_search_query("");
+        assert_eq!(r.query, "");
+        assert!(r.from_address.is_none());
+    }
+
+    #[test]
+    fn from_only() {
+        let r = parse_search_query("from:alice@example.com");
+        assert_eq!(r.from_address.as_deref(), Some("alice@example.com"));
+        assert_eq!(r.query, "");
+    }
+
+    #[test]
+    fn from_with_remainder() {
+        let r = parse_search_query("from:alice@example.com invoice");
+        assert_eq!(r.from_address.as_deref(), Some("alice@example.com"));
+        assert_eq!(r.query, "invoice");
+    }
+
+    #[test]
+    fn to_operator() {
+        let r = parse_search_query("to:bob@example.com");
+        assert_eq!(r.to_address.as_deref(), Some("bob@example.com"));
+        assert_eq!(r.query, "");
+    }
+
+    #[test]
+    fn subject_operator() {
+        let r = parse_search_query("subject:meeting");
+        assert_eq!(r.subject.as_deref(), Some("meeting"));
+        assert_eq!(r.query, "");
+    }
+
+    #[test]
+    fn after_iso() {
+        let r = parse_search_query("after:2024-01-01");
+        assert_eq!(r.after_date.as_deref(), Some("2024-01-01"));
+        assert_eq!(r.query, "");
+    }
+
+    #[test]
+    fn after_relative_yyyy_mm_dd() {
+        let r = parse_search_query("after:7d");
+        assert!(r.after_date.is_some());
+        let d = r.after_date.unwrap();
+        assert!(regex::Regex::new(r"^\d{4}-\d{2}-\d{2}$")
+            .unwrap()
+            .is_match(&d));
+    }
+
+    #[test]
+    fn before_iso() {
+        let r = parse_search_query("before:2024-12-31");
+        assert_eq!(r.before_date.as_deref(), Some("2024-12-31"));
+        assert_eq!(r.query, "");
+    }
+
+    #[test]
+    fn multiple_operators() {
+        let r = parse_search_query("from:alice@example.com subject:invoice after:7d");
+        assert_eq!(r.from_address.as_deref(), Some("alice@example.com"));
+        assert_eq!(r.subject.as_deref(), Some("invoice"));
+        assert!(r.after_date.is_some());
+        assert_eq!(r.query, "");
+    }
+
+    #[test]
+    fn remainder_with_or() {
+        let r = parse_search_query("from:alice@example.com invoice OR receipt");
+        assert_eq!(r.from_address.as_deref(), Some("alice@example.com"));
+        assert_eq!(r.query, "invoice OR receipt");
+    }
+
+    #[test]
+    fn normalizes_or_and() {
+        let r = parse_search_query("invoice or receipt");
+        assert_eq!(r.query, "invoice OR receipt");
+        let r2 = parse_search_query("invoice and receipt");
+        assert_eq!(r2.query, "invoice AND receipt");
+    }
+
+    #[test]
+    fn operator_in_middle() {
+        let r = parse_search_query("invoice from:alice@example.com receipt");
+        assert_eq!(r.from_address.as_deref(), Some("alice@example.com"));
+        assert_eq!(r.query, "invoice receipt");
+    }
+
+    #[test]
+    fn ignores_invalid_after_date() {
+        let r = parse_search_query("after:invalid-date");
+        assert!(r.after_date.is_none());
+    }
+
+    #[test]
+    fn complex_all_operators() {
+        let r = parse_search_query(
+            "from:alice@example.com to:bob@example.com subject:meeting after:7d before:2024-12-31 invoice OR receipt",
+        );
+        assert_eq!(r.from_address.as_deref(), Some("alice@example.com"));
+        assert_eq!(r.to_address.as_deref(), Some("bob@example.com"));
+        assert_eq!(r.subject.as_deref(), Some("meeting"));
+        assert!(r.after_date.is_some());
+        assert_eq!(r.before_date.as_deref(), Some("2024-12-31"));
+        assert_eq!(r.query, "invoice OR receipt");
+    }
+
+    #[test]
+    fn text_only() {
+        let r = parse_search_query("invoice receipt");
+        assert_eq!(r.query, "invoice receipt");
+        assert!(r.from_address.is_none());
+    }
+
+    #[test]
+    fn whitespace_trimmed() {
+        let r = parse_search_query("  from:alice@example.com  invoice  ");
+        assert_eq!(r.from_address.as_deref(), Some("alice@example.com"));
+        assert_eq!(r.query, "invoice");
+    }
+
+    #[test]
+    fn filter_only_or_between_filters() {
+        let r = parse_search_query("from:marcio OR to:marcio");
+        assert_eq!(r.from_address.as_deref(), Some("marcio"));
+        assert_eq!(r.to_address.as_deref(), Some("marcio"));
+        assert_eq!(r.query, "");
+        assert_eq!(r.filter_or, Some(true));
+    }
+
+    #[test]
+    fn filter_only_and_between_filters() {
+        let r = parse_search_query("from:alice AND to:bob");
+        assert_eq!(r.from_address.as_deref(), Some("alice"));
+        assert_eq!(r.to_address.as_deref(), Some("bob"));
+        assert_eq!(r.query, "");
+        assert_eq!(r.filter_or, Some(false));
+    }
+
+    #[test]
+    fn or_with_text_terms_keeps_query() {
+        let r = parse_search_query("from:alice invoice OR receipt");
+        assert_eq!(r.from_address.as_deref(), Some("alice"));
+        assert_eq!(r.query, "invoice OR receipt");
+    }
+}

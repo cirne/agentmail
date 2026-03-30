@@ -31,7 +31,7 @@ A **Rust** implementation lives under **`rust/`** (same CLI/MCP contract and `~/
 
 ```bash
 cd rust
-cargo test                    # integration tests (phase1–phase9)
+cargo test                    # integration tests (`tests/*.rs`, e.g. config_schema_status, search_fts, mcp_stdio)
 cargo run -- search "foo"     # dev binary; same subcommand style as Node zmail
 cargo build --release && ./target/release/zmail status
 ```

@@ -1,4 +1,4 @@
-//! Phase 9 — ask guardrails, compose stub, inbox window, full regression trigger.
+//! Integration tests: `ask` date/year guardrails, draft rewrite stub, inbox window parsing.
 
 use zmail::{
     ask_rejects_old_explicit_year, ask_rejects_stale_date_range, draft_rewrite_stub,

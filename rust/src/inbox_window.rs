@@ -50,3 +50,28 @@ pub fn parse_inbox_window_to_iso_cutoff(spec: &str) -> Result<String, String> {
     let cutoff = Utc::now() - Duration::hours(hours);
     Ok(cutoff.to_rfc3339_opts(chrono::SecondsFormat::Millis, true))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn iso_date_midnight_z() {
+        let s = parse_inbox_window_to_iso_cutoff("2026-03-15").unwrap();
+        assert!(s.starts_with("2026-03-15T00:00:00.000Z"));
+    }
+
+    #[test]
+    fn rolling_24h_ok() {
+        let s = parse_inbox_window_to_iso_cutoff("24h").unwrap();
+        assert!(s.ends_with('Z'));
+        assert!(s.contains('T'));
+    }
+
+    #[test]
+    fn rejects_empty_and_bad() {
+        assert!(parse_inbox_window_to_iso_cutoff("").is_err());
+        assert!(parse_inbox_window_to_iso_cutoff("not-a-window").is_err());
+        assert!(parse_inbox_window_to_iso_cutoff("0d").is_err());
+    }
+}

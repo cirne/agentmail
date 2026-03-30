@@ -1,4 +1,4 @@
-//! Phase 3 checkpoint — FTS search, query parse, filter-only, JSON format.
+//! Integration tests: FTS keyword search, inline query operators, filter-only queries, result JSON shape.
 
 use std::process::Command;
 

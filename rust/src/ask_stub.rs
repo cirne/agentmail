@@ -32,3 +32,38 @@ pub fn ask_rejects_old_explicit_year(question: &str) -> Result<(), String> {
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rejects_two_years_ago() {
+        assert!(ask_rejects_stale_date_range("email from two years ago").is_err());
+        assert!(ask_rejects_stale_date_range("2 years ago stuff").is_err());
+    }
+
+    #[test]
+    fn allows_recent_wording() {
+        assert!(ask_rejects_stale_date_range("last week invoices").is_ok());
+    }
+
+    #[test]
+    fn draft_rewrite_appends_marker() {
+        let out = draft_rewrite_stub("x", "Hello");
+        assert!(out.contains("Hello"));
+        assert!(out.contains("[edited]"));
+    }
+
+    #[test]
+    fn rejects_very_old_explicit_year() {
+        assert!(ask_rejects_old_explicit_year("mail from 1999").is_err());
+    }
+
+    #[test]
+    fn allows_recent_year_in_question() {
+        let y = Utc::now().year();
+        let q = format!("What happened in {y}?");
+        assert!(ask_rejects_old_explicit_year(&q).is_ok());
+    }
+}

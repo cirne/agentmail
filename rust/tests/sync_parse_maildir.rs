@@ -1,4 +1,4 @@
-//! Phase 2 checkpoint tests.
+//! Integration tests: MIME parse, sync windows/UIDs, maildir write, process lock, persist + FTS triggers.
 
 use std::fs;
 use tempfile::tempdir;

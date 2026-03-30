@@ -111,3 +111,64 @@ pub fn build_where_sql(clause: &FilterClause) -> String {
     parts.extend(clause.always_and.clone());
     parts.join(" AND ")
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fts_only_minimal() {
+        let opts = SearchOptions::default();
+        let c = build_filter_clause(&opts, true);
+        assert_eq!(c.conditions.len(), 1);
+        assert!(c.conditions[0].contains("MATCH"));
+        assert!(c.params.is_empty());
+    }
+
+    #[test]
+    fn from_adds_like_params() {
+        let opts = SearchOptions {
+            from_address: Some("alice@x.com".into()),
+            ..Default::default()
+        };
+        let c = build_filter_clause(&opts, false);
+        assert!(c.conditions.iter().any(|s| s.contains("from_address")));
+        assert_eq!(c.params.len(), 2);
+        assert!(c.params[0].contains("alice"));
+    }
+
+    #[test]
+    fn before_date_extends_end_of_day() {
+        let opts = SearchOptions {
+            before_date: Some("2024-06-01".into()),
+            ..Default::default()
+        };
+        let c = build_filter_clause(&opts, false);
+        assert!(c.params.iter().any(|p| p.contains("T23:59:59")));
+    }
+
+    #[test]
+    fn build_where_and_vs_or() {
+        let mut clause = FilterClause {
+            conditions: vec!["a = 1".into(), "b = 2".into()],
+            params: vec![],
+            use_or: false,
+            always_and: vec!["c = 3".into()],
+        };
+        assert_eq!(build_where_sql(&clause), "a = 1 AND b = 2 AND c = 3");
+        clause.use_or = true;
+        let w = build_where_sql(&clause);
+        assert!(w.contains("(a = 1 OR b = 2)"));
+        assert!(w.contains("AND c = 3"));
+    }
+
+    #[test]
+    fn include_noise_skips_noise_clause() {
+        let opts = SearchOptions {
+            include_noise: true,
+            ..Default::default()
+        };
+        let c = build_filter_clause(&opts, false);
+        assert!(c.always_and.is_empty());
+    }
+}

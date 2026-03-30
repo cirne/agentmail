@@ -80,3 +80,42 @@ pub fn fts_match_count(conn: &Connection, fts_query: &str) -> rusqlite::Result<i
     let sql = "SELECT COUNT(*) FROM messages_fts WHERE messages_fts MATCH ?1";
     conn.query_row(sql, [fts_query], |row| row.get(0))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::open_memory;
+    use crate::sync::ParsedMessage;
+
+    #[test]
+    fn label_noise_promotions() {
+        assert!(label_noise(r#"["Promotions"]"#));
+        assert!(label_noise(r#"["\\Spam"]"#));
+        assert!(!label_noise(r#"["Inbox"]"#));
+    }
+
+    #[test]
+    fn persist_and_fts() {
+        let conn = open_memory().unwrap();
+        let p = ParsedMessage {
+            message_id: "<t@1>".into(),
+            from_address: "from@x.com".into(),
+            from_name: None,
+            to_addresses: vec!["to@y.com".into()],
+            cc_addresses: vec![],
+            subject: "hello world".into(),
+            date: "2026-01-01T00:00:00Z".into(),
+            body_text: "body content here".into(),
+            body_html: None,
+            attachments: vec![],
+            is_noise: false,
+        };
+        assert!(persist_message(&conn, &p, "INBOX", 1, "[]", "/tmp/x").unwrap());
+        let n: i64 = conn
+            .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+        let fts = fts_match_count(&conn, "hello").unwrap();
+        assert!(fts >= 1);
+    }
+}

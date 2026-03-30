@@ -39,3 +39,31 @@ pub fn last_uid_for_folder(conn: &Connection, folder: &str) -> Result<Option<i64
     )
     .optional()
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forward_uid_range_fmt() {
+        assert_eq!(forward_uid_range(9), "10:*");
+        assert_eq!(forward_uid_range(0), "1:*");
+    }
+
+    #[test]
+    fn filter_uids_after_excludes_equal() {
+        assert_eq!(filter_uids_after(&[1, 2, 3, 10], 3), vec![10]);
+    }
+
+    #[test]
+    fn same_calendar_day_prefix() {
+        assert!(same_calendar_day(
+            "2024-01-02T12:00:00Z",
+            "2024-01-02T23:59:59Z"
+        ));
+        assert!(!same_calendar_day(
+            "2024-01-02T12:00:00Z",
+            "2024-01-03T00:00:00Z"
+        ));
+    }
+}

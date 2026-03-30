@@ -564,9 +564,9 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Decision:** Maintain a **Rust** implementation in **`rust/`** alongside the existing **Node + TypeScript** tree at repo root. Both target the same **agent contract**: `ZMAIL_HOME` / `~/.zmail` (`config.json`, `.env`, `data/`, maildir layout), FTS5 SQLite schema semantics, CLI subcommands, and MCP stdio tools. **`rust/target/`** is gitignored; CI/dev run **`cargo test`** from **`rust/`**.
 
-**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests `rust/tests/phase1.rs` … **`phase9.rs`** (config/schema/status through LLM-shaped flows and MCP param stability).
+**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests in **`rust/tests/*.rs`** named by area (e.g. `config_schema_status`, `sync_parse_maildir`, `search_fts`, `who_identity`, `setup_read_rebuild`, `attachments_extract`, `send_drafts`, `mcp_stdio`, `ask_inbox_guards`) covering config/DB through MCP and ask-shaped flows.
 
-**Checkpoint (in-repo):** Phases 1–9 exercised in **`cargo test`** — sync/index/search/who/attachments/send-drafts/MCP/ask-shaped tests against temp dirs; not a substitute for production bakeoffs on real mailboxes.
+**Checkpoint (in-repo):** Area-named integration tests under **`rust/tests/`** (plus `#[cfg(test)]` unit tests in `rust/src/`) run via **`cargo test`** — sync/index/search/who/attachments/send-drafts/MCP/ask-shaped coverage against temp dirs; not a substitute for production bakeoffs on real mailboxes.
 
 **Remaining work (cutover and parity):**
 

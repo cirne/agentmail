@@ -1,4 +1,4 @@
-//! Phase 8 — MCP JSON-RPC handlers.
+//! Integration tests: MCP stdio JSON-RPC handlers and tool schema stability.
 
 use serde_json::json;
 use tempfile::tempdir;

@@ -17,3 +17,24 @@ pub fn name_matches_phonetically(name_token: &str, query: &str) -> bool {
     let pq = primary_code(q);
     !pn.is_empty() && pn == pq
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jon_john_match() {
+        assert!(name_matches_phonetically("Jon", "John"));
+    }
+
+    #[test]
+    fn unrelated_no_match() {
+        assert!(!name_matches_phonetically("Lewis", "Donna"));
+    }
+
+    #[test]
+    fn empty_tokens() {
+        assert!(!name_matches_phonetically("", "John"));
+        assert!(!name_matches_phonetically("John", ""));
+    }
+}

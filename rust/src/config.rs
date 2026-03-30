@@ -254,4 +254,41 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
     }
 }
 
-// `dirs` crate for home_dir - I need to add it to Cargo.toml
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn resolve_smtp_unknown_host_errors() {
+        let r = resolve_smtp_settings("mail.example.com", None);
+        assert!(r.is_err());
+    }
+
+    #[test]
+    fn resolve_smtp_override_only_when_complete() {
+        let j = SmtpJson {
+            host: Some("mx.example.com".into()),
+            port: Some(587),
+            secure: Some(false),
+        };
+        let r = resolve_smtp_settings("unknown.imap.com", Some(&j)).unwrap();
+        assert_eq!(r.host, "mx.example.com");
+    }
+
+    #[test]
+    fn config_json_empty_object() {
+        let j: ConfigJson = serde_json::from_str("{}").unwrap();
+        assert!(j.imap.is_none());
+    }
+
+    #[test]
+    fn config_json_deserialize_nested() {
+        let raw = r#"{"imap":{"host":"imap.x","port":993,"user":"u@x.com"},"inbox":{"defaultWindow":"48h"}}"#;
+        let j: ConfigJson = serde_json::from_str(raw).unwrap();
+        assert_eq!(j.imap.as_ref().unwrap().host.as_deref(), Some("imap.x"));
+        assert_eq!(
+            j.inbox.as_ref().unwrap().default_window.as_deref(),
+            Some("48h")
+        );
+    }
+}

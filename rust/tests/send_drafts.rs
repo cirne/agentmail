@@ -1,4 +1,4 @@
-//! Phase 7 — SMTP resolve, drafts, threading, send-test, dry-run.
+//! Integration tests: SMTP resolution from IMAP host, draft store, threading headers, send-test filter, dry-run.
 
 use tempfile::tempdir;
 use zmail::{

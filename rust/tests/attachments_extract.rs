@@ -1,4 +1,4 @@
-//! Phase 6 — attachment extractors (fixtures under repo `tests/attachments/fixtures/`).
+//! Integration tests: attachment extract/list/read/cache (fixtures under repo `tests/attachments/fixtures/`).
 
 use std::fs;
 use std::io::BufWriter;

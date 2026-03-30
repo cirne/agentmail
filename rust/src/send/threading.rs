@@ -32,3 +32,30 @@ pub fn extract_threading_headers(raw: &[u8]) -> (Option<String>, Vec<String>) {
     }
     (in_reply, refs)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_in_reply_and_references() {
+        let raw = b"From: a@b\r\nIn-Reply-To: <abc@d>\r\nReferences: <x@y> <z@w>\r\n\r\n";
+        let (ir, refs) = extract_threading_headers(raw);
+        assert_eq!(ir.as_deref(), Some("abc@d"));
+        assert_eq!(refs, vec!["x@y".to_string(), "z@w".to_string()]);
+    }
+
+    #[test]
+    fn strip_angle_brackets() {
+        let raw = b"In-Reply-To: abc@test\r\n\r\n";
+        let (ir, _) = extract_threading_headers(raw);
+        assert_eq!(ir.as_deref(), Some("abc@test"));
+    }
+
+    #[test]
+    fn invalid_bytes_empty() {
+        let (ir, refs) = extract_threading_headers(&[0xff, 0xfe]);
+        assert!(ir.is_none());
+        assert!(refs.is_empty());
+    }
+}

@@ -164,3 +164,97 @@ pub fn infer_name_from_address(address: &str) -> Option<String> {
 
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dot_separated_local_part() {
+        assert_eq!(
+            infer_name_from_address("lewis.cirne@alum.dartmouth.org").as_deref(),
+            Some("Lewis Cirne")
+        );
+        assert_eq!(
+            infer_name_from_address("katelyn.cirne@gmail.com").as_deref(),
+            Some("Katelyn Cirne")
+        );
+        assert_eq!(
+            infer_name_from_address("alan.finley@example.com").as_deref(),
+            Some("Alan Finley")
+        );
+    }
+
+    #[test]
+    fn underscore_separated() {
+        assert_eq!(
+            infer_name_from_address("katelyn_cirne@icloud.com").as_deref(),
+            Some("Katelyn Cirne")
+        );
+        assert_eq!(
+            infer_name_from_address("john_smith@example.com").as_deref(),
+            Some("John Smith")
+        );
+    }
+
+    #[test]
+    fn camel_case_local_part() {
+        assert_eq!(
+            infer_name_from_address("lewisCirne@example.com").as_deref(),
+            Some("Lewis Cirne")
+        );
+        assert_eq!(
+            infer_name_from_address("johnSmith@example.com").as_deref(),
+            Some("John Smith")
+        );
+    }
+
+    #[test]
+    fn all_lowercase_clear_patterns() {
+        assert_eq!(
+            infer_name_from_address("alanfinley@example.com").as_deref(),
+            Some("Alan Finley")
+        );
+        assert_eq!(
+            infer_name_from_address("johnsmith@example.com").as_deref(),
+            Some("John Smith")
+        );
+        assert_eq!(
+            infer_name_from_address("whitneyallen@example.com").as_deref(),
+            Some("Whitney Allen")
+        );
+    }
+
+    #[test]
+    fn single_letter_prefix() {
+        assert_eq!(
+            infer_name_from_address("abrown@somecompany.com").as_deref(),
+            Some("A Brown")
+        );
+        assert_eq!(
+            infer_name_from_address("jsmith@example.com").as_deref(),
+            Some("J Smith")
+        );
+        assert_eq!(infer_name_from_address("sjohnson@example.com"), None);
+    }
+
+    #[test]
+    fn skip_words_null() {
+        assert_eq!(infer_name_from_address("recipient@example.com"), None);
+        assert_eq!(infer_name_from_address("noreply@example.com"), None);
+        assert_eq!(infer_name_from_address("support@example.com"), None);
+        assert_eq!(infer_name_from_address("admin@example.com"), None);
+    }
+
+    #[test]
+    fn invalid_short_or_numeric() {
+        assert_eq!(infer_name_from_address("ab@example.com"), None);
+        assert_eq!(infer_name_from_address("a@example.com"), None);
+        assert_eq!(infer_name_from_address("123@example.com"), None);
+    }
+
+    #[test]
+    fn ambiguous_username_like() {
+        assert_eq!(infer_name_from_address("fredbrown@example.com"), None);
+    }
+}

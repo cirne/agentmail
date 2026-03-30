@@ -109,3 +109,47 @@ pub fn list_drafts(dir: &Path, full: bool) -> std::io::Result<Vec<serde_json::Va
     });
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn write_read_roundtrip() {
+        let dir = tempdir().unwrap();
+        let meta = DraftMeta {
+            to: Some("bob@x.com".into()),
+            subject: Some("Hi".into()),
+            cc: None,
+        };
+        let path = write_draft(dir.path(), "abc", &meta, "Body\n").unwrap();
+        let d = read_draft(&path).unwrap();
+        assert_eq!(d.id, "abc");
+        assert_eq!(d.meta.to.as_deref(), Some("bob@x.com"));
+        assert_eq!(d.body, "Body\n");
+    }
+
+    #[test]
+    fn read_without_frontmatter_uses_raw_body() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("plain.md");
+        std::fs::write(&path, "Just text\nno yaml").unwrap();
+        let d = read_draft(&path).unwrap();
+        assert!(d.meta.to.is_none());
+        assert_eq!(d.body, "Just text\nno yaml");
+    }
+
+    #[test]
+    fn list_drafts_sorts_by_id() {
+        let dir = tempdir().unwrap();
+        write_draft(dir.path(), "b", &DraftMeta::default(), "x").unwrap();
+        write_draft(dir.path(), "a", &DraftMeta::default(), "y").unwrap();
+        let list = list_drafts(dir.path(), false).unwrap();
+        assert_eq!(list.len(), 2);
+        assert_eq!(
+            list[0].get("id").and_then(|v| v.as_str()),
+            Some("a")
+        );
+    }
+}

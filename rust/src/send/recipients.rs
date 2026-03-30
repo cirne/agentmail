@@ -37,3 +37,38 @@ pub fn filter_recipients_send_test(
     }
     Ok(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn send_test_off_passes_through() {
+        let r = vec!["a@b.com".into(), "c@d.com".into()];
+        let out = filter_recipients_send_test(SendTestMode::Off, &r, &[]).unwrap();
+        assert_eq!(out, r);
+    }
+
+    #[test]
+    fn send_test_on_allowlist() {
+        let allow = vec!["a@b.com".into()];
+        let out = filter_recipients_send_test(
+            SendTestMode::On,
+            &[String::from("A@B.com")],
+            &allow,
+        )
+        .unwrap();
+        assert_eq!(out, vec!["A@B.com"]);
+    }
+
+    #[test]
+    fn send_test_on_rejects() {
+        let e = filter_recipients_send_test(
+            SendTestMode::On,
+            &[String::from("bad@x.com")],
+            &[String::from("a@b.com")],
+        )
+        .unwrap_err();
+        assert!(e.contains("allowlist"));
+    }
+}

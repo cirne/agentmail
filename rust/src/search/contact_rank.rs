@@ -333,3 +333,21 @@ pub fn apply_contact_rank_rerank(
 
     Ok(scored.into_iter().map(|(r, _)| r.result).collect())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn contact_rank_more_sent_orders_higher() {
+        let a = contact_rank_simple(10, 0);
+        let b = contact_rank_simple(5, 0);
+        assert!(a > b);
+    }
+
+    #[test]
+    fn contact_rank_non_negative() {
+        assert!(contact_rank_simple(0, 0) >= 0.0);
+        assert!(contact_rank_simple(3, 100) >= 0.0);
+    }
+}

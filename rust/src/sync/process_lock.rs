@@ -101,7 +101,7 @@ pub fn acquire_lock(conn: &mut Connection, current_pid: i64) -> rusqlite::Result
     let row = read_lock_row(&tx)?;
     let was_locked = row.is_running != 0;
     let had_owner = row.owner_pid.is_some();
-    let taken_over = was_locked && (had_owner || !had_owner);
+    let taken_over = was_locked;
 
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)

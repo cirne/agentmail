@@ -53,3 +53,83 @@ pub fn search_result_to_slim_json_row(r: &SearchResult) -> Value {
     }
     Value::Object(out)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::search::types::SearchResult;
+
+    #[test]
+    fn resolve_auto_slim_above_threshold() {
+        assert_eq!(
+            resolve_search_json_format(
+                SEARCH_AUTO_SLIM_THRESHOLD + 1,
+                SearchResultFormatPreference::Auto,
+                true,
+            ),
+            SearchJsonFormat::Slim
+        );
+    }
+
+    #[test]
+    fn resolve_auto_full_at_threshold() {
+        assert_eq!(
+            resolve_search_json_format(
+                SEARCH_AUTO_SLIM_THRESHOLD,
+                SearchResultFormatPreference::Auto,
+                true,
+            ),
+            SearchJsonFormat::Full
+        );
+    }
+
+    #[test]
+    fn resolve_auto_never_slim_when_disabled() {
+        assert_eq!(
+            resolve_search_json_format(
+                100,
+                SearchResultFormatPreference::Auto,
+                false,
+            ),
+            SearchJsonFormat::Full
+        );
+    }
+
+    #[test]
+    fn slim_row_shape() {
+        let r = SearchResult {
+            message_id: "<a@b>".into(),
+            thread_id: "<a@b>".into(),
+            from_address: "x@y.com".into(),
+            from_name: Some("X".into()),
+            subject: "Hi".into(),
+            date: "2026-01-01T00:00:00.000Z".into(),
+            snippet: "snip".into(),
+            body_preview: "p".into(),
+            rank: -1.0,
+        };
+        let v = search_result_to_slim_json_row(&r);
+        assert_eq!(v["messageId"], "<a@b>");
+        assert_eq!(v["subject"], "Hi");
+        assert_eq!(v["date"], "2026-01-01T00:00:00.000Z");
+        assert_eq!(v["fromName"], "X");
+        assert!(v.get("bodyPreview").is_none());
+    }
+
+    #[test]
+    fn slim_row_omits_empty_from_name() {
+        let r = SearchResult {
+            message_id: "m".into(),
+            thread_id: "m".into(),
+            from_address: "a@b".into(),
+            from_name: Some(String::new()),
+            subject: "S".into(),
+            date: "d".into(),
+            snippet: "".into(),
+            body_preview: "".into(),
+            rank: 0.0,
+        };
+        let v = search_result_to_slim_json_row(&r);
+        assert!(v.get("fromName").is_none());
+    }
+}

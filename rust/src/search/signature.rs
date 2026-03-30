@@ -133,3 +133,85 @@ fn extract_signature(body: &str) -> Option<String> {
         Some(t.to_string())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extract_rfc3676_separator() {
+        let body = "Hello world\n\n-- \nJohn Doe\nCEO, Acme Corp\n+1-555-123-4567";
+        let sig = extract_signature(body).expect("sig");
+        assert!(sig.contains("John Doe"));
+        assert!(sig.contains("CEO, Acme Corp"));
+        assert!(sig.contains("555-123-4567") || sig.contains("5551234567"));
+    }
+
+    #[test]
+    fn extract_underscore_separator() {
+        let body = "Message text\n\n___\nJane Smith\nVP Operations";
+        let sig = extract_signature(body).expect("sig");
+        assert!(sig.contains("Jane Smith"));
+    }
+
+    #[test]
+    fn strips_iphone_boilerplate() {
+        let body = "Message\n\n-- \nSent from my iPhone\nJohn Doe";
+        let sig = extract_signature(body).expect("sig");
+        assert!(!sig.to_lowercase().contains("iphone"));
+        assert!(sig.contains("John Doe"));
+    }
+
+    #[test]
+    fn no_signature_short_body() {
+        assert!(extract_signature("short").is_none());
+    }
+
+    #[test]
+    fn parse_block_phone() {
+        let sig = "John Doe\n(512) 555-1234";
+        let r = parse_signature_block(sig, "john@example.com");
+        assert!(r.phone.is_some());
+        let p = r.phone.unwrap();
+        assert!(p.contains("512") && p.contains("555"));
+    }
+
+    #[test]
+    fn parse_title_company() {
+        let sig = "John Doe\nCEO, Acme Corp";
+        let r = parse_signature_block(sig, "john@example.com");
+        assert_eq!(r.title.as_deref(), Some("CEO"));
+        assert_eq!(r.company.as_deref(), Some("Acme Corp"));
+    }
+
+    #[test]
+    fn parse_urls_skip_unsubscribe() {
+        let sig = "Hi\nhttps://linkedin.com/in/x\nhttps://x.com?utm_source=1";
+        let r = parse_signature_block(sig, "a@b.com");
+        assert!(r.urls.iter().any(|u| u.contains("linkedin")));
+        assert!(!r.urls.iter().any(|u| u.contains("utm_")));
+    }
+
+    #[test]
+    fn parse_alt_email_not_sender() {
+        let sig = "John Doe\njohn.personal@gmail.com";
+        let r = parse_signature_block(sig, "john@company.com");
+        assert!(r.alt_emails.contains(&"john.personal@gmail.com".into()));
+        assert!(!r.alt_emails.contains(&"john@company.com".into()));
+    }
+
+    #[test]
+    fn extract_signature_data_full() {
+        let body = "Message\n\n-- \nJohn Doe\nCEO, Acme Corp\n(512) 555-1234\nhttps://example.com";
+        let r = extract_signature_data(body, "john@example.com").expect("data");
+        assert_eq!(r.title.as_deref(), Some("CEO"));
+        assert!(r.phone.is_some());
+        assert!(!r.urls.is_empty());
+    }
+
+    #[test]
+    fn extract_signature_data_no_marker() {
+        let body = "Just a message with enough length here";
+        assert!(extract_signature_data(body, "sender@example.com").is_none());
+    }
+}

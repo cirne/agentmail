@@ -38,3 +38,31 @@ pub fn parse_since_to_date(since: &str) -> Result<String, String> {
     let target = now - chrono::Duration::days(days);
     Ok(target.format("%Y-%m-%d").to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_number_is_days() {
+        let d = parse_since_to_date("1").unwrap();
+        assert!(regex::Regex::new(r"^\d{4}-\d{2}-\d{2}$")
+            .unwrap()
+            .is_match(&d));
+    }
+
+    #[test]
+    fn units_dwmy() {
+        for spec in ["7d", "2w", "3m", "1y"] {
+            let d = parse_since_to_date(spec).unwrap();
+            assert_eq!(d.len(), 10);
+        }
+    }
+
+    #[test]
+    fn rejects_zero_and_invalid() {
+        assert!(parse_since_to_date("0d").is_err());
+        assert!(parse_since_to_date("").is_err());
+        assert!(parse_since_to_date("xyz").is_err());
+    }
+}

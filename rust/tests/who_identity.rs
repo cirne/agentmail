@@ -1,4 +1,4 @@
-//! Phase 4 — who, normalize, nicknames, infer-name, signature, phonetics, fuzzy.
+//! Integration tests: `who`, address normalize, nicknames, infer-name, signature parse, phonetic/fuzzy match.
 
 use std::process::Command;
 

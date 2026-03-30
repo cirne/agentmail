@@ -84,3 +84,33 @@ pub fn list_user_tables(conn: &Connection) -> Result<Vec<String>, DbError> {
         .collect();
     Ok(names)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn open_memory_user_version() {
+        let conn = open_memory().unwrap();
+        let v: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(v, SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn journal_mode_sensible() {
+        let conn = open_memory().unwrap();
+        let mode = journal_mode(&conn).unwrap();
+        // In-memory DBs often report `memory`; file-backed uses WAL after pragma.
+        assert!(mode == "wal" || mode == "memory", "unexpected journal_mode={mode}");
+    }
+
+    #[test]
+    fn core_tables_exist() {
+        let conn = open_memory().unwrap();
+        let tables = list_user_tables(&conn).unwrap();
+        assert!(tables.iter().any(|n| n == "messages"));
+        assert!(tables.iter().any(|n| n == "messages_fts"));
+    }
+}

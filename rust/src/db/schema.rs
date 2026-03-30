@@ -126,3 +126,14 @@ pub const SCHEMA: &str = r#"
   CREATE INDEX IF NOT EXISTS idx_attachments_msg  ON attachments(message_id);
   CREATE INDEX IF NOT EXISTS idx_messages_noise ON messages(is_noise) WHERE is_noise = 1;
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn schema_has_core_objects() {
+        assert!(SCHEMA.contains("CREATE TABLE IF NOT EXISTS messages"));
+        assert!(SCHEMA.contains("messages_fts"));
+    }
+}

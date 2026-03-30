@@ -4,7 +4,7 @@
 
 **Problem:** zmail is implemented twice (Node at repo root, Rust under `rust/`). End users and skills still document `npm install -g @cirne/zmail`. We need a clear path to a single supported binary (or an explicit dual-publish story) without stranding existing installs.
 
-**Canonical technical context:** [ADR-025](../ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover) — stack, test phases, remaining work table.
+**Canonical technical context:** [ADR-025](../ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover) — stack, integration test layout (`rust/tests/*.rs`), remaining work table.
 
 **Proposed direction (sequencing):**
 

@@ -85,3 +85,55 @@ pub fn convert_to_or_query(query: &str) -> String {
     }
     escape_fts5_query(&or_parts.join(" OR "))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn escape_plain_unchanged() {
+        assert_eq!(escape_fts5_query("invoice"), "invoice");
+    }
+
+    #[test]
+    fn escape_dots_wrap_phrase() {
+        assert_eq!(
+            escape_fts5_query("user@mail.example.com"),
+            "\"user@mail.example.com\""
+        );
+    }
+
+    #[test]
+    fn escape_brackets() {
+        assert_eq!(escape_fts5_query("foo[bar]"), "\"foo[bar]\"");
+    }
+
+    #[test]
+    fn escape_or_splits_parts_with_dots() {
+        // Operator token is consumed by the split; joined parts are space-separated quoted segments.
+        assert_eq!(
+            escape_fts5_query("a.com OR b.com"),
+            "\"a.com\" \"b.com\""
+        );
+    }
+
+    #[test]
+    fn convert_words_to_or() {
+        let q = convert_to_or_query("advisory meeting");
+        assert!(q.contains(" OR "));
+        assert!(q.contains("advisory") && q.contains("meeting"));
+    }
+
+    #[test]
+    fn convert_respects_quoted_phrase() {
+        let q = convert_to_or_query(r#""exact phrase" extra"#);
+        assert!(q.contains("exact phrase"));
+    }
+
+    #[test]
+    fn lowercase_or_not_treated_as_operator() {
+        // RE_OPS only matches uppercase OR/AND; lowercase "or" is not split.
+        let q = escape_fts5_query("foo.com or bar.com");
+        assert!(q.starts_with('"') && q.contains("foo.com or bar.com"));
+    }
+}

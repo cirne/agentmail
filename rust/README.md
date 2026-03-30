@@ -10,4 +10,6 @@ cargo run -- --help
 cargo build --release
 ```
 
+**Tests:** Unit tests live in `src/` under `#[cfg(test)] mod tests { ... }` next to the code they exercise. Integration tests (one crate per file under `tests/`, e.g. `config_schema_status`, `search_fts`, `mcp_stdio`) exercise the public `zmail` API end-to-end. After changing a module, a fast check is `cargo test --lib <filter>` from this directory; run full `cargo test` before merge.
+
 The published **`npm install -g @cirne/zmail`** artifact is still the Node tree at the repo root until cutover (OPP-030).
