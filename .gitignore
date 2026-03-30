@@ -2,10 +2,8 @@
 node_modules/
 .bun/
 
-# Rust (workspace root)
-/target/
-# Stale path if a pre-layout `rust/` directory still exists locally
-rust/target/
+# Rust/Cargo — compiled artifacts (matches `target/` at repo root, under `rust/`, or any nested workspace)
+target/
 
 # Build output (Node package under node/)
 node/dist/
