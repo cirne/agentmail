@@ -17,7 +17,7 @@ import { fileURLToPath } from "url";
 import { homedir } from "os";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const repoRoot = join(__dirname, "..");
+const repoRoot = join(__dirname, "..", "..");
 const src = join(repoRoot, "skills", "zmail");
 
 const args = new Set(process.argv.slice(2));
@@ -25,7 +25,7 @@ const dryRun = args.has("--dry-run") || args.has("-n");
 const help = args.has("--help") || args.has("-h");
 
 if (help) {
-  console.log(`Usage: node scripts/install-claude-skill.mjs [--dry-run]
+  console.log(`Usage: cd node && node scripts/install-claude-skill.mjs [--dry-run]
 
 Installs this repo's skills/zmail/ (SKILL.md + references/) for Claude Code.
 

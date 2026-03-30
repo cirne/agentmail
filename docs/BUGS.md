@@ -2,7 +2,7 @@
 
 When an agent or user hits a failure, we document it here. Root cause and "agent-intuitive" implications matter: **is the CLI intuitive enough for the LLM?** See [VISION.md](./VISION.md) (agent-first, agent-intuitive interfaces).
 
-**Distribution:** Unless a report says otherwise, **active bugs refer to the published Node/npm CLI** (`@cirne/zmail`). The in-repo **Rust** port under `rust/` targets the same behavior; after cutover ([ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover), [OPP-030](opportunities/OPP-030-rust-port-cutover.md)), re-verify or re-file if a fix only landed on one implementation.
+**Distribution:** Unless a report says otherwise, **active bugs refer to the published Node/npm CLI** (`@cirne/zmail`). The in-repo **Rust** workspace at the **repository root** targets the same behavior; after cutover ([ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover), [OPP-030](opportunities/OPP-030-rust-port-cutover.md)), re-verify or re-file if a fix only landed on one implementation.
 
 ---
 

@@ -7,17 +7,17 @@ description: Install zmail globally from the local dev directory (npm run instal
 
 ## Preferred command
 
-From the **repository root**:
+From the **repository root** (after `nvm use`):
 
 ```bash
-npm run install-cli
+cd node && npm run install-cli
 ```
 
 This runs **`npm run build`** (compile to `dist/`), then **`npm install -g .`**, then installs the publishable **`skills/zmail/`** tree into **`~/.claude/skills/zmail`** (symlink to the repo by default) so **Claude Code** can use **`/zmail`** as a global skill. Skip the skill step with **`ZMAIL_SKIP_CLAUDE_SKILL=1`**. Install only the skill: **`npm run install-skill:claude`**.
 
 ## Requirements
 
-- **Node.js 20+** (see `engines` in `package.json`). The repo’s **`.npmrc`** sets **`engine-strict=true`**, so `npm install` / `npm install -g .` **fail** with `EBADENGINE` if Node is too old — not a warning.
+- **Node.js 20+** (see `engines` in `node/package.json`). **`node/.npmrc`** sets **`engine-strict=true`**, so `npm install` / `npm install -g .` **fail** with `EBADENGINE` if Node is too old — not a warning.
 - Write access to the global npm prefix (sometimes requires fixing npm permissions or using a Node version manager)
 
 ## After install
@@ -39,4 +39,4 @@ npm uninstall -g @cirne/zmail
 
 ## Not this
 
-- Day-to-day dev from the repo without touching global install: **`npm run zmail -- <cmd>`** or **`npx tsx src/index.ts -- <cmd>`**
+- Day-to-day dev from the repo without touching global install: **`cd node && npm run zmail -- <cmd>`** or **`cd node && npx tsx src/index.ts -- <cmd>`**

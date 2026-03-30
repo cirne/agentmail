@@ -256,7 +256,7 @@ Copy the **`zmail`** directory (this skill) into an **end-user** location—not 
 |------|----------------|
 | Cursor | `~/.cursor/skills/zmail/` or another project’s `.cursor/skills/zmail/` |
 | Claude Code | `~/.claude/skills/zmail/` |
-| OpenClaw | `<workspace>/skills/zmail/`, `~/.openclaw/skills/zmail/`, or from this repo: **`npm run install-skill:openclaw`** ([OpenClaw creating skills](https://docs.openclaw.ai/tools/creating-skills)) |
+| OpenClaw | `<workspace>/skills/zmail/`, `~/.openclaw/skills/zmail/`, or from this repo: **`cd node && npm run install-skill:openclaw`** ([OpenClaw creating skills](https://docs.openclaw.ai/tools/creating-skills)) |
 
 Folder name must stay **`zmail`** to match frontmatter `name` ([Agent Skills spec](https://agentskills.io/specification.md)). Copy the **whole** `skills/zmail/` directory (includes `references/`).
 

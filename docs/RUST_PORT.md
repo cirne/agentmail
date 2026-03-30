@@ -1,10 +1,10 @@
-# Rust port — tracker
+# Rust — parity tracker
 
 **Canonical ADR:** [ADR-025: Rust Port — Parallel Implementation (Pre-Cutover)](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover).
 
 **Cutover / packaging:** [OPP-030: Rust Port — Packaging and Cutover](opportunities/OPP-030-rust-port-cutover.md).
 
-**Code:** `rust/` — run `cargo test` from that directory; published CLI remains Node (`@cirne/zmail`) until cutover.
+**Code:** Repository root — run `cargo test` from the workspace root. **Node reference** lives under **`node/`** (published as `@cirne/zmail`).
 
 This document is the **single place** for (1) remaining work toward parity and release, (2) **intentional** differences from the Node implementation, and (3) **risks** (ecosystem maturity, behavioral drift). Product opportunities and Node-specific bugs may still reference Rust in passing; link here instead of duplicating long checklists elsewhere.
 
@@ -19,7 +19,7 @@ This document is the **single place** for (1) remaining work toward parity and r
 ### Production validation
 
 - Run the Rust binary against real `ZMAIL_HOME` + IMAP and compare to Node for **sync**, **refresh**, and JSON/text outputs for **search**, **who**, **read**, **thread**, **status**, **`ask`**, **`inbox`**, **MCP** — especially edge cases (large mailboxes, provider quirks, date boundaries).
-- Integration tests under `rust/tests/` are necessary but not sufficient (ADR-025 checkpoint).
+- Integration tests under `tests/` (crate root) are necessary but not sufficient (ADR-025 checkpoint).
 
 ### CLI — gaps vs Node
 
@@ -29,9 +29,9 @@ This document is the **single place** for (1) remaining work toward parity and r
 
 ### `zmail ask` — investigation tool
 
-- The **`search` tool’s `includeThreads`** parameter is accepted but **ignored** until Rust thread payloads are wired through the ask pipeline (`rust/src/ask/tools.rs`). Automated LLM-as-judge parity for `ask` remains Node (`ask.eval.test.ts`).
+- The **`search` tool’s `includeThreads`** parameter is accepted but **ignored** until Rust thread payloads are wired through the ask pipeline (`src/ask/tools.rs`). Automated LLM-as-judge parity for `ask` remains Node (`node/src/ask/ask.eval.test.ts`).
 
-### MCP (`rust/src/mcp`)
+### MCP (`src/mcp`)
 
 - **`inputSchema`** entries are minimal placeholders (`properties: {}`) vs rich Node schemas — tighten before calling MCP stable for agents.
 - **`create_draft` / `delete_draft`** return stub success without full Node behavior.
@@ -39,7 +39,7 @@ This document is the **single place** for (1) remaining work toward parity and r
 
 ### Documentation and user-facing install
 
-- After cutover: update `skills/zmail/`, `install.sh`, **AGENTS.md** primary install path, and any publishable docs that still assume npm-only. Until then, Rust is **developer-only** (see [AGENTS.md](../AGENTS.md#rust-port-in-repo)).
+- After cutover: update `skills/zmail/`, `install.sh`, **AGENTS.md** primary install path, and any publishable docs that still assume npm-only. **AGENTS.md** now leads with Rust; npm remains documented for `@cirne/zmail`.
 
 ### Schema
 
@@ -58,7 +58,7 @@ These are **acceptable by default** unless we explicitly decide to match Node.
 | **IMAP client** | Rust **`imap`** crate (see risks below), not **imapflow** — different API and behavior surface; chosen for native Rust stack integration. |
 | **CPU-bound work** | **Rayon** for parallel maildir/parse-style work where appropriate — idiomatic Rust parallelism vs Node `worker_threads` model. |
 | **Async model** | Library and CLI use **synchronous** SQLite and blocking IMAP in many paths — simpler than forcing full async end-to-end; differs from Node’s async `SqliteDatabase` facade but matches “blocking is OK” for a CLI tool. |
-| **Nickname map (`who`)** | Smaller embedded map (`rust/src/search/nicknames.rs`) than TypeScript until shared JSON or codegen — [BUG-026](bugs/BUG-026-who-nicknames-i18n-and-query-contract.md). |
+| **Nickname map (`who`)** | Smaller embedded map (`src/search/nicknames.rs`) than TypeScript until shared JSON or codegen — [BUG-026](bugs/BUG-026-who-nicknames-i18n-and-query-contract.md). |
 | **Wizard UX** | **inquire** + **indicatif** vs Node line prompts — intentional UX upgrade; flags and config shape match Node. |
 
 “Better” is not automatic: differences must still pass **real-mailbox validation** and documented agent contracts ([MCP.md](MCP.md), CLI help).
@@ -84,8 +84,8 @@ These are **acceptable by default** unless we explicitly decide to match Node.
 |-----|------|
 | [ARCHITECTURE.md § ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover) | Decision record (parallel implementation, stack summary). |
 | [OPP-030](opportunities/OPP-030-rust-port-cutover.md) | Packaging sequence and cutover. |
-| [AGENTS.md](../AGENTS.md#rust-port-in-repo) | How to build and run Rust from the monorepo. |
-| [rust/README.md](../rust/README.md) | Short developer pointer into `rust/`. |
+| [AGENTS.md](../AGENTS.md) | How to build and run Rust and Node from the monorepo. |
+| [RUST_README.md](RUST_README.md) | Short developer pointer for the Rust workspace. |
 
 ## Rust send: edge cases not yet ported
 

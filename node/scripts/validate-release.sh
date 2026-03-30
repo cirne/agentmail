@@ -5,7 +5,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 source "$SCRIPT_DIR/lib/common.sh"
 
 errors=0
@@ -27,14 +27,14 @@ section "Release Validation Checklist"
 section "Install Script"
 check "install.sh syntax valid" bash -n "$REPO_ROOT/install.sh"
 check "install.sh is executable" [ -x "$REPO_ROOT/install.sh" ]
-check "install.sh references npm package" grep -q "@cirne/zmail" "$REPO_ROOT/install.sh"
+check "install.sh references npm package" grep -q "@cirne/zmail" "$REPO_ROOT/node/install.sh"
 
 # Package.json checks
 section "Package Configuration"
-check "package.json exists" [ -f "$REPO_ROOT/package.json" ]
-check "package name is @cirne/zmail" grep -q '"name": "@cirne/zmail"' "$REPO_ROOT/package.json"
-check "bin field configured" bash -c "grep -q '\"bin\"' '$REPO_ROOT/package.json' && grep -q '\"zmail\"' '$REPO_ROOT/package.json'"
-check "Node.js 20+ required" bash -c "grep -q '\"engines\"' '$REPO_ROOT/package.json' && grep -q '\"node\"' '$REPO_ROOT/package.json' && grep -q '>=20' '$REPO_ROOT/package.json'"
+check "package.json exists" [ -f "$REPO_ROOT/node/package.json" ]
+check "package name is @cirne/zmail" grep -q '"name": "@cirne/zmail"' "$REPO_ROOT/node/package.json"
+check "bin field configured" bash -c "grep -q '\"bin\"' '$REPO_ROOT/node/package.json' && grep -q '\"zmail\"' '$REPO_ROOT/node/package.json'"
+check "Node.js 20+ required" bash -c "grep -q '\"engines\"' '$REPO_ROOT/node/package.json' && grep -q '\"node\"' '$REPO_ROOT/node/package.json' && grep -q '>=20' '$REPO_ROOT/node/package.json'"
 
 # Documentation checks
 section "Documentation"
@@ -46,7 +46,7 @@ check "OPP-007 doc exists" [ -f "$REPO_ROOT/docs/opportunities/archive/OPP-007-p
 section "Git Status"
 if [ -d "$REPO_ROOT/.git" ]; then
     cd "$REPO_ROOT"
-    if git diff --quiet install.sh package.json 2>/dev/null; then
+    if git diff --quiet install.sh node/install.sh node/package.json 2>/dev/null; then
         echo -e "${GREEN}✓${NC} No uncommitted changes to release files"
     else
         echo -e "${YELLOW}⚠${NC} Uncommitted changes detected (this is OK for testing)"

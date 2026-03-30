@@ -8,9 +8,9 @@
 
 ## Summary
 
-1. **Nickname normalization is English-centric and embedded in source.** [`src/search/nicknames.ts`](../../src/search/nicknames.ts) maps hundreds of diminutives to canonical first names for (a) cluster merge keys in `who-dynamic` / `clusterIdentities`, and (b) tie-breaking / fuzzy signals. It improves merges like "Bob Jones" vs "Robert Jones" for common US/UK names but is wrong or empty for many locales, cultures, and ambiguous short forms (e.g. "Pat" → Patricia vs Patrick). Maintaining the list in code is brittle.
+1. **Nickname normalization is English-centric and embedded in source.** [`node/src/search/nicknames.ts`](../../node/src/search/nicknames.ts) maps hundreds of diminutives to canonical first names for (a) cluster merge keys in `who-dynamic` / `clusterIdentities`, and (b) tie-breaking / fuzzy signals. It improves merges like "Bob Jones" vs "Robert Jones" for common US/UK names but is wrong or empty for many locales, cultures, and ambiguous short forms (e.g. "Pat" → Patricia vs Patrick). Maintaining the list in code is brittle.
 
-2. **Rust `who` uses a documented subset only.** [`rust/src/search/nicknames.rs`](../../rust/src/search/nicknames.rs) states it mirrors a subset of the TypeScript map. Query-side phonetic/fuzzy matching after `canonical_first_name` therefore diverges from Node for most entries. Until cutover, this is a **parity gap** for the same CLI surface ([ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)).
+2. **Rust `who` uses a documented subset only.** [`src/search/nicknames.rs`](../../src/search/nicknames.rs) states it mirrors a subset of the TypeScript map. Query-side phonetic/fuzzy matching after `canonical_first_name` therefore diverges from Node for most entries. Until cutover, this is a **parity gap** for the same CLI surface ([ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)).
 
 3. **No multi-term / OR query for `who`.** The query string is a single phrase used as substring (and related scoring). Passing `tom|thomas` does **not** mean OR; it searches for that literal substring. Agents that want variants must run **multiple** `who` invocations and merge results, or we need an explicit API (e.g. repeated `--query`, comma-separated terms, or documented JSON) and MCP parity.
 
@@ -36,8 +36,8 @@
 
 ## References
 
-- Node: [`src/search/nicknames.ts`](../../src/search/nicknames.ts), [`src/search/who-dynamic.ts`](../../src/search/who-dynamic.ts) (cluster merge by `canonicalFirst:last`), [`src/search/cluster.ts`](../../src/search/cluster.ts).
-- Rust: [`rust/src/search/nicknames.rs`](../../rust/src/search/nicknames.rs), [`rust/src/search/who.rs`](../../rust/src/search/who.rs) (`matches_query` + canonical first name).
+- Node: [`node/src/search/nicknames.ts`](../../node/src/search/nicknames.ts), [`node/src/search/who-dynamic.ts`](../../node/src/search/who-dynamic.ts) (cluster merge by `canonicalFirst:last`), [`node/src/search/cluster.ts`](../../node/src/search/cluster.ts).
+- Rust: [`src/search/nicknames.rs`](../../src/search/nicknames.rs), [`src/search/who.rs`](../../src/search/who.rs) (`matches_query` + canonical first name).
 - Related prior `who` identity bugs (fixed): [BUG-011](archive/BUG-011-who-dartmouth-not-merged.md), [BUG-012](archive/BUG-012-who-min-sent-splits-identity.md), etc.
 
 ---
@@ -45,6 +45,6 @@
 ## Acceptance criteria (when closing)
 
 - [ ] Chosen direction documented (data file vs generated vs reduced heuristics).
-- [ ] Node and Rust behavior aligned **or** differences explicitly documented in [rust/README.md](../../rust/README.md) / ADR-025 notes.
+- [ ] Node and Rust behavior aligned **or** differences explicitly documented in [docs/RUST_README.md](../../docs/RUST_README.md) / ADR-025 notes.
 - [ ] If multi-term `who` is added: CLI, MCP, tests, and agent-facing docs updated; param-sync tests pass.
 - [ ] Publishable skill / AGENTS guidance matches actual query syntax (no misleading `|` OR unless implemented).

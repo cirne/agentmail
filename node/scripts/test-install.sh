@@ -5,8 +5,8 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-INSTALL_SCRIPT="$REPO_ROOT/install.sh"
+REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+INSTALL_SCRIPT="$REPO_ROOT/node/install.sh"
 source "$SCRIPT_DIR/lib/common.sh"
 
 test_passed=0

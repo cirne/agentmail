@@ -1,4 +1,4 @@
-//! Integration tests: attachment extract/list/read/cache (fixtures under repo `tests/attachments/fixtures/`).
+//! Integration tests: attachment extract/list/read/cache (fixtures under `node/tests/attachments/fixtures/`).
 
 use std::fs;
 use std::io::BufWriter;
@@ -13,7 +13,7 @@ use zmail::{
 
 fn fixture(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../tests/attachments/fixtures")
+        .join("node/tests/attachments/fixtures")
         .join(name)
 }
 

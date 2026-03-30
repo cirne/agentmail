@@ -112,7 +112,7 @@ zmail mcp                       ← start MCP server (stdio)
 
 MCP remains the right interface for remote/hosted deployments where the index lives on a server the agent can't shell into.
 
-Both modes hit the same SQLite index. **Published distribution today** is the Node-based CLI (`npm install -g @cirne/zmail`; ADR-008). **In-repo Rust port** (`rust/`, ADR-025) targets the same CLI/MCP contract and `~/.zmail` layout for eventual cutover.
+Both modes hit the same SQLite index. **Primary in-repo implementation** is **Rust** at the **repository root** (ADR-025). **Published npm package** remains the Node-based CLI (`npm install -g @cirne/zmail`; ADR-008), source in **`node/`**. Both target the same CLI/MCP contract and `~/.zmail` layout.
 
 **See also:** [OPP-004: People Index and Writable Contacts](opportunities/archive/OPP-004-people-index-contacts.md) — roadmap for people index at index time, `zmail contact`, and MCP who/contact tools.
 
@@ -159,7 +159,7 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 
 **Decision:** TypeScript on Node.js 20+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/archive/OPP-007-packaging-npm-homebrew.md)).
 
-**Parallel implementation:** A **Rust** port lives under **`rust/`** ([ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover)). Until packaging cutover, **this ADR remains authoritative** for the published npm artifact and for agent-facing install docs (`AGENTS.md`, `skills/zmail/`).
+**Parallel implementation:** **Rust** lives at the **repository root**; **Node + TypeScript** under **`node/`** ([ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover)). **This ADR remains authoritative** for the published npm artifact and for agent-facing install docs that reference Node (`AGENTS.md`, `skills/zmail/`).
 
 **Rationale:**
 - Node.js is ubiquitous; no separate runtime (Bun) required. Aligns with OpenClaw/Claude Code (`npm i -g`).
@@ -554,7 +554,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Drafts:** Pre-send content lives as **Markdown + YAML frontmatter** under `{dataDir}/drafts/`; after send, the draft file is moved to `{dataDir}/sent/`. Local drafts are **not** synced to the provider’s IMAP Drafts folder in v1. **CLI:** `zmail draft new|reply|forward|list|view`, **`zmail draft edit <id> "<instruction>"`** (LLM revision via OpenAI), **`zmail draft rewrite <id> …`** (literal body), then **`zmail send <draft-id>`**. Mutating commands default to JSON; **`--text`** prints a human-readable draft. **MCP:** `create_draft`, `list_drafts`, `send_draft` (same send pipeline; LLM edit is CLI subprocess today).
 
-**Threading:** `In-Reply-To` / `References` for replies are built from the source message’s raw `.eml` via **mailparser** (`src/send/threading.ts`), because those headers are not stored as columns in SQLite.
+**Threading:** `In-Reply-To` / `References` for replies are built from the source message’s raw `.eml` via **mailparser** (`node/src/send/threading.ts`), because those headers are not stored as columns in SQLite.
 
 **Non-goals (v1):** OAuth2-only SMTP, per-message relay APIs, IMAP APPEND to Drafts.
 
@@ -564,11 +564,11 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ### ADR-025: Rust Port — Parallel Implementation (Pre-Cutover)
 
-**Decision:** Maintain a **Rust** implementation in **`rust/`** alongside the existing **Node + TypeScript** tree at repo root. Both target the same **agent contract**: `ZMAIL_HOME` / `~/.zmail` (`config.json`, `.env`, `data/`, maildir layout), FTS5 SQLite schema semantics, CLI subcommands, and MCP stdio tools. **`rust/target/`** is gitignored; CI/dev run **`cargo test`** from **`rust/`**.
+**Decision:** Maintain a **Rust** implementation at the **repository root** (`Cargo.toml`, `src/`, `tests/`) alongside **Node + TypeScript** under **`node/`**. Both target the same **agent contract**: `ZMAIL_HOME` / `~/.zmail` (`config.json`, `.env`, `data/`, maildir layout), FTS5 SQLite schema semantics, CLI subcommands, and MCP stdio tools. **`/target/`** at the repo root is gitignored; CI/dev run **`cargo test`** from the **repository root**.
 
-**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), **`imap`** (TLS IMAP client) for `zmail sync` / `zmail refresh`, `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests in **`rust/tests/*.rs`** named by area (e.g. `config_schema_status`, `sync_parse_maildir`, `sync_run_fake_imap`, `search_fts`, `who_identity`, `setup_read_rebuild`, `attachments_extract`, `send_drafts`, `mcp_stdio`, `ask_inbox_guards`) covering config/DB through MCP, IMAP-shaped sync, and ask-shaped flows.
+**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), **`imap`** (TLS IMAP client) for `zmail sync` / `zmail refresh`, `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests in **`tests/*.rs`** named by area (e.g. `config_schema_status`, `sync_parse_maildir`, `sync_run_fake_imap`, `search_fts`, `who_identity`, `setup_read_rebuild`, `attachments_extract`, `send_drafts`, `mcp_stdio`, `ask_inbox_guards`) covering config/DB through MCP, IMAP-shaped sync, and ask-shaped flows.
 
-**Checkpoint (in-repo):** Area-named integration tests under **`rust/tests/`** (plus `#[cfg(test)]` unit tests in `rust/src/`) run via **`cargo test`** — sync/index/search/who/attachments/send-drafts/MCP/ask-shaped coverage against temp dirs; not a substitute for production bakeoffs on real mailboxes.
+**Checkpoint (in-repo):** Area-named integration tests under **`tests/`** (plus `#[cfg(test)]` unit tests in **`src/`**) run via **`cargo test`** — sync/index/search/who/attachments/send-drafts/MCP/ask-shaped coverage against temp dirs; not a substitute for production bakeoffs on real mailboxes.
 
 **Master tracker:** **[RUST_PORT.md](RUST_PORT.md)** — remaining CLI/MCP/feature gaps vs Node, intentional differences (SQLite bundling, IMAP stack, parallelism model), known risks (e.g. `imap` crate pre-1.0, attachment stack parity), production validation, and pointers to [BUG-025](bugs/BUG-025-mcp-cli-parity-alignment-skill.md) / [BUG-026](bugs/BUG-026-who-nicknames-i18n-and-query-contract.md). High-level **packaging and cutover sequencing** stay in [OPP-030](opportunities/OPP-030-rust-port-cutover.md). **CI:** [`.github/workflows/rust-ci.yml`](../.github/workflows/rust-ci.yml), [`.github/workflows/rust-release.yml`](../.github/workflows/rust-release.yml), [`.github/workflows/rust-nightly.yml`](../.github/workflows/rust-nightly.yml).
 

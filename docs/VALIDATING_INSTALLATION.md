@@ -6,7 +6,7 @@ This document describes how to validate the install script, manual npm release, 
 
 The validation strategy covers:
 1. **Install script validation** - Syntax, logic, and functionality
-2. **Release process** - Manual npm publish via `scripts/publish.sh` (no GitHub Actions release workflow)
+2. **Release process** - Manual npm publish via `node/scripts/publish.sh` (no GitHub Actions release workflow)
 3. **End-to-end installation testing** - Full installation and package verification
 4. **Manual validation** - Real-world testing scenarios
 
@@ -18,7 +18,7 @@ The validation strategy covers:
 
 Run the test script:
 ```bash
-./scripts/test-install.sh
+./node/scripts/test-install.sh
 ```
 
 This validates:
@@ -31,15 +31,16 @@ This validates:
 
 ### Manual Testing
 
-**Test syntax:**
+**Test syntax:** Root `install.sh` delegates to `node/install.sh`; validate both.
 ```bash
 bash -n install.sh
+bash -n node/install.sh
 ```
 
 **Test with ShellCheck (recommended):**
 ```bash
 # Install ShellCheck first: brew install shellcheck
-shellcheck install.sh
+shellcheck install.sh node/install.sh
 ```
 
 **Dry-run test (simulate without installing):**
@@ -76,12 +77,13 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 
 ## 2. Release validation (manual npm publish)
 
-Publishing is done locally with `scripts/publish.sh` (see `scripts/publish.sh` and `AGENTS.md`). Before publishing:
+Publishing is done locally with `node/scripts/publish.sh` (see `AGENTS.md`). Before publishing, from the repo root after `nvm use`:
 
 ```bash
+cd node
 npm test
 npm run build
-./scripts/validate-release.sh
+cd .. && ./node/scripts/validate-release.sh
 ```
 
 After `publish.sh` completes, confirm the new version appears on the npm registry you use and that `npm install -g @cirne/zmail` works.
@@ -150,11 +152,11 @@ zmail status  # Should show "No config found" or similar
 
 ### Pre-Release Checklist
 
-- [ ] Install script syntax validated (`bash -n install.sh`)
-- [ ] ShellCheck passes (`shellcheck install.sh`)
-- [ ] Test script passes (`./scripts/test-install.sh`)
-- [ ] Local tests pass (`npm test`)
-- [ ] Build succeeds (`npm run build`)
+- [ ] Install script syntax validated (`bash -n install.sh && bash -n node/install.sh`)
+- [ ] ShellCheck passes (`shellcheck install.sh node/install.sh`)
+- [ ] Test script passes (`./node/scripts/test-install.sh`)
+- [ ] Local tests pass (`cd node && npm test`)
+- [ ] Build succeeds (`cd node && npm run build`)
 - [ ] Package.json name is `@cirne/zmail`
 
 ### Post-publish checklist
@@ -211,7 +213,7 @@ Provide alpha testers with:
 ### Publish issues
 
 **Tests fail before publish:**
-- Run locally: `npm test`
+- Run locally: `cd node && npm test`
 - Verify Node.js version matches `.nvmrc` (20+)
 
 **Package publish fails:**
@@ -230,14 +232,14 @@ Consider adding:
 1. **Pre-commit hook** to validate install script:
    ```bash
    # .git/hooks/pre-commit
-   bash -n install.sh && shellcheck install.sh
+   bash -n install.sh && bash -n node/install.sh && shellcheck install.sh node/install.sh
    ```
 
 2. **CI workflow** to test install script:
    ```yaml
    # .github/workflows/test-install.yml
    - name: Test install script
-     run: ./scripts/test-install.sh
+     run: ./node/scripts/test-install.sh
    ```
 
 3. **Package validation** after publish:
@@ -251,7 +253,7 @@ Consider adding:
 
 ```bash
 # Validate install script
-bash -n install.sh && shellcheck install.sh && ./scripts/test-install.sh
+bash -n install.sh && bash -n node/install.sh && shellcheck install.sh node/install.sh && ./node/scripts/test-install.sh
 
 # Test full install
 curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash

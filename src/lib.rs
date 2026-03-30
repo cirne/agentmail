@@ -1,4 +1,4 @@
-//! zmail library — Rust port (see repo `rust/` during migration).
+//! zmail library — Rust CLI/MCP implementation (workspace root).
 
 pub mod ask;
 pub mod ask_stub;

@@ -1,8 +1,15 @@
 # zmail — Agent Guide
 
-**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. Runs on **Node.js 20+**; dev uses `tsx`, distributed via npm as `@cirne/zmail` (see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). **Outbound mail** uses SMTP send-as-user (`zmail send`, `zmail draft`, MCP tools); optional `ZMAIL_SEND_TEST=1` restricts recipients for dev/test (see [ADR-024](docs/ARCHITECTURE.md#adr-024-outbound-email--smtp-send-as-user--local-drafts)).
+**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. **Primary in-repo implementation:** **Rust** at the repository root (`cargo build`, `cargo test`). **Reference / published npm package:** **Node.js 20+** under **`node/`** (`tsx` dev, `npm install -g @cirne/zmail`; see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). **Outbound mail** uses SMTP send-as-user (`zmail send`, `zmail draft`, MCP tools); optional `ZMAIL_SEND_TEST=1` restricts recipients for dev/test (see [ADR-024](docs/ARCHITECTURE.md#adr-024-outbound-email--smtp-send-as-user--local-drafts)).
 
-**Quick install:**
+**Quick install (Rust binary from source):**
+```bash
+cargo build --release
+# ./target/release/zmail --help
+# Optional: ./install-rust-binary.sh
+```
+
+**Quick install (npm — Node reference build):**
 ```bash
 npm install -g @cirne/zmail
 # Alternative: curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
@@ -21,62 +28,60 @@ npm install -g @cirne/zmail
 
 ## Tech stack
 
-Node.js 20+, TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native addon, OS page cache — not a whole-DB-in-RAM WASM/sql.js model), FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db`). Dev: `tsx`; install: `npm install -g @cirne/zmail` (or build: `npm run build` → `dist/index.js`).
+**Rust (default in this repo):** workspace root — `clap` CLI, **`rusqlite`** with bundled SQLite, **`imap`** crate, FTS5, MCP stdio. **Dev:** `cargo run`, `cargo test`; **release:** `cargo build --release` → `./target/release/zmail`. See **[ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)** and **[docs/RUST_README.md](docs/RUST_README.md)**.
 
-**Native addon ABI:** `better-sqlite3` ships a `.node` binary for Node’s `NODE_MODULE_VERSION`. On first `zmail` run, **`ensure-better-sqlite-native`** loads the addon; if the ABI is wrong, it runs **`npm rebuild better-sqlite3`** from the install directory (same as manual `npm rebuild` with the `node` that runs `zmail`). **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
+**Node (reference / npm):** **`node/`** — TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native addon, OS page cache — not a whole-DB-in-RAM WASM/sql.js model), FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db` under `node/src/`). Dev: `tsx` from `node/`; install: `npm install -g @cirne/zmail` (or `cd node && npm run build` → `node/dist/index.js`).
 
-### Rust port (in-repo)
+**Native addon ABI (Node only):** `better-sqlite3` ships a `.node` binary for Node’s `NODE_MODULE_VERSION`. On first `zmail` run, **`ensure-better-sqlite-native`** loads the addon; if the ABI is wrong, it runs **`npm rebuild better-sqlite3`** from the install directory (same as manual `npm rebuild` with the `node` that runs `zmail`). **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
-A **Rust** implementation lives under **`rust/`** (same CLI/MCP contract and `~/.zmail` goals; see **[ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)**). **Parity tracker (remaining work, intentional differences, risks):** [docs/RUST_PORT.md](docs/RUST_PORT.md). It is **not** the published npm package yet — use it from a clone for development and benchmarking.
+**Parity tracker** (remaining work vs Node, intentional differences, risks): [docs/RUST_PORT.md](docs/RUST_PORT.md). **Packaging and cutover:** [OPP-030](docs/opportunities/OPP-030-rust-port-cutover.md).
 
 ```bash
-cd rust
-cargo test                    # integration tests (`tests/*.rs`, e.g. config_schema_status, sync_run_fake_imap, search_fts, mcp_stdio)
-cargo run -- search "foo"     # dev binary; same subcommand style as Node zmail
+# From repository root (Rust)
+cargo test
+cargo run -- search "foo"
 cargo run -- ask "your question"   # OpenAI ask pipeline (requires ZMAIL_OPENAI_API_KEY in env or ~/.zmail/.env)
-cargo run -- sync --foreground --since 7d   # backward IMAP sync (`sync` alone spawns a background child like Node)
-cargo run -- refresh          # forward IMAP sync + JSON/text new-mail preview
+cargo run -- sync --foreground --since 7d
+cargo run -- refresh
 cargo build --release && ./target/release/zmail status
 ```
 
-If both **`zmail`** (from `npm install -g @cirne/zmail`) and **`./target/release/zmail`** are on your **`PATH`**, the shell resolves whichever comes first — use an explicit path or alias when comparing behavior. **Remaining packaging and cutover:** [OPP-030](docs/opportunities/OPP-030-rust-port-cutover.md).
+If both **`zmail`** (from `npm install -g @cirne/zmail`) and **`./target/release/zmail`** are on your **`PATH`**, the shell resolves whichever comes first — use an explicit path or alias when comparing behavior.
 
 ## Node.js version (nvm)
 
-**Required for development.** Always use the Node version pinned in [`.nvmrc`](.nvmrc) so it matches **`package.json` → `engines`** and the toolchain behaves consistently.
+**Required for Node / npm work.** Always use the Node version pinned in [`.nvmrc`](.nvmrc) so it matches **`node/package.json` → `engines`** and the toolchain behaves consistently.
 
-1. **Before** `npm install`, `npm ci`, `npm run install-cli`, or any install that builds **native** dependencies (`better-sqlite3`), run:
+1. **Before** `npm install`, `npm ci`, `npm run install-cli`, or any install that builds **native** dependencies (`better-sqlite3`), run **`nvm use`** from the **repository root** (same `.nvmrc` as CI), then work under **`node/`**:
    ```bash
    nvm use
+   cd node && npm ci
    ```
    If that version isn’t installed: `nvm install` (reads `.nvmrc`), then `nvm use`.
-2. **`.npmrc`** sets **`engine-strict=true`** — if your shell is on the wrong Node, **`npm install`** fails with **`EBADENGINE`** (this is intentional).
+2. **`node/.npmrc`** sets **`engine-strict=true`** — if your shell is on the wrong Node, **`npm install`** fails with **`EBADENGINE`** (this is intentional).
 3. **Same Node for install and runtime** — `better-sqlite3` is built for whatever Node ran `npm install`. Using Node 18 in the shell and Node 20 elsewhere causes **`NODE_MODULE_VERSION`** / dlopen errors.
 
-**Agents and CI:** When running repo commands in a subprocess, activate nvm first (e.g. `source ~/.nvm/nvm.sh && nvm use && npm test`) or use a Node 20+ toolchain that matches `.nvmrc`.
+**Agents and CI:** When running Node tests in a subprocess, activate nvm first (e.g. `source ~/.nvm/nvm.sh && nvm use && cd node && npm test`) or use a Node 20+ toolchain that matches `.nvmrc`.
 
 ## Project structure
 
 ```
-src/            Node + TypeScript (published CLI today)
-  cli/          entrypoint and subcommands
-  inbox/        LLM notable-mail scan (`zmail inbox`)
-  sync/         IMAP sync engine
-  db/           SQLite schema, queries
-  search/       FTS5 full-text search
-  ask/          answer engine (zmail ask): agent, tools, eval
-  attachments/  document extraction → markdown
-  mcp/          MCP server tools
-  lib/          shared utilities
-rust/           Rust port (pre-cutover); see ADR-025 and rust/README.md
+src/            Rust CLI + library (primary); cargo workspace root
+tests/          Rust integration tests (`cargo test`)
+Cargo.toml      Rust workspace
+node/           Node + TypeScript reference + npm package `@cirne/zmail`
+  src/          cli/, inbox/, sync/, db/, search/, ask/, attachments/, mcp/, lib/
+  tests/        Vitest suites
+  package.json
 ```
 
 ## Development rules
 
-- **Node:** follow [Node.js version (nvm)](#nodejs-version-nvm) — `nvm use` from the repo root before installs and when running `npm run zmail`, `npm test`, `npm run install-cli`, etc.
+- **Rust:** `cargo fmt`, `cargo clippy`, `cargo test` from the **repository root**.
+- **Node:** follow [Node.js version (nvm)](#nodejs-version-nvm) — `nvm use` from the repo root, then **`cd node`** before installs and when running `npm run zmail`, `npm test`, `npm run install-cli`, etc.
 - Never commit email data, credentials, or `.db` files.
 - **No migrations.** Schema is applied on DB creation. For schema changes: run manual `ALTER TABLE` / SQL against the live DB to save a resync. Full reset (`rm -rf ~/.zmail/data/` + resync) also works. Do not create or maintain migration files.
-- When testing search, **use the standard search interface** (`search(db, { query })` from `~/search`). Do not query the DB directly unless debugging or explicitly asked.
+- When testing search in **Node**, **use the standard search interface** (`search(db, { query })` from `~/search`). Do not query the DB directly unless debugging or explicitly asked.
 
 ## Planning and test coverage
 
@@ -109,9 +114,19 @@ See `.cursor/skills/process-feedback/SKILL.md` for the complete workflow. The `d
 
 ## Commands
 
-**Prerequisite:** `nvm use` (see [Node.js version (nvm)](#nodejs-version-nvm)).
+**Rust (repository root):**
 
 ```bash
+cargo test
+cargo run -- --help
+cargo build --release
+./target/release/zmail status
+```
+
+**Node (after `nvm use`, from `node/`):**
+
+```bash
+cd node
 npm install          # builds better-sqlite3 native addon for current Node (engine-strict: Node must match package.json engines, >=20)
 npm run dev          # starts background sync (tsx src/index.ts)
 npm run zmail --     # CLI from repo (e.g. npm run zmail -- search "foo"); the -- passes args
@@ -161,9 +176,11 @@ tail -f ~/.zmail/logs/sync-*.log
 
 The CLI prints the log file path to stdout (e.g., `Sync log: ~/.zmail/logs/sync-20250306-143022.log`) so agents can tail/inspect it. Verbose logging goes to the file, not stdout, making background execution clean.
 
-**Using `zmail` from the repo:** `npm run zmail -- <command> [args]` (the `--` is required so args reach the CLI). Or: `npx tsx src/index.ts -- <command> [args]`.
+**Using `zmail` from the repo (Rust):** `cargo run -- <command> [args]` from the repository root, or `./target/release/zmail` after `cargo build --release`.
 
-**Using `zmail` from another directory (local dev):** With **`nvm use`** active, from the repo run **`npm run install-cli`** once — it builds `dist/`, runs `npm install -g .`, and links **`skills/zmail/`** to **`~/.claude/skills/zmail`** so Claude Code can use **`/zmail`** (override: `ZMAIL_CLAUDE_SKILL_DIR`; copy instead of symlink: `ZMAIL_CLAUDE_SKILL_MODE=copy`; skip the skill step: `ZMAIL_SKIP_CLAUDE_SKILL=1`). The global `zmail` command uses the same `dist/index.js` entry as the published package. Remove with `npm uninstall -g @cirne/zmail`. For quick iteration without touching global install, use `npm run zmail -- <command>` from the repo (still use **`nvm use`** so Node matches `.nvmrc`). To install only the Claude skill from the repo: **`npm run install-skill:claude`**.
+**Using `zmail` from the repo (Node):** `cd node && npm run zmail -- <command> [args]` (the `--` is required so args reach the CLI). Or: `cd node && npx tsx src/index.ts -- <command> [args]`.
+
+**Using `zmail` from another directory (local dev):** With **`nvm use`** active, from the repo run **`cd node && npm run install-cli`** once — it builds `node/dist/`, runs `npm install -g .`, and links **`skills/zmail/`** to **`~/.claude/skills/zmail`** so Claude Code can use **`/zmail`** (override: `ZMAIL_CLAUDE_SKILL_DIR`; copy instead of symlink: `ZMAIL_CLAUDE_SKILL_MODE=copy`; skip the skill step: `ZMAIL_SKIP_CLAUDE_SKILL=1`). The global `zmail` command uses the same `dist/index.js` entry as the published package. Remove with `npm uninstall -g @cirne/zmail`. For quick iteration without touching global install, use `cd node && npm run zmail -- <command>` (still use **`nvm use`** so Node matches `.nvmrc`). To install only the Claude skill from the repo: **`cd node && npm run install-skill:claude`**.
 
 ### Attachment commands
 
@@ -175,7 +192,7 @@ zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]   # -
 
 Supported formats: PDF, DOCX, XLSX, HTML, CSV, TXT. Extraction happens on first read and is cached in the DB.
 
-**CLI help and onboarding (no env required):** `zmail --help`, `zmail -h`, `zmail help`, and bare `zmail` print a **concise command list** (canonical string: `CLI_USAGE` in `src/lib/onboarding.ts`). Use **`zmail <command> --help`** for flags and examples. When to use **`zmail ask`** versus search/read/thread/who/attachment, the **draft + send** loop, and MCP workflows: [docs/ASK.md](docs/ASK.md), [docs/MCP.md](docs/MCP.md), and the end-user skill ([skills/zmail/references/CANONICAL-DOCS.md](skills/zmail/references/CANONICAL-DOCS.md), [skills/zmail/references/DRAFT-AND-SEND.md](skills/zmail/references/DRAFT-AND-SEND.md)). **Progressive disclosure:** JSON output from commands such as **`search`** may include a **`hint`** field (and truncation metadata); text mode may print similar tips after results—read them before inventing a new approach. If any command fails due to missing config, the CLI prints "No config found. Run 'zmail setup' or 'zmail wizard' first."
+**CLI help and onboarding (no env required):** `zmail --help`, `zmail -h`, `zmail help`, and bare `zmail` print a **concise command list** (canonical string: `CLI_USAGE` in `node/src/lib/onboarding.ts` for Node; Rust mirrors the same surface). Use **`zmail <command> --help`** for flags and examples. When to use **`zmail ask`** versus search/read/thread/who/attachment, the **draft + send** loop, and MCP workflows: [docs/ASK.md](docs/ASK.md), [docs/MCP.md](docs/MCP.md), and the end-user skill ([skills/zmail/references/CANONICAL-DOCS.md](skills/zmail/references/CANONICAL-DOCS.md), [skills/zmail/references/DRAFT-AND-SEND.md](skills/zmail/references/DRAFT-AND-SEND.md)). **Progressive disclosure:** JSON output from commands such as **`search`** may include a **`hint`** field (and truncation metadata); text mode may print similar tips after results—read them before inventing a new approach. If any command fails due to missing config, the CLI prints "No config found. Run 'zmail setup' or 'zmail wizard' first."
 
 **Setup (CLI/agent-first):** Provide credentials via flags or env vars. For interactive prompts, use `zmail wizard`.
 
@@ -234,7 +251,7 @@ Run `zmail setup` (with flags/env) or `zmail wizard` (interactive) to create the
 Optional environment variables:
 
 - `ZMAIL_HOME` — override config directory (default: `~/.zmail`)
-- `ZMAIL_WORKER_CONCURRENCY` — optional. Max **`worker_threads`** for CPU-parallel zmail work (maildir parse during reindex / `zmail rebuild-index` today; same knob for future pools). One Node **process**, several V8 isolates; SQLite stays on the main thread. Non-negative integer; **defaults to 8** when unset (see `DEFAULT_ZMAIL_WORKER_CONCURRENCY` in `src/lib/worker-concurrency.ts`). Under Vitest, defaults to **1** unless this var is set. Parallel rebuild parse loads `dist/db/rebuild-parse-worker.js` — run `npm run build` once if you use `tsx`/source without `dist/`. Legacy alias: `ZMAIL_REBUILD_PARSE_CONCURRENCY` (used only if `ZMAIL_WORKER_CONCURRENCY` is unset).
+- `ZMAIL_WORKER_CONCURRENCY` — optional. Max **`worker_threads`** for CPU-parallel zmail work (maildir parse during reindex / `zmail rebuild-index` today; same knob for future pools). One Node **process**, several V8 isolates; SQLite stays on the main thread. Non-negative integer; **defaults to 8** when unset (see `DEFAULT_ZMAIL_WORKER_CONCURRENCY` in `node/src/lib/worker-concurrency.ts`). Under Vitest, defaults to **1** unless this var is set. Parallel rebuild parse loads `node/dist/db/rebuild-parse-worker.js` — run `cd node && npm run build` once if you use `tsx`/source without `dist/`. Legacy alias: `ZMAIL_REBUILD_PARSE_CONCURRENCY` (used only if `ZMAIL_WORKER_CONCURRENCY` is unset).
 
 Required environment variables (for `zmail setup`):
 

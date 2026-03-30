@@ -24,9 +24,6 @@ jobs:
             target: x86_64-pc-windows-msvc
             ext: zip
     runs-on: ${{ matrix.os }}
-    defaults:
-      run:
-        working-directory: rust
     steps:
       - uses: actions/checkout@v4
 
@@ -40,7 +37,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: rust
+          workspaces: "."
 
       - name: Build release
         run: cargo build --release

@@ -3,7 +3,7 @@
   "build": {
     "dockerfile": "Dockerfile"
   },
-  "postCreateCommand": "npm install",
+  "postCreateCommand": "cd node && npm install",
   "forwardPorts": [3000],
   "remoteEnv": {
     "ZMAIL_HOME": "${workspaceFolder}/.zmail"

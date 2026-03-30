@@ -3,14 +3,20 @@ name: Rust CI
 on:
   pull_request:
     paths:
-      - "rust/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "src/**"
+      - "tests/**"
       - ".github/workflows/rust-ci.yml"
   push:
-    branches:
-      - main
-      - rust
+    branches: [main]
     paths:
-      - "rust/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "src/**"
+      - "tests/**"
       - ".github/workflows/rust-ci.yml"
   workflow_dispatch:
 
@@ -23,12 +29,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # hashFiles() is not valid in jobs.<id>.if; detect at step level instead.
-      # main may not have rust/ until the port lands — skip cargo steps, succeed.
       - name: Detect Rust workspace
         id: rustws
         run: |
-          if [ -f rust/Cargo.toml ]; then
+          if [ -f Cargo.toml ]; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
@@ -46,24 +50,20 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         if: steps.rustws.outputs.present == 'true'
         with:
-          workspaces: rust
+          workspaces: "."
 
       - name: Format
         if: steps.rustws.outputs.present == 'true'
-        working-directory: rust
         run: cargo fmt --all -- --check
 
       - name: Clippy
         if: steps.rustws.outputs.present == 'true'
-        working-directory: rust
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
         if: steps.rustws.outputs.present == 'true'
-        working-directory: rust
         run: cargo test
 
       - name: Release build smoke
         if: steps.rustws.outputs.present == 'true'
-        working-directory: rust
         run: cargo build --release

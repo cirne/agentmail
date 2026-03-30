@@ -13,22 +13,30 @@ Modern email systems are human-first — designed around inbox browsing and manu
 ## Quick start
 
 1. **Install** (see [AGENTS.md](AGENTS.md) for full installation options)
+
+   **From source (Rust CLI — primary in this repo):**
+   ```bash
+   cargo build --release
+   # Optionally: ./install-rust-binary.sh   # copies target/release/zmail into PATH
+   ```
+
+   **Published npm package** (Node reference implementation under `node/`):
    ```bash
    npm install -g @cirne/zmail
    ```
-   
-   For development:
+
+   **Node development** (parity tests, eval harness, publish):
    ```bash
-   npm install
+   cd node && npm install
    ```
 
 2. **Run interactive setup**
    ```bash
    zmail setup
    ```
-   Or from the repo:
+   Or from the repo (Node):
    ```bash
-   npm run zmail -- setup
+   cd node && npm run zmail -- setup
    ```
    This creates `~/.zmail/config.json` and `~/.zmail/.env` with your IMAP credentials and OpenAI API key. The setup command validates credentials and guides you through the process.
 
@@ -36,27 +44,27 @@ Modern email systems are human-first — designed around inbox browsing and manu
    ```bash
    zmail sync --since 7d
    ```
-   Or from the repo:
+   Or from the repo (Node):
    ```bash
-   npm run zmail -- sync --since 7d
+   cd node && npm run zmail -- sync --since 7d
    ```
    
    **Refresh (fetch new messages):**
    ```bash
    zmail refresh
    ```
-   Or from the repo:
+   Or from the repo (Node):
    ```bash
-   npm run zmail -- refresh
+   cd node && npm run zmail -- refresh
    ```
 
 4. **Search (header-first default)**
    ```bash
    zmail search "apple receipt after:30d" --json
    ```
-   Or from the repo:
+   Or from the repo (Node):
    ```bash
-   npm run zmail -- search "apple receipt after:30d" --json
+   cd node && npm run zmail -- search "apple receipt after:30d" --json
    ```
 
 ## CLI
@@ -109,7 +117,7 @@ For a **maildir-only** SQLite reindex without deleting raw email (same steps as 
 
 ## Architecture
 
-Built with TypeScript + Node.js 20+. All data stored locally on a persistent volume — no cloud sync service, no third-party access to your email. 
+**Primary implementation:** Rust (workspace root — `cargo build`, `cargo test`). **Reference / npm package:** TypeScript + Node.js 20+ under **`node/`** (published as `@cirne/zmail`). All data stored locally on a persistent volume — no cloud sync service, no third-party access to your email. 
 
 **Documentation:**
 - [`AGENTS.md`](AGENTS.md) — single source of truth for installation, commands, and development

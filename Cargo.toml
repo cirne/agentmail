@@ -2,7 +2,7 @@
 name = "zmail"
 version = "0.1.0"
 edition = "2021"
-description = "Agent-first email — Rust port (work in progress)"
+description = "Agent-first email — Rust CLI and MCP (primary implementation in-repo)"
 default-run = "zmail"
 
 [dependencies]

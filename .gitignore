@@ -2,10 +2,13 @@
 node_modules/
 .bun/
 
-# Rust (port lives in rust/ until cutover)
+# Rust (workspace root)
+/target/
+# Stale path if a pre-layout `rust/` directory still exists locally
 rust/target/
 
-# Build output
+# Build output (Node package under node/)
+node/dist/
 dist/
 build/
 *.compiled
