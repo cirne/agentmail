@@ -4,6 +4,8 @@ Directories here are **[Agent Skills](https://agentskills.io/specification.md)-s
 
 **Product skill name:** **`/zmail`** — the folder and frontmatter `name` are `zmail` (spec requirement); many hosts surface that as the **`/zmail`** slash command.
 
+**Pitch:** Agent-native email for **Claude Code**, **OpenClaw**, and coding agents. **Local SQLite + FTS**—inbox-style **lightning-fast search**, answers as **structured JSON**, not a mail website. **Never leave** **agent / chat / terminal**: **zmail** CLI or MCP end-to-end. Let **AI** take care of search, summary, drafts, and send so you **never have to live in an inbox** again.
+
 **Not the same as** **`.cursor/skills/`** in this repository — internal dev skills only (`commit`, `db-dev`, `install-local`, `process-feedback`).
 
 | Path | Audience |

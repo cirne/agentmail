@@ -1,17 +1,19 @@
 ---
 name: zmail
 description: >-
-  Local-first email for agents: IMAP sync to maildir + SQLite (FTS5); CLI search, read, thread, who,
-  attachments, drafts, and SMTP send-as-user. Requires Node 20+, npm install (`npm install -g @cirne/zmail` or `npx @cirne/zmail`),
-  native better-sqlite3 (rebuilt on first run if Node ABI mismatch), and IMAP credentials. OpenAI API
-  key required for `zmail setup` / wizard, `zmail ask`, `zmail inbox`, and `zmail draft edit` (LLM revises drafts)—those features send text to OpenAI. Optional `who --enrich` may call third-party search APIs. Source:
-  github.com/cirne/zmail.
+  Agent-native email: IMAP sync to local SQLite + FTS5—lightning-fast local search,
+  structured JSON (no webmail UI). Assistants search, read, thread, attachments, draft, and send via CLI or MCP
+  without leaving chat or terminal. Built for Claude Code, OpenClaw, Cursor, and any host with shell or MCP.
+  Local-first primitives keep mail on-device; OpenAI powers `zmail ask`, `zmail inbox`, setup/wizard, and `draft edit`.
+  Requires Node 20+, `npm install -g @cirne/zmail` or `npx @cirne/zmail`, IMAP credentials, and an API key for LLM
+  paths; native better-sqlite3 (rebuilds on ABI mismatch). OTP/login codes: optional `refresh`, then `search` + `read`
+  (skill § Login / OTP). Optional `who --enrich` may call third-party APIs. Source: github.com/cirne/zmail.
 license: "Refer to https://github.com/cirne/zmail for project license and terms."
 compatibility: >-
   Node.js 20+; npm; `zmail` on PATH after global install. Network: IMAP, OpenAI (ask/inbox/setup),
   optional enrich providers. Disk: ~/.zmail (SQLite + maildir). Native addon: better-sqlite3 (rebuilt on first run if needed).
 metadata:
-  version: "0.2.0"
+  version: "0.2.3"
   homepage: "https://github.com/cirne/zmail"
   repository: "https://github.com/cirne/zmail"
   openclaw:
@@ -26,11 +28,13 @@ metadata:
         - ZMAIL_OPENAI_API_KEY
 ---
 
-# /zmail — agent-first email
+# /zmail — Email your agent can actually use
 
-**What zmail is:** Email reimagined for **agents and automation**—not a human-first inbox UI. It syncs mail over **IMAP**, stores messages as **files (maildir-style)** and indexes them in **local SQLite** with **FTS5**. The primary surface is the **CLI**: search, read, thread, who, attachments, **`zmail ask`** for natural-language questions (OpenAI), and **draft + SMTP send** so agents can **compose, iterate, and send** without opening Gmail—same index and credentials as sync (see [Agent workflow: draft and send](#agent-workflow-draft-and-send)).
+**Tagline:** **Stay in agent / chat / zmail—skip the inbox tab.** Your mail is a **local SQLite + FTS5** index: **lightning-fast** search and reads over structured CLI/MCP output, not a mail website. Let **AI** handle triage, answers, and drafts (`zmail ask`, `inbox`, `draft` …) so you **never have to stare at a traditional inbox** for routine work.
 
-**Why use it:** Traditional webmail is slow and awkward for AI workflows. zmail’s promise is **local-first, privacy-friendly** mail you control, **agent-intuitive** commands, and room to grow toward “the agent is the interface”—plain-language prompts become searches and reads, not manual digging.
+**What it is:** Not a human mail UI. **IMAP** sync, maildir-style storage, **FTS5** search, **SMTP send-as-user**. Same pipeline from **Claude Code**, **OpenClaw**, **Cursor**, or automation (see [Agent workflow: draft and send](#agent-workflow-draft-and-send)).
+
+**Why:** **Local-first** primitives (`search`, `read`, `thread`, …) stay on your machine; LLM-backed features (`ask`, `inbox`, `draft edit`, setup) call **OpenAI**—use when the mailbox owner accepts that tradeoff.
 
 ## Transparency (registries & security review)
 
@@ -63,7 +67,8 @@ OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://d
 6. **Keep the index fresh:** **`search`**, **`read`**, **`thread`**, **`attachment`**, and **`ask`** only see mail already synced locally—run **`zmail refresh`** regularly (especially before mail work when **recency** matters), and recommend the user **schedule** **`zmail refresh`** (cron, launchd, or a host **heartbeat**) so new mail is indexed without manual steps ([Keeping mail fresh](#keeping-mail-fresh-indexed-and-searchable)).
 7. **Learn the CLI from the CLI:** run **`zmail`**, **`zmail --help`**, and **`zmail <command> --help`** (e.g. **`zmail draft --help`** for compose, LLM **`draft edit`**, **`draft rewrite`**, **`--text`** output). Read any **`hint`** (and truncation fields) in **JSON** output—zmail uses them to disclose the next capability ([Canonical docs & discovery](references/CANONICAL-DOCS.md)).
 8. For questions over mail, prefer **`zmail ask`** first; use **`search` / `read` / `thread` / `who` / `attachment`** when you need fine control ([Ask vs primitives](#zmail-ask-vs-primitives)). To **reply or send**, follow **[Agent workflow: draft and send](#agent-workflow-draft-and-send)** (detail: [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md)).
-9. Never paste secrets into chat logs; use env or flags in the **user’s** shell.
+9. **Login / OTP / verification codes:** prefer **`refresh` (optional) → `search` → `read`** on the **local index**—do not assume the code only appears in **`refresh`** output; full steps: [Login / OTP / verification codes](#login--otp--verification-codes) and [references/AUTH-CODES.md](references/AUTH-CODES.md).
+10. Never paste secrets into chat logs; use env or flags in the **user’s** shell.
 
 ---
 
@@ -197,6 +202,18 @@ zmail search 'query'      # FTS hits (JSON default; --text for tables)
 
 ---
 
+## Login / OTP / verification codes
+
+**Goal:** Find a **sign-in / verification / MFA code** and report it with **sender, time (date), subject**, and enough context to choose the right message if several match.
+
+**Do not** rely on **`refresh`**’s new-mail preview alone—the code may **already** be in the local index from an earlier sync. **Source of truth:** **`zmail search`** (then **`zmail read`** on the best **`message_id`**s).
+
+**Default path (no OpenAI on the core path):** optional **`zmail refresh`** (or **`zmail refresh --force`** if the user knows mail landed and STATUS skipped fetch—see **`zmail refresh --help`**), then **`zmail search`** with a **recent window** and auth-ish keywords, then **`zmail read <message_id>`** for the body/snippet if needed. Prefer **primitives** over **`zmail ask`** / **`zmail inbox`** here—avoids sending mail content to an LLM for a simple lookup.
+
+**Detail, search hints, MCP parity, and a short output template:** [references/AUTH-CODES.md](references/AUTH-CODES.md).
+
+---
+
 ## Keeping mail fresh (indexed and searchable)
 
 **Local** **`search`**, **`read`**, **`thread`**, **`attachment`**, and **`ask`** only see messages that have been **pulled from IMAP and indexed**. Mail that arrived on the server **after** the last sync is **not** in SQLite/FTS until another sync runs.
@@ -260,4 +277,5 @@ For **[OpenClaw](https://docs.openclaw.ai/)**, use a **heartbeat** (not a separa
 ## More detail
 
 - [references/CANONICAL-DOCS.md](references/CANONICAL-DOCS.md) — **CLI-first discovery** (`zmail`, `--help`, per-command help), **hints in output**, and a **table of canonical markdown** (`AGENTS.md`, `docs/VISION.md`, `docs/ASK.md`, `docs/ARCHITECTURE.md`, `docs/MCP.md`, OPP-025).
+- [references/AUTH-CODES.md](references/AUTH-CODES.md) — **Login / OTP / verification codes:** refresh + search + read, time filters, privacy (skip LLM), MCP.
 - [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md) — **Compose, reply, forward, revise, send** — detailed agent workflow, CLI and MCP examples, safety.
