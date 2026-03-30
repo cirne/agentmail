@@ -1,19 +1,22 @@
 ---
 name: install-local
-description: Install the Rust zmail binary from a local clone (cargo + install-rust-binary.sh) and optionally link the publishable skill. For npm parity work only, use node/install-npm-legacy.sh or npm run install-cli.
+description: Install the Rust zmail binary from a local clone via cargo install-local and optionally link the publishable skill. For npm parity work only, use node/install-npm-legacy.sh or npm run install-cli.
 ---
 
 # Install zmail from a local clone (dev)
 
 ## Preferred: Rust binary (matches releases)
 
-From the **repository root**:
+From the **repository root** (or any subdirectory of the clone):
 
 ```bash
-cargo build --release
-INSTALL_PREFIX="$HOME/.local/bin" ./install-rust-binary.sh
+INSTALL_PREFIX="$HOME/.local/bin" cargo install-local
 export PATH="$HOME/.local/bin:$PATH"
 ```
+
+Copy-only after **`cargo build --release`** (e.g. CI): **`cp target/release/zmail "$INSTALL_PREFIX/zmail"`** and **`chmod 755`**.
+
+After **`cargo install --path .`**, `cargo-install-local` is on `PATH` (usually `~/.cargo/bin`); then **`cargo install-local`** works from any directory (it finds the workspace by walking up from the cwd, or use **`ZMAIL_ROOT`**).
 
 Or test the same path as end users (downloads from GitHub):
 

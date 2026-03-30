@@ -48,6 +48,10 @@ tempfile = "3.14"
 name = "zmail"
 path = "src/main.rs"
 
+[[bin]]
+name = "cargo-install-local"
+path = "src/bin/cargo-install-local.rs"
+
 [lib]
 name = "zmail"
 path = "src/lib.rs"

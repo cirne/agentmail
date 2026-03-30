@@ -5,6 +5,7 @@ pub mod ask_stub;
 pub mod attachments;
 pub mod config;
 pub mod db;
+pub mod draft;
 pub mod inbox;
 pub mod inbox_window;
 pub mod mail_read;

@@ -1,0 +1,4 @@
+# Run `cargo install-local` from the repo (or a subdirectory): build release + install to INSTALL_PREFIX (default ~/.local/bin).
+# After `cargo install --path .`, the `cargo-install-local` binary on PATH handles the same workflow from any cwd.
+[alias]
+install-local = "run --bin cargo-install-local --"

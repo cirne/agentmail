@@ -67,7 +67,7 @@ def detect_triple() -> Tuple[str, str]:
     if sys_n == "darwin" and mach in ("x86_64", "i386"):
         print(
             "No prebuilt zmail for Intel Mac (CI ships Apple Silicon only).\n"
-            "  Build from source: cargo build --release && ./install-rust-binary.sh\n"
+            "  Build from source: clone the repo and run: cargo install-local (set INSTALL_PREFIX)\n"
             "  See https://github.com/cirne/zmail/blob/main/AGENTS.md",
             file=sys.stderr,
         )

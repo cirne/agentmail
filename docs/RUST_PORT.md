@@ -24,7 +24,7 @@ This document is the **single place** for (1) remaining work toward parity and r
 ### CLI — gaps vs Node
 
 - **Flags not yet mirrored:** `search --ids-only`, `who --enrich`, `thread --raw`, `status --imap` (Rust text `status` prints a hint about `--imap`, but the flag is not implemented).
-- **`zmail draft`:** No Rust CLI for `new` / `reply` / `forward` / `list` / `view` / `edit` / `rewrite` (library support for reading/listing/sending drafts exists; LLM `draft edit` / `rewrite` remain Node-first). See **LLM and compose** under [Challenges](#challenges-limitations-and-quality-risks).
+- **`zmail draft`:** **Implemented in Rust** (`zmail draft list|view|new|reply|forward|edit|rewrite`), mirroring the Node CLI. LLM paths (`draft new --instruction`, `draft edit`) use the same OpenAI JSON API as Node (`gpt-4.1-mini`).
 - **`zmail send --raw`:** RFC 822 from stdin or `--file` — [not ported](#rust-send-edge-cases-not-yet-ported).
 
 ### `zmail ask` — investigation tool
@@ -74,7 +74,7 @@ These are **acceptable by default** unless we explicitly decide to match Node.
 | **Attachment / office stack** | Rust uses **pdf-extract**, **docx-rs** (paragraph text; Node **mammoth** yields Markdown), **calamine** (XLSX/XLS → CSV with quoted fields and multi-sheet `## Sheet:` headers), **htmd** (HTML → Markdown). Unsupported binaries get the same **stub line** as Node (`[Binary attachment: …]`). Parity with Node’s **ExcelJS** / **mailparser** pipeline is still **best-effort** on edge-case or malformed files. |
 | **Provider quirks** | Gmail and others sometimes need workarounds developed against the **Node** client first; Rust sync must be **bakeoff-tested** so divergences are caught early. |
 | **Dual implementation** | Until cutover, fixes may land in **one** codebase first — [BUGS.md](BUGS.md) notes that active bugs often refer to the **published Node** CLI; Rust regressions need explicit tracking. |
-| **LLM and compose** | **`draft edit`** / **`rewrite`** and optional **`who --enrich`** remain Node-first. |
+| **LLM and compose** | **`who --enrich`** remains Node-first. Draft compose/edit are available in Rust. |
 
 ---
 

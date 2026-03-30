@@ -79,7 +79,7 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 - **Prerelease / nightly builds:** `curl -fsSL .../install.sh | bash -s -- --nightly`
 - **Specific version:** `ZMAIL_VERSION=v1.2.3 curl -fsSL .../install.sh | bash` (or pass **`--version v1.2.3`** to the script when run from a clone).
 - **Install directory:** defaults to **`~/.local/bin`**; override with **`INSTALL_PREFIX`**.
-- **From source:** clone the repo, **`cargo build --release`**, **`./install-rust-binary.sh`** (see **`AGENTS.md`**).
+- **From source:** clone the repo, then **`cargo install-local`** (set **`INSTALL_PREFIX`**). See **`AGENTS.md`**.
 - **Windows:** download the **`.zip`** for **`x86_64-pc-windows-msvc`** from [Releases](https://github.com/cirne/zmail/releases); the shell installer is macOS/Linux only.
 
 Config and data default to **`ZMAIL_HOME`** (default **`~/.zmail`**): `config.json`, `.env`, and `data/` (SQLite + maildir).

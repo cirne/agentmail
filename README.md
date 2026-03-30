@@ -21,8 +21,7 @@ Modern email systems are human-first — designed around inbox browsing and manu
 
    **From source** (repository root):
    ```bash
-   cargo build --release
-   # Optionally: ./install-rust-binary.sh
+   cargo install-local   # build release + install; set INSTALL_PREFIX (see AGENTS.md)
    ```
 
    **Node reference** (`node/` — parity tests, eval harness, legacy npm package):

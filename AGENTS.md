@@ -13,9 +13,9 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 
 **From source (dev / contributors):**
 ```bash
-cargo build --release
-# ./target/release/zmail --help
-# Optional: ./install-rust-binary.sh
+cargo install-local   # build --release + install (set INSTALL_PREFIX; default ~/.local/bin)
+# Copy-only (e.g. CI artifact already at target/release/zmail): cp target/release/zmail "$INSTALL_PREFIX/zmail" && chmod 755 "$INSTALL_PREFIX/zmail"
+# After: cargo install --path .  # puts `zmail` and `cargo-install-local` in ~/.cargo/bin so `cargo install-local` works outside the repo
 ```
 
 **Legacy npm CLI (reference / parity only):** `npm install -g @cirne/zmail` or `bash node/install-npm-legacy.sh` — requires Node 20+.

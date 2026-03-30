@@ -1,24 +1,12 @@
-/**
- * Canonical onboarding and CLI usage text. No dependencies — safe to import
- * before config. Reuse in CLI, MCP tools, docs, etc.
- */
-
-/** One-line hint shown when a command fails due to missing config. */
-export const ONBOARDING_HINT_MISSING_ENV =
-  "Run 'zmail setup' to configure zmail.";
-
-export const CLI_USAGE = `zmail — agent-first email
-
-Usage:
-  zmail                      Show this help
+Commands:
 
 Setup & sync
   zmail setup [--email <e>] [--password <p>] [--openai-key <k>] [--no-validate]
-  zmail wizard [--no-validate]
+  zmail wizard [--no-validate] [--clean] [--yes]
   zmail sync [--since <spec>] [--foreground]
-  zmail refresh
-  zmail status [--imap]
-  zmail stats
+  zmail refresh [--force] [--text]
+  zmail status [--json]
+  zmail stats [--json]
   zmail rebuild-index
 
 Search & read
@@ -34,9 +22,8 @@ Assistants
   zmail inbox [<window>] [--since ...] [--refresh] [--text]
 
 Send & integration
-  zmail send [flags] [<draft-id>]
-  zmail draft <subcommand> [args]
+  zmail send [--to ... --subject ...] [<draft-id>]
+  zmail draft list|view|new|reply|forward|edit|rewrite  (see zmail draft --help)
   zmail mcp
 
 Run zmail <command> --help for command-specific options.
-`;

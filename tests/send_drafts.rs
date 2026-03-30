@@ -2,6 +2,7 @@
 
 use tempfile::tempdir;
 use zmail::config::SmtpJson;
+use zmail::send::read_draft_in_data_dir;
 use zmail::{
     filter_recipients_send_test, list_drafts, plan_send, read_draft, resolve_smtp_for_imap_host,
     write_draft, DraftMeta, SendPlan, SendTestMode,
@@ -28,17 +29,21 @@ fn smtp_resolve_override() {
 }
 
 #[test]
+fn read_draft_in_data_dir_missing_is_user_friendly() {
+    let dir = tempdir().unwrap();
+    let err = read_draft_in_data_dir(dir.path(), "missing-id").unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("Draft not found: missing-id"), "{msg}");
+    assert!(msg.contains("draft list"), "{msg}");
+}
+
+#[test]
 fn draft_store_roundtrip() {
     let dir = tempdir().unwrap();
     let meta = DraftMeta {
-        to: Some("bob@x.com".into()),
+        to: Some(vec!["bob@x.com".into()]),
         subject: Some("Hi".into()),
-        cc: None,
-        bcc: None,
-        in_reply_to: None,
-        references: None,
-        kind: None,
-        source_message_id: None,
+        ..Default::default()
     };
     let p = write_draft(dir.path(), "abc", &meta, "Body here\n").unwrap();
     let d = read_draft(&p).unwrap();
@@ -51,14 +56,9 @@ fn draft_store_roundtrip() {
 fn draft_list_slim_vs_full() {
     let dir = tempdir().unwrap();
     let meta = DraftMeta {
-        to: Some("t@t.com".into()),
+        to: Some(vec!["t@t.com".into()]),
         subject: Some("Subj".into()),
-        cc: None,
-        bcc: None,
-        in_reply_to: None,
-        references: None,
-        kind: None,
-        source_message_id: None,
+        ..Default::default()
     };
     write_draft(dir.path(), "d1", &meta, "long body text").unwrap();
     let slim = list_drafts(dir.path(), false).unwrap();

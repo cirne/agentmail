@@ -1,16 +1,28 @@
 //! Outbound mail — drafts, SMTP resolve, threading (`src/send` subset).
 
 pub mod draft_body;
+pub mod draft_list_json;
+pub mod draft_llm;
 pub mod draft_store;
+pub mod forward_excerpt;
 pub mod recipients;
 pub mod smtp_resolve;
 pub mod smtp_send;
 pub mod threading;
 
 pub use draft_body::draft_markdown_to_plain_text;
+pub use draft_list_json::build_draft_list_json_payload;
+pub use draft_llm::{
+    compose_new_draft_from_instruction, rewrite_draft_with_instruction, RewriteDraftResult,
+};
 pub use draft_store::{
-    archive_draft_to_sent, list_drafts, normalize_draft_filename, read_draft, write_draft,
-    DraftFile, DraftListFull, DraftListSlim, DraftMeta,
+    archive_draft_to_sent, create_draft_id, draft_body_preview, draft_file_to_json,
+    draft_list_slim_hint, format_draft_not_found_message, format_draft_view_text, list_draft_rows,
+    list_drafts, normalize_draft_filename, read_draft, read_draft_in_data_dir, subject_to_slug,
+    write_draft, DraftFile, DraftListFull, DraftListRow, DraftListSlim, DraftMeta,
+};
+pub use forward_excerpt::{
+    compose_forward_draft_body, load_forward_source_excerpt, ForwardSourceExcerpt,
 };
 pub use recipients::{
     assert_send_recipients_allowed, filter_recipients_send_test, split_address_list, SendTestMode,
@@ -53,31 +65,18 @@ pub fn send_draft_by_id(
     draft_id: &str,
     dry_run: bool,
 ) -> Result<SendResult, String> {
-    let base = normalize_draft_filename(draft_id);
-    let path = data_dir.join("drafts").join(format!("{base}.md"));
-    let draft = read_draft(&path).map_err(|e| format!("Draft not found: {base} ({e})"))?;
+    let draft = read_draft_in_data_dir(data_dir, draft_id).map_err(|e| e.to_string())?;
 
-    let to_raw = draft.meta.to.as_deref().unwrap_or("").trim();
-    if to_raw.is_empty() {
-        return Err("Draft has no recipients (to:)".into());
-    }
-    let to = split_address_list(to_raw);
-    if to.is_empty() {
-        return Err("Draft has no recipients (to:)".into());
-    }
+    let to = draft
+        .meta
+        .to
+        .as_ref()
+        .filter(|v| !v.is_empty())
+        .cloned()
+        .ok_or_else(|| "Draft has no recipients (to:)".to_string())?;
 
-    let cc = draft
-        .meta
-        .cc
-        .as_deref()
-        .map(split_address_list)
-        .filter(|v| !v.is_empty());
-    let bcc = draft
-        .meta
-        .bcc
-        .as_deref()
-        .map(split_address_list)
-        .filter(|v| !v.is_empty());
+    let cc = draft.meta.cc.as_ref().filter(|v| !v.is_empty()).cloned();
+    let bcc = draft.meta.bcc.as_ref().filter(|v| !v.is_empty()).cloned();
 
     let mut in_reply_to = draft.meta.in_reply_to.clone();
     let mut references = draft.meta.references.clone();
@@ -127,7 +126,7 @@ pub fn send_draft_by_id(
 
     let result = send_simple_message(cfg, &fields, dry_run)?;
     if !dry_run && result.ok {
-        let _ = archive_draft_to_sent(data_dir, &base);
+        let _ = archive_draft_to_sent(data_dir, &draft.id);
     }
     Ok(result)
 }

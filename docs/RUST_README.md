@@ -22,6 +22,6 @@ cargo run -- ask "summarize invoices from last week" --verbose
 
 **Tests:** Unit tests live in `src/` under `#[cfg(test)] mod tests { ... }` next to the code they exercise. Integration tests (one crate per file under `tests/`, e.g. `config_schema_status`, `search_fts`, `mcp_stdio`) exercise the public `zmail` API end-to-end. After changing a module, a fast check is `cargo test --lib <filter>`; run full `cargo test` before merge.
 
-Install helper for a built release binary: `./install-rust-binary.sh` (optional `INSTALL_PREFIX`).
+Local install to a prefix (default **`~/.local/bin`**): **`cargo install-local`** (optional **`INSTALL_PREFIX`**). See **`AGENTS.md`**. Copy-only after a build: **`cp target/release/zmail "$INSTALL_PREFIX/zmail"`** and **`chmod 755`**.
 
 End-user install is **`install.sh`** (GitHub Release assets) or **`cargo build --release`**. The **`@cirne/zmail`** npm package under **`node/`** remains for parity and legacy use (OPP-030).

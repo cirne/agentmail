@@ -3,7 +3,7 @@
 use clap::{Parser, Subcommand};
 use regex::Regex;
 use std::collections::HashMap;
-use std::io::{IsTerminal, Read, Write};
+use std::io::Write;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 use zmail::{
@@ -23,7 +23,17 @@ use zmail::{
 
 #[derive(Parser)]
 #[command(name = "zmail")]
-#[command(about = "Agent-first email — Rust port (work in progress)")]
+#[command(about = "zmail: Agent-first email")]
+#[command(
+    help_template = "\
+{before-help}{about-with-newline}\
+{usage-heading} {usage}\
+{after-help}\
+{options}\
+",
+    after_help = "Run zmail --help for the full command list by workflow.\n",
+    after_long_help = include_str!("cli/root_help.txt")
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -31,6 +41,53 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    // --- Setup & sync (common first) ---
+    /// Write ~/.zmail config (non-interactive)
+    Setup {
+        #[arg(long)]
+        email: Option<String>,
+        #[arg(long)]
+        password: Option<String>,
+        #[arg(long)]
+        openai_key: Option<String>,
+        #[arg(long)]
+        no_validate: bool,
+    },
+    /// Interactive TUI setup (prompts; use `zmail setup` for agents)
+    Wizard {
+        #[arg(long)]
+        no_validate: bool,
+        #[arg(long)]
+        clean: bool,
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Backfill mail (backward sync). Default: background subprocess; use --foreground to block.
+    Sync {
+        /// Positional duration (e.g. `7d`, `180d`, `1y`) — same as `--since`
+        duration: Option<String>,
+        /// Rolling window — overrides `sync.defaultSince` when set
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long, alias = "fg")]
+        foreground: bool,
+    },
+    /// Fetch new messages since last checkpoint (forward sync)
+    Refresh {
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        include_noise: bool,
+        #[arg(long)]
+        text: bool,
+    },
+    /// Sync and search readiness
+    Status {
+        /// JSON output
+        #[arg(long)]
+        json: bool,
+    },
+    // --- Search & read ---
     /// Full-text search (JSON by default)
     Search {
         /// Search query (supports from:, after:, subject:, …)
@@ -64,22 +121,6 @@ enum Commands {
         #[arg(long)]
         text: bool,
     },
-    /// Write ~/.zmail config (non-interactive)
-    Setup {
-        #[arg(long)]
-        email: Option<String>,
-        #[arg(long)]
-        password: Option<String>,
-        #[arg(long)]
-        openai_key: Option<String>,
-        #[arg(long)]
-        no_validate: bool,
-    },
-    /// Database counts
-    Stats {
-        #[arg(long)]
-        json: bool,
-    },
     /// Read one message (raw .eml or body text)
     Read {
         message_id: String,
@@ -92,51 +133,13 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
-    /// Rebuild SQLite index from maildir tree
-    #[command(name = "rebuild-index")]
-    RebuildIndex,
     /// List or read message attachments (extracted text / CSV)
     #[command(name = "attachment")]
     Attachment {
         #[command(subcommand)]
         sub: AttachmentCmd,
     },
-    /// MCP server (JSON-RPC lines on stdin)
-    Mcp,
-    /// Interactive TUI setup (prompts; use `zmail setup` for agents)
-    Wizard {
-        #[arg(long)]
-        no_validate: bool,
-        #[arg(long)]
-        clean: bool,
-        #[arg(long)]
-        yes: bool,
-    },
-    /// Sync and search readiness
-    Status {
-        /// JSON output
-        #[arg(long)]
-        json: bool,
-    },
-    /// Backfill mail (backward sync). Default: background subprocess; use --foreground to block.
-    Sync {
-        /// Positional duration (e.g. `7d`, `180d`, `1y`) — same as `--since`
-        duration: Option<String>,
-        /// Rolling window — overrides `sync.defaultSince` when set
-        #[arg(long)]
-        since: Option<String>,
-        #[arg(long, alias = "fg")]
-        foreground: bool,
-    },
-    /// Fetch new messages since last checkpoint (forward sync)
-    Refresh {
-        #[arg(long)]
-        force: bool,
-        #[arg(long)]
-        include_noise: bool,
-        #[arg(long)]
-        text: bool,
-    },
+    // --- Assistants ---
     /// Answer a question about your email (requires ZMAIL_OPENAI_API_KEY)
     Ask {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
@@ -144,6 +147,22 @@ enum Commands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
+    /// LLM notable-mail scan for a time window (requires ZMAIL_OPENAI_API_KEY)
+    Inbox {
+        /// Rolling window e.g. 24h, 3d (optional; use `--since` or config default for YYYY-MM-DD)
+        window: Option<String>,
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long)]
+        refresh: bool,
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        include_noise: bool,
+        #[arg(long)]
+        text: bool,
+    },
+    // --- Send, stats & tools (long tail) ---
     /// Send mail via SMTP (same IMAP credentials; optional `ZMAIL_SEND_TEST=1` guard)
     Send {
         /// Saved draft id (`data/drafts/{id}.md`) when not using `--to` / `--subject`
@@ -163,21 +182,21 @@ enum Commands {
         #[arg(long)]
         text: bool,
     },
-    /// LLM notable-mail scan for a time window (requires ZMAIL_OPENAI_API_KEY)
-    Inbox {
-        /// Rolling window e.g. 24h, 3d (optional; use `--since` or config default for YYYY-MM-DD)
-        window: Option<String>,
-        #[arg(long)]
-        since: Option<String>,
-        #[arg(long)]
-        refresh: bool,
-        #[arg(long)]
-        force: bool,
-        #[arg(long)]
-        include_noise: bool,
-        #[arg(long)]
-        text: bool,
+    /// Local drafts under data/drafts/ (list, view, new, reply, forward, edit, rewrite)
+    Draft {
+        #[command(subcommand)]
+        sub: zmail::draft::DraftCmd,
     },
+    /// Database counts
+    Stats {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Rebuild SQLite index from maildir tree
+    #[command(name = "rebuild-index")]
+    RebuildIndex,
+    /// MCP server (JSON-RPC lines on stdin)
+    Mcp,
 }
 
 #[derive(Subcommand)]
@@ -476,12 +495,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let conn = db::open_file(cfg.db_path())?;
             let use_json = !text;
             if let (Some(to_s), Some(subj)) = (to.as_ref(), subject.as_ref()) {
-                let mut body_text = body.clone().unwrap_or_default();
-                if body_text.is_empty() && !std::io::stdin().is_terminal() {
-                    let mut buf = String::new();
-                    std::io::stdin().read_to_string(&mut buf)?;
-                    body_text = buf;
-                }
+                let body_text = body.clone().unwrap_or_default();
                 let fields = SendSimpleFields {
                     to: split_address_list(to_s),
                     cc: cc
@@ -531,6 +545,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("       zmail send <draft-id>");
                 std::process::exit(1);
             }
+        }
+        Commands::Draft { sub } => {
+            let cfg = load_config(LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            });
+            if cfg.imap_user.trim().is_empty() || cfg.imap_password.is_empty() {
+                eprintln!("IMAP user/password required. Run `zmail setup`.");
+                std::process::exit(1);
+            }
+            let conn = db::open_file(cfg.db_path())?;
+            zmail::draft::run_draft(sub, &cfg, &conn)?;
         }
         Commands::Inbox {
             window,
