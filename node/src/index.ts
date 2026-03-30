@@ -2,11 +2,8 @@
 // Main entrypoint — routes to CLI commands or starts sync service.
 // Help and setup are handled here so they work without loading config (no env required).
 
-import { CLI_USAGE, formatNodeCliLongVersion } from "~/lib/onboarding";
+import { CLI_USAGE } from "~/lib/onboarding";
 import { hasConfig } from "~/lib/config";
-import { readFileSync } from "fs";
-import { dirname, join } from "path";
-import { fileURLToPath } from "url";
 import {
   isNodeNativeAddonAbiError,
   printBetterSqliteAbiMismatchHint,
@@ -16,10 +13,6 @@ import {
 const rest = process.argv.slice(2);
 const command = rest[0] === "--" ? rest[1] : rest[0];
 const args = rest[0] === "--" ? rest.slice(2) : rest.slice(1);
-
-const PKG_VERSION: string = JSON.parse(
-  readFileSync(join(dirname(fileURLToPath(import.meta.url)), "..", "package.json"), "utf-8"),
-).version;
 
 function handleNativeAddonAbi(err: unknown): void {
   if (!isNodeNativeAddonAbiError(err)) return;
@@ -40,14 +33,6 @@ function handleMissingConfig(err: unknown): never {
 
 if (command === "--help" || command === "-h" || command === "help") {
   console.log(CLI_USAGE);
-  process.exit(0);
-}
-if (command === "--version") {
-  console.log(`zmail ${formatNodeCliLongVersion(PKG_VERSION)}`);
-  process.exit(0);
-}
-if (command === "-V") {
-  console.log(`zmail ${PKG_VERSION}`);
   process.exit(0);
 }
 /** Parse --flag value or --flag=value from args. Returns undefined if not found. */
@@ -105,7 +90,6 @@ if (!command) {
   console.log("  zmail status             Show sync and indexing progress");
   console.log("  zmail read <id>          Read a message");
   console.log("  zmail send <draft-id>      Send a saved draft (SMTP); zmail draft … — compose, LLM edit, then send");
-  console.log("  zmail --version          Version and how to upgrade the prebuilt binary");
   console.log("");
   console.log("Run 'zmail --help' for all commands and flags.");
   process.exit(0);

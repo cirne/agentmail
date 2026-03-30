@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  CLI_USAGE,
-  formatNodeCliLongVersion,
-  ONBOARDING_HINT_MISSING_ENV,
-} from "./onboarding";
+import { CLI_USAGE, ONBOARDING_HINT_MISSING_ENV } from "./onboarding";
 
 describe("onboarding", () => {
   describe("CLI_USAGE", () => {
@@ -34,18 +30,6 @@ describe("onboarding", () => {
 
     it("points to per-command help", () => {
       expect(CLI_USAGE).toContain("zmail <command> --help");
-      expect(CLI_USAGE).toContain("Upgrade / reinstall");
-      expect(CLI_USAGE).toContain("install.sh");
-    });
-  });
-
-  describe("formatNodeCliLongVersion", () => {
-    it("includes semver, upgrade lines, and install.sh", () => {
-      const out = formatNodeCliLongVersion("9.9.9-test");
-      expect(out.startsWith("9.9.9-test\n\n")).toBe(true);
-      expect(out).toContain("Upgrade / reinstall");
-      expect(out).toContain("install.sh");
-      expect(out).toContain("Homebrew");
     });
   });
 

@@ -10,11 +10,11 @@ This file is for the **end-user `/zmail` skill** (`skills/zmail/`). For **develo
 
 **Discovery order (recommended):**
 
-1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — short command list (canonical string **`CLI_USAGE`** lives in **`node/src/lib/onboarding.ts`**; the Rust CLI mirrors the same surface). **`zmail --version`** — version plus **`install.sh`** upgrade/reinstall one-liners (see **`AGENTS.md`**); **`zmail -V`** — version only (Rust). Workflows (e.g. **`zmail ask`** vs primitives, **draft + send**, MCP): **`docs/ASK.md`**, **`docs/MCP.md`**, **`skills/zmail/references/DRAFT-AND-SEND.md`**, **`skills/zmail/references/AUTH-CODES.md`**, **`SKILL.md`** § Agent workflow.
+1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — short command list (**Rust** source: **`src/cli/root_help.txt`**, **`src/main.rs`**). Reference copy: **`node/src/lib/onboarding.ts`** (`CLI_USAGE`) may lag. **`zmail --version`** — version plus **`install.sh`** upgrade/reinstall one-liners (see **`AGENTS.md`**); **`zmail -V`** — version only. Workflows (e.g. **`zmail ask`** vs primitives, **draft + send**, MCP): **`docs/ASK.md`**, **`docs/MCP.md`**, **`skills/zmail/references/DRAFT-AND-SEND.md`**, **`skills/zmail/references/AUTH-CODES.md`**, **`SKILL.md`** § Agent workflow.
 2. **`zmail <command> --help`** — flags and examples for that command (e.g. `zmail search --help`, `zmail who --help`, `zmail attachment list --help`).
 3. **Run a command** and read the **structured output** — zmail **embeds hints** so you learn the next step without opening docs (see below).
 
-Top-level help is maintained in code as **`CLI_USAGE`** in **`node/src/lib/onboarding.ts`** (Rust prints the same list). When in doubt, compare this skill or `AGENTS.md` to that file.
+Top-level help and **install/upgrade** text are maintained in the **Rust** CLI (`src/cli/root_help.txt`, long `zmail --version` text in `src/main.rs`). **`node/.../onboarding.ts`** is a reference copy only. When in doubt, run the **Rust** binary or compare this skill to **`AGENTS.md`**.
 
 ---
 
@@ -50,7 +50,7 @@ Paths below are relative to the **repository root** or, if you use the legacy np
 | **MCP** — tools, params, token-efficient patterns | `docs/MCP.md` | Same index as CLI; hints in JSON sometimes align with MCP batch patterns. |
 | **Skill packaging** — spec, hosts, `skills/zmail/` layout | `docs/opportunities/OPP-025-cross-platform-agent-skills-packaging.md` | Strategy for `/zmail` vs internal Cursor skills. |
 
-**DRY:** Prefer updating **`AGENTS.md`**, **`docs/*.md`**, or **`node/src/lib/onboarding.ts`** (`CLI_USAGE` and onboarding strings) rather than duplicating long command lists in **`SKILL.md`** or this file.
+**DRY:** Prefer updating **`AGENTS.md`**, **`docs/*.md`**, or the **Rust** CLI (`src/main.rs`, `src/cli/root_help.txt`) rather than duplicating long command lists in **`SKILL.md`** or this file. Optionally sync **`node/.../onboarding.ts`** for npm parity.
 
 ---
 
