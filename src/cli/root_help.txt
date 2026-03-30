@@ -26,4 +26,10 @@ Send & integration
   zmail draft list|view|new|reply|forward|edit|rewrite  (see zmail draft --help)
   zmail mcp
 
+Upgrade / reinstall (prebuilt binary):
+  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | INSTALL_PREFIX=~/bin bash
+  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash -s -- --nightly
+  If you installed via Homebrew, npm, or cargo, upgrade with that tool instead.
+
 Run zmail <command> --help for command-specific options.

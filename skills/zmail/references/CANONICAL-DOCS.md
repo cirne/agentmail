@@ -10,7 +10,7 @@ This file is for the **end-user `/zmail` skill** (`skills/zmail/`). For **develo
 
 **Discovery order (recommended):**
 
-1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — short command list (canonical string **`CLI_USAGE`** lives in **`node/src/lib/onboarding.ts`**; the Rust CLI mirrors the same surface). Workflows (e.g. **`zmail ask`** vs primitives, **draft + send**, MCP): **`docs/ASK.md`**, **`docs/MCP.md`**, **`skills/zmail/references/DRAFT-AND-SEND.md`**, **`skills/zmail/references/AUTH-CODES.md`**, **`SKILL.md`** § Agent workflow.
+1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — short command list (canonical string **`CLI_USAGE`** lives in **`node/src/lib/onboarding.ts`**; the Rust CLI mirrors the same surface). **`zmail --version`** — version plus **`install.sh`** upgrade/reinstall one-liners (see **`AGENTS.md`**); **`zmail -V`** — version only (Rust). Workflows (e.g. **`zmail ask`** vs primitives, **draft + send**, MCP): **`docs/ASK.md`**, **`docs/MCP.md`**, **`skills/zmail/references/DRAFT-AND-SEND.md`**, **`skills/zmail/references/AUTH-CODES.md`**, **`SKILL.md`** § Agent workflow.
 2. **`zmail <command> --help`** — flags and examples for that command (e.g. `zmail search --help`, `zmail who --help`, `zmail attachment list --help`).
 3. **Run a command** and read the **structured output** — zmail **embeds hints** so you learn the next step without opening docs (see below).
 

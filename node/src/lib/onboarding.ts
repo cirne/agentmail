@@ -7,6 +7,19 @@
 export const ONBOARDING_HINT_MISSING_ENV =
   "Run 'zmail setup' to configure zmail.";
 
+/** Body of `zmail --version` after the semver line (matches Rust `CLI_LONG_VERSION`). */
+export function formatNodeCliLongVersion(version: string): string {
+  return `${version}\n\n${CLI_VERSION_LONG_BODY}`;
+}
+
+const CLI_VERSION_LONG_BODY = `Upgrade / reinstall (prebuilt binary):
+  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
+  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | INSTALL_PREFIX=~/bin bash
+  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash -s -- --nightly
+
+If you installed via Homebrew, npm, or cargo, upgrade with that tool instead.
+`;
+
 export const CLI_USAGE = `zmail — agent-first email
 
 Usage:
@@ -37,6 +50,8 @@ Send & integration
   zmail send [flags] [<draft-id>]
   zmail draft <subcommand> [args]
   zmail mcp
+
+${CLI_VERSION_LONG_BODY.trimEnd()}
 
 Run zmail <command> --help for command-specific options.
 `;

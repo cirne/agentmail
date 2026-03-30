@@ -6,6 +6,18 @@ use std::collections::HashMap;
 use std::io::Write;
 use std::path::PathBuf;
 use std::sync::OnceLock;
+/// Shown for `zmail --version` (`-V` stays a single line from `version =`).
+const CLI_LONG_VERSION: &str = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "\n\n",
+    "Upgrade / reinstall (prebuilt binary):\n",
+    "  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash\n",
+    "  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | INSTALL_PREFIX=~/bin bash\n",
+    "  curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash -s -- --nightly\n",
+    "\n",
+    "If you installed via Homebrew, npm, or cargo, upgrade with that tool instead.\n",
+);
+
 use zmail::{
     build_inbox_style_json, build_refresh_json_value, collect_stats, connect_imap_session, db,
     handle_request_line, list_attachments_for_message, list_thread_messages, load_config,
@@ -24,7 +36,7 @@ use zmail::{
 #[derive(Parser)]
 #[command(name = "zmail")]
 #[command(about = "zmail: Agent-first email")]
-#[command(version)]
+#[command(version = env!("CARGO_PKG_VERSION"), long_version = CLI_LONG_VERSION)]
 #[command(
     help_template = "\
 {before-help}{about-with-newline}\
@@ -32,7 +44,7 @@ use zmail::{
 {after-help}\
 {options}\
 ",
-    after_help = "Run zmail --help for the full command list by workflow.\n",
+    after_help = "Upgrade / reinstall: zmail --version (long text) or zmail --help.\nRun zmail --help for the full command list by workflow.\n",
     after_long_help = include_str!("cli/root_help.txt")
 )]
 struct Cli {
