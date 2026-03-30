@@ -14,10 +14,10 @@ pub mod refresh;
 pub mod search;
 pub mod send;
 pub mod setup;
-pub mod wizard;
 pub mod status;
 pub mod sync;
 pub mod thread_view;
+pub mod wizard;
 
 pub use ask::{run_ask, RunAskError, RunAskOptions};
 pub use ask_stub::{
@@ -58,10 +58,11 @@ pub use search::{
     WhoOptions, WhoPerson, WhoResult, SEARCH_AUTO_SLIM_THRESHOLD,
 };
 pub use send::{
-    extract_threading_headers, filter_recipients_send_test, list_drafts, load_threading_from_source_message,
-    normalize_message_id, plan_send, read_draft, resolve_smtp_for_imap_host, send_draft_by_id,
-    send_simple_message, split_address_list, verify_smtp_credentials, write_draft, DraftFile,
-    DraftMeta, SendPlan, SendResult, SendSimpleFields, SendTestMode,
+    extract_threading_headers, filter_recipients_send_test, list_drafts,
+    load_threading_from_source_message, normalize_message_id, plan_send, read_draft,
+    resolve_smtp_for_imap_host, send_draft_by_id, send_simple_message, split_address_list,
+    verify_smtp_credentials, write_draft, DraftFile, DraftMeta, SendPlan, SendResult,
+    SendSimpleFields, SendTestMode,
 };
 pub use setup::{
     clean_zmail_home, collect_stats, derive_imap_settings, load_existing_env_secrets,
@@ -70,7 +71,6 @@ pub use setup::{
     write_zmail_config_and_env, DerivedImap, ExistingEnvSecrets, ExistingWizardConfig, SetupArgs,
     StatsJson, WriteZmailParams,
 };
-pub use wizard::{run_wizard, WizardOptions};
 pub use status::{format_time_ago, get_status, print_status_text, StatusData};
 pub use sync::{
     acquire_lock, connect_imap_session, filter_uids_after, forward_uid_range, is_process_alive,
@@ -83,3 +83,4 @@ pub use sync::{
     SyncOptions, SyncResult,
 };
 pub use thread_view::{list_thread_messages, ThreadMessageRow};
+pub use wizard::{run_wizard, WizardOptions};

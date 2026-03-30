@@ -321,10 +321,7 @@ pub fn print_inbox_style_text(
                 if !atts.is_empty() {
                     println!("Attachments:");
                     for a in atts {
-                        println!(
-                            "  {}. {} ({})",
-                            a.index, a.filename, a.mime_type
-                        );
+                        println!("  {}. {} ({})", a.index, a.filename, a.mime_type);
                     }
                 }
             }

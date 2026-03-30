@@ -4,12 +4,12 @@ use std::collections::{HashMap, HashSet};
 use std::time::Instant;
 
 use async_openai::config::OpenAIConfig;
-use async_openai::Client as OpenAiClient;
 use async_openai::types::{
     ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
     ChatCompletionRequestSystemMessageContent, ChatCompletionRequestUserMessage,
     ChatCompletionRequestUserMessageContent, CreateChatCompletionRequestArgs, ResponseFormat,
 };
+use async_openai::Client as OpenAiClient;
 use async_trait::async_trait;
 use rusqlite::Connection;
 use serde_json::json;
@@ -36,7 +36,9 @@ If nothing qualifies, return {"notable":[]}. Every messageId in notable MUST app
 
 /// Bounded prefetch: `min(2 * candidate_cap, 200)` — matches Node `inboxCandidatePrefetchLimit`.
 pub fn inbox_candidate_prefetch_limit(candidate_cap: usize) -> usize {
-    candidate_cap.saturating_mul(2).min(DEFAULT_INBOX_PREFETCH_CAP)
+    candidate_cap
+        .saturating_mul(2)
+        .min(DEFAULT_INBOX_PREFETCH_CAP)
 }
 
 #[derive(Debug, Clone)]
@@ -157,9 +159,9 @@ impl InboxBatchClassifier for OpenAiInboxClassifier {
                     name: None,
                 }),
                 ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
-                    content: ChatCompletionRequestUserMessageContent::Text(
-                        serde_json::to_string(&payload)?,
-                    ),
+                    content: ChatCompletionRequestUserMessageContent::Text(serde_json::to_string(
+                        &payload,
+                    )?),
                     name: None,
                 }),
             ])
@@ -436,7 +438,8 @@ mod tests {
             snippet: "x".into(),
             attachments: vec![],
         }];
-        let j = r#"{"notable":[{"messageId":"other","note":"n"},{"messageId":"m1","note":"  hi  "}]}"#;
+        let j =
+            r#"{"notable":[{"messageId":"other","note":"n"},{"messageId":"m1","note":"  hi  "}]}"#;
         let r = parse_notable_response(j, &batch).unwrap();
         assert_eq!(r.len(), 1);
         assert_eq!(r[0].message_id, "m1");

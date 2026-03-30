@@ -1,5 +1,6 @@
 //! IMAP sync: parsing, windows, maildir, locks, and `run_sync` / IMAP transport.
 
+pub mod background_spawn;
 pub mod error;
 pub mod fetch_timeout;
 pub mod imap_date;
@@ -12,8 +13,8 @@ pub mod run;
 pub mod sync_log;
 pub mod transport;
 pub mod windows;
-pub mod background_spawn;
 
+pub use background_spawn::spawn_sync_background_detached;
 pub use error::RunSyncError;
 pub use maildir::{write_maildir_message, MaildirWrite};
 pub use parse_message::{parse_raw_message, ParsedAttachment, ParsedMessage};
@@ -34,4 +35,3 @@ pub use windows::{
     filter_uids_after, forward_uid_range, last_uid_for_folder, oldest_message_date_for_folder,
     same_calendar_day,
 };
-pub use background_spawn::spawn_sync_background_detached;

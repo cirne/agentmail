@@ -8,15 +8,15 @@ use std::path::PathBuf;
 use std::sync::OnceLock;
 use zmail::{
     build_inbox_style_json, build_refresh_json_value, collect_stats, connect_imap_session, db,
-    handle_request_line, list_attachments_for_message, list_thread_messages,
-    load_config, load_refresh_new_mail, parse_inbox_window_to_iso_cutoff, print_inbox_style_text,
+    handle_request_line, list_attachments_for_message, list_thread_messages, load_config,
+    load_refresh_new_mail, parse_inbox_window_to_iso_cutoff, print_inbox_style_text,
     print_refresh_text, print_status_text, read_attachment_text, read_message_bytes,
     read_stored_file, rebuild_from_maildir, resolve_openai_api_key, resolve_search_json_format,
     resolve_setup_email, resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd,
     run_ask, run_inbox_scan, run_wizard, search_result_to_slim_json_row, search_with_meta,
-    send_draft_by_id, send_simple_message, split_address_list, spawn_sync_background_detached,
-    status, validate_imap_credentials, validate_openai_key, verify_smtp_credentials,
-    who, write_setup, LoadConfigOptions, OpenAiInboxClassifier, RunAskOptions, RunInboxScanOptions,
+    send_draft_by_id, send_simple_message, spawn_sync_background_detached, split_address_list,
+    status, validate_imap_credentials, validate_openai_key, verify_smtp_credentials, who,
+    write_setup, LoadConfigOptions, OpenAiInboxClassifier, RunAskOptions, RunInboxScanOptions,
     SearchOptions, SearchResultFormatPreference, SendSimpleFields, SetupArgs, SyncDirection,
     SyncFileLogger, SyncOptions, WhoOptions, WizardOptions,
 };
@@ -501,10 +501,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if use_json {
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 } else {
-                    print!(
-                        "ok={} messageId={}",
-                        result.ok, result.message_id
-                    );
+                    print!("ok={} messageId={}", result.ok, result.message_id);
                     if result.dry_run == Some(true) {
                         print!(" dryRun=true");
                     }
@@ -518,10 +515,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if use_json {
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 } else {
-                    print!(
-                        "ok={} messageId={}",
-                        result.ok, result.message_id
-                    );
+                    print!("ok={} messageId={}", result.ok, result.message_id);
                     if result.dry_run == Some(true) {
                         print!(" dryRun=true");
                     }
@@ -592,12 +586,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 !do_refresh,
             );
             if force_text {
-                print_inbox_style_text(
-                    &sync_result,
-                    &scan.new_mail,
-                    "Inbox:",
-                    !do_refresh,
-                );
+                print_inbox_style_text(&sync_result, &scan.new_mail, "Inbox:", !do_refresh);
             } else {
                 println!("{}", serde_json::to_string_pretty(&json)?);
             }
@@ -684,8 +673,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         } else {
                             println!("Attachments for {message_id}:\n");
                             println!(
-                                "  {:>4}  {:<40}  {:<38}  {:>9}  {}",
-                                "#", "FILENAME", "MIME TYPE", "SIZE", "EXTRACTED"
+                                "  {:>4}  {:<40}  {:<38}  {:>9}  EXTRACTED",
+                                "#", "FILENAME", "MIME TYPE", "SIZE"
                             );
                             println!("  {}", "-".repeat(100));
                             for r in &rows {
@@ -738,42 +727,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("No attachments found for message.");
                         std::process::exit(1);
                     }
-                    let att =
-                        if let Ok(n) = index_or_name.parse::<usize>() {
-                            if n >= 1 && n <= rows.len() {
-                                &rows[n - 1]
-                            } else {
-                                eprintln!(
-                                    "No attachment \"{}\" in this message. Use index 1-{}",
-                                    index_or_name,
-                                    rows.len()
-                                );
-                                std::process::exit(1);
-                            }
-                        } else if let Some(a) =
-                            rows.iter().find(|a| a.filename == index_or_name.as_str())
-                        {
-                            a
+                    let att = if let Ok(n) = index_or_name.parse::<usize>() {
+                        if n >= 1 && n <= rows.len() {
+                            &rows[n - 1]
                         } else {
                             eprintln!(
-                                "No attachment \"{}\" in this message. Use index 1-{} or exact filename.",
+                                "No attachment \"{}\" in this message. Use index 1-{}",
                                 index_or_name,
                                 rows.len()
                             );
                             std::process::exit(1);
-                        };
+                        }
+                    } else if let Some(a) =
+                        rows.iter().find(|a| a.filename == index_or_name.as_str())
+                    {
+                        a
+                    } else {
+                        eprintln!(
+                                "No attachment \"{}\" in this message. Use index 1-{} or exact filename.",
+                                index_or_name,
+                                rows.len()
+                            );
+                        std::process::exit(1);
+                    };
                     if raw {
                         let bytes = read_stored_file(&att.stored_path, &cfg.data_dir)?;
                         std::io::stdout().write_all(&bytes)?;
                     } else {
-                        let text = read_attachment_text(
-                            &conn,
-                            &cfg.data_dir,
-                            att.id,
-                            cache,
-                            no_cache,
-                        )
-                        .map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e))?;
+                        let text =
+                            read_attachment_text(&conn, &cfg.data_dir, att.id, cache, no_cache)
+                                .map_err(std::io::Error::other)?;
                         println!("{text}");
                     }
                 }

@@ -9,17 +9,11 @@ use lettre::{SmtpTransport, Transport};
 use uuid::Uuid;
 
 /// SMTP verify (Node nodemailer `transport.verify()`). Uses same resolution as send path.
-pub fn verify_smtp_credentials(
-    imap_host: &str,
-    user: &str,
-    pass: &str,
-) -> Result<(), String> {
+pub fn verify_smtp_credentials(imap_host: &str, user: &str, pass: &str) -> Result<(), String> {
     let smtp = crate::config::resolve_smtp_settings(imap_host, None)?;
     let creds = Credentials::new(user.to_string(), pass.to_string());
     let transport = build_smtp_transport(&smtp, creds).map_err(|e| e.to_string())?;
-    transport
-        .test_connection()
-        .map_err(|e| e.to_string())?;
+    transport.test_connection().map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -46,11 +40,7 @@ pub struct SendResult {
 }
 
 fn generate_outbound_message_id(from_email: &str) -> String {
-    let domain = from_email
-        .split('@')
-        .nth(1)
-        .unwrap_or("localhost")
-        .trim();
+    let domain = from_email.split('@').nth(1).unwrap_or("localhost").trim();
     format!("<zmail-{}@{}>", Uuid::new_v4(), domain)
 }
 
@@ -72,10 +62,7 @@ fn build_smtp_transport(
     } else {
         SmtpTransport::starttls_relay(&smtp.host)?
     };
-    Ok(builder
-        .credentials(creds)
-        .port(smtp.port)
-        .build())
+    Ok(builder.credentials(creds).port(smtp.port).build())
 }
 
 /// Send a plain-text message via SMTP (same credentials as IMAP).
@@ -155,8 +142,8 @@ pub fn send_simple_message(
         .map_err(|e| format!("message build: {e}"))?;
 
     let creds = Credentials::new(user.to_string(), cfg.imap_password.clone());
-    let transport = build_smtp_transport(&cfg.smtp, creds)
-        .map_err(|e| format!("SMTP transport: {e}"))?;
+    let transport =
+        build_smtp_transport(&cfg.smtp, creds).map_err(|e| format!("SMTP transport: {e}"))?;
 
     let response = transport
         .send(&email)

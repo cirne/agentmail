@@ -6,9 +6,7 @@ use std::process::Stdio;
 use crate::config::Config;
 use crate::db;
 use crate::status::print_status_text;
-use crate::sync::{
-    connect_imap_session, is_sync_lock_held, sync_log_path, SyncLockRow,
-};
+use crate::sync::{connect_imap_session, is_sync_lock_held, sync_log_path, SyncLockRow};
 
 /// Spawn the current binary with `sync --foreground [--since …]` in the background (Node `detached: true`).
 pub fn spawn_sync_background_detached(

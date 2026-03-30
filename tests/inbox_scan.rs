@@ -8,6 +8,7 @@ use zmail::{
 
 const MAILBOX: &str = "[Gmail]/All Mail";
 
+#[allow(clippy::too_many_arguments)]
 fn insert_msg(
     conn: &rusqlite::Connection,
     mid: &str,
@@ -47,26 +48,10 @@ async fn returns_rows_picked_by_classifier() {
     let old = (Utc::now() - Duration::days(10)).to_rfc3339();
     let recent = (Utc::now() - Duration::hours(2)).to_rfc3339();
     insert_msg(
-        &conn,
-        "<old@x>",
-        "a@b.com",
-        "Old",
-        "body",
-        &old,
-        1,
-        false,
-        "[]",
+        &conn, "<old@x>", "a@b.com", "Old", "body", &old, 1, false, "[]",
     );
     insert_msg(
-        &conn,
-        "<new@x>",
-        "a@b.com",
-        "New",
-        "body",
-        &recent,
-        2,
-        false,
-        "[]",
+        &conn, "<new@x>", "a@b.com", "New", "body", &recent, 2, false, "[]",
     );
     let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339();
     let mut mock = MockInboxClassifier::new(|batch| {
@@ -99,15 +84,7 @@ async fn includes_attachment_metadata_on_notable_rows() {
     let conn = open_memory().unwrap();
     let recent = (Utc::now() - Duration::hours(2)).to_rfc3339();
     insert_msg(
-        &conn,
-        "<att@x>",
-        "a@b.com",
-        "Paper",
-        "body",
-        &recent,
-        1,
-        false,
-        "[]",
+        &conn, "<att@x>", "a@b.com", "Paper", "body", &recent, 1, false, "[]",
     );
     conn.execute(
         "INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text) VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
@@ -235,15 +212,7 @@ async fn excludes_noise_when_include_noise_false() {
         "[]",
     );
     insert_msg(
-        &conn,
-        "<real@x>",
-        "a@b.com",
-        "Real",
-        "body",
-        &d2,
-        2,
-        false,
-        "[]",
+        &conn, "<real@x>", "a@b.com", "Real", "body", &d2, 2, false, "[]",
     );
     conn.execute(
         "UPDATE messages SET is_noise = 1 WHERE message_id = '<noise@x>'",
@@ -253,7 +222,10 @@ async fn excludes_noise_when_include_noise_false() {
     let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
     let mut mock = MockInboxClassifier::new(|batch| {
         assert_eq!(
-            batch.iter().map(|b| b.message_id.as_str()).collect::<Vec<_>>(),
+            batch
+                .iter()
+                .map(|b| b.message_id.as_str())
+                .collect::<Vec<_>>(),
             vec!["<real@x>"]
         );
         vec![InboxNotablePick {

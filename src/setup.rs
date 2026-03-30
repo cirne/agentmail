@@ -116,10 +116,7 @@ pub fn parse_dotenv_secrets(content: &str) -> ExistingEnvSecrets {
             }
         }
     }
-    ExistingEnvSecrets {
-        password,
-        api_key,
-    }
+    ExistingEnvSecrets { password, api_key }
 }
 
 /// Mask a secret for display (Node `maskSecret`).
@@ -208,7 +205,12 @@ pub fn clean_zmail_home(home: &Path) -> io::Result<()> {
 }
 
 /// Validate IMAP by connecting and logging out (Node `validateImap`).
-pub fn validate_imap_credentials(host: &str, port: u16, user: &str, pass: &str) -> Result<(), String> {
+pub fn validate_imap_credentials(
+    host: &str,
+    port: u16,
+    user: &str,
+    pass: &str,
+) -> Result<(), String> {
     let mut s = connect_imap_session(host, port, user, pass).map_err(|e| e.to_string())?;
     s.logout().map_err(|e| e.to_string())?;
     Ok(())
@@ -224,11 +226,7 @@ pub fn validate_openai_key(api_key: &str) -> Result<(), String> {
         use async_openai::config::OpenAIConfig;
         use async_openai::Client;
         let client = Client::with_config(OpenAIConfig::new().with_api_key(api_key));
-        client
-            .models()
-            .list()
-            .await
-            .map_err(|e| e.to_string())?;
+        client.models().list().await.map_err(|e| e.to_string())?;
         Ok::<(), String>(())
     })
 }
@@ -284,9 +282,7 @@ mod tests {
 
     #[test]
     fn parse_dotenv() {
-        let s = parse_dotenv_secrets(
-            "ZMAIL_IMAP_PASSWORD=secret\nZMAIL_OPENAI_API_KEY=sk-test\n",
-        );
+        let s = parse_dotenv_secrets("ZMAIL_IMAP_PASSWORD=secret\nZMAIL_OPENAI_API_KEY=sk-test\n");
         assert_eq!(s.password.as_deref(), Some("secret"));
         assert_eq!(s.api_key.as_deref(), Some("sk-test"));
     }

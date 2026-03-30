@@ -115,12 +115,8 @@ fn extract_docx_by_filename_when_mime_wrong() {
         .pack(&mut file)
         .unwrap();
     let bytes = std::fs::read(&path).unwrap();
-    let t = extract_attachment(
-        &bytes,
-        "application/octet-stream",
-        "d.docx",
-    )
-    .expect("docx via .docx");
+    let t =
+        extract_attachment(&bytes, "application/octet-stream", "d.docx").expect("docx via .docx");
     assert!(t.contains("By extension"));
 }
 
@@ -171,7 +167,8 @@ fn extract_and_cache_stub_for_binary() {
         )
         .unwrap();
     let bytes = read_stored_file(&bin_path.to_string_lossy(), dir.path()).unwrap();
-    let t = extract_and_cache(&conn, id, &bytes, "application/octet-stream", "z.bin", true).unwrap();
+    let t =
+        extract_and_cache(&conn, id, &bytes, "application/octet-stream", "z.bin", true).unwrap();
     assert!(t.contains("[Binary attachment:"));
     assert!(t.contains("z.bin"));
 }

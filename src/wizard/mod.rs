@@ -122,9 +122,10 @@ pub fn run_wizard(opts: WizardOptions) -> Result<(), Box<dyn std::error::Error>>
             || home.join("data").exists();
         if has {
             if !opts.yes {
-                let proceed = Confirm::new("This will delete all existing config and data. Continue?")
-                    .with_default(false)
-                    .prompt()?;
+                let proceed =
+                    Confirm::new("This will delete all existing config and data. Continue?")
+                        .with_default(false)
+                        .prompt()?;
                 if !proceed {
                     println!("Cancelled.");
                     std::process::exit(0);
@@ -197,13 +198,8 @@ pub fn run_wizard(opts: WizardOptions) -> Result<(), Box<dyn std::error::Error>>
     };
 
     let password_value: String = if let Some(ref existing_pw) = existing_env.password {
-        let pw_msg = format!(
-            "Use existing IMAP password ({})?",
-            mask_secret(existing_pw)
-        );
-        let use_existing = Confirm::new(&pw_msg)
-            .with_default(true)
-            .prompt()?;
+        let pw_msg = format!("Use existing IMAP password ({})?", mask_secret(existing_pw));
+        let use_existing = Confirm::new(&pw_msg).with_default(true).prompt()?;
         if use_existing {
             existing_pw.clone()
         } else {
@@ -229,9 +225,8 @@ pub fn run_wizard(opts: WizardOptions) -> Result<(), Box<dyn std::error::Error>>
         let pb = spinner("Connecting to IMAP…");
         let r = validate_imap_credentials(&imap_host, imap_port, &email, &password_value);
         pb.finish_and_clear();
-        r.map_err(|e| {
+        r.inspect_err(|_| {
             eprintln!("  Could not connect. Check your credentials and try again.");
-            e
         })?;
         println!("  Connected to {imap_host} as {email}");
     }
@@ -252,9 +247,7 @@ pub fn run_wizard(opts: WizardOptions) -> Result<(), Box<dyn std::error::Error>>
             "Use existing OpenAI API key ({})?",
             mask_secret(existing_key)
         );
-        let use_existing = Confirm::new(&key_msg)
-            .with_default(true)
-            .prompt()?;
+        let use_existing = Confirm::new(&key_msg).with_default(true).prompt()?;
         if use_existing {
             existing_key.clone()
         } else {
@@ -285,10 +278,7 @@ pub fn run_wizard(opts: WizardOptions) -> Result<(), Box<dyn std::error::Error>>
         println!("  API key valid");
     }
 
-    let default_since = existing_cfg
-        .default_since
-        .as_deref()
-        .unwrap_or("1y");
+    let default_since = existing_cfg.default_since.as_deref().unwrap_or("1y");
     let valid: &[&str] = &["7d", "5w", "3m", "1y", "2y"];
     let default_idx = if valid.contains(&default_since) {
         SYNC_CHOICES
@@ -320,10 +310,7 @@ pub fn run_wizard(opts: WizardOptions) -> Result<(), Box<dyn std::error::Error>>
         .prompt()?;
 
     if should_sync {
-        println!(
-            "\nStarting sync in background (--since {})...",
-            since.value
-        );
+        println!("\nStarting sync in background (--since {})...", since.value);
         let cfg = load_config(LoadConfigOptions {
             home: Some(home.clone()),
             env: None,

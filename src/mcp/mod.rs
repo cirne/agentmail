@@ -6,9 +6,9 @@ use serde_json::{json, Value};
 
 use crate::attachments::{list_attachments_for_message, read_attachment_text};
 use crate::collect_stats;
+use crate::config::{load_config, LoadConfigOptions};
 use crate::search::who::{who, WhoOptions};
 use crate::search::{search_with_meta, SearchOptions};
-use crate::config::{load_config, LoadConfigOptions};
 use crate::send::{list_drafts, read_draft, send_draft_by_id};
 use crate::status::get_status;
 use crate::thread_view::list_thread_messages;
@@ -204,7 +204,11 @@ fn tool_call(
             let aid = args
                 .get("attachmentId")
                 .and_then(|x| x.as_i64())
-                .or_else(|| args.get("attachmentId").and_then(|x| x.as_u64()).map(|u| u as i64));
+                .or_else(|| {
+                    args.get("attachmentId")
+                        .and_then(|x| x.as_u64())
+                        .map(|u| u as i64)
+                });
             match aid {
                 Some(aid) => read_attachment_text(conn, data_dir, aid, cache_extracted, false),
                 None => Err("attachmentId (number) required".into()),
@@ -212,13 +216,18 @@ fn tool_call(
         }
         "create_draft" => Ok("\"ok\"".into()),
         "send_draft" => {
-            let dry = args.get("dryRun").and_then(|x| x.as_bool()).unwrap_or(false);
+            let dry = args
+                .get("dryRun")
+                .and_then(|x| x.as_bool())
+                .unwrap_or(false);
             let draft_id = args.get("draftId").and_then(|x| x.as_str()).unwrap_or("");
             if draft_id.trim().is_empty() {
                 Err("draftId required".into())
             } else {
                 let cfg = load_config(LoadConfigOptions {
-                    home: std::env::var("ZMAIL_HOME").ok().map(std::path::PathBuf::from),
+                    home: std::env::var("ZMAIL_HOME")
+                        .ok()
+                        .map(std::path::PathBuf::from),
                     env: None,
                 });
                 send_draft_by_id(conn, &cfg, data_dir, draft_id, dry).and_then(|result| {

@@ -13,8 +13,8 @@ pub use draft_store::{
     DraftFile, DraftListFull, DraftListSlim, DraftMeta,
 };
 pub use recipients::{
-    assert_send_recipients_allowed, filter_recipients_send_test, split_address_list,
-    SendTestMode, DEV_SEND_ALLOWLIST,
+    assert_send_recipients_allowed, filter_recipients_send_test, split_address_list, SendTestMode,
+    DEV_SEND_ALLOWLIST,
 };
 pub use smtp_resolve::resolve_smtp_for_imap_host;
 pub use smtp_send::{send_simple_message, verify_smtp_credentials, SendResult, SendSimpleFields};
@@ -70,20 +70,24 @@ pub fn send_draft_by_id(
         .meta
         .cc
         .as_deref()
-        .map(|s| split_address_list(s))
+        .map(split_address_list)
         .filter(|v| !v.is_empty());
     let bcc = draft
         .meta
         .bcc
         .as_deref()
-        .map(|s| split_address_list(s))
+        .map(split_address_list)
         .filter(|v| !v.is_empty());
 
     let mut in_reply_to = draft.meta.in_reply_to.clone();
     let mut references = draft.meta.references.clone();
 
     if draft.meta.kind.as_deref() == Some("reply")
-        && draft.meta.source_message_id.as_ref().is_some_and(|s| !s.trim().is_empty())
+        && draft
+            .meta
+            .source_message_id
+            .as_ref()
+            .is_some_and(|s| !s.trim().is_empty())
     {
         let sid = draft.meta.source_message_id.as_ref().unwrap().trim();
         match load_threading_from_source_message(conn, data_dir, sid) {
@@ -188,10 +192,7 @@ fn threading_headers_for_reply(raw: &[u8]) -> Result<(String, String), String> {
         return Err("Cannot build reply threading: source message has no Message-ID.".into());
     }
     let (_, ref_ids) = extract_threading_headers(raw);
-    let mut refs_parts: Vec<String> = ref_ids
-        .into_iter()
-        .map(|s| ensure_brackets(&s))
-        .collect();
+    let mut refs_parts: Vec<String> = ref_ids.into_iter().map(|s| ensure_brackets(&s)).collect();
     if !refs_parts.iter().any(|x| x == &orig) {
         refs_parts.push(orig.clone());
     }

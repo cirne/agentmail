@@ -139,11 +139,15 @@ fn mcp_read_attachment_extracts_csv() {
     .unwrap();
     conn.execute(
         "INSERT INTO attachments (message_id, filename, mime_type, size, stored_path) VALUES ('mr', 'a.csv', 'text/csv', 3, ?1)",
-        [format!("attachments/m-read/a.csv")],
+        ["attachments/m-read/a.csv".to_string()],
     )
     .unwrap();
     let id: i64 = conn
-        .query_row("SELECT id FROM attachments WHERE message_id = 'mr'", [], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM attachments WHERE message_id = 'mr'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     let line = serde_json::to_string(&json!({
         "jsonrpc": "2.0",
