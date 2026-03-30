@@ -21,7 +21,10 @@ fn map_row(row: &Row<'_>) -> rusqlite::Result<ThreadMessageRow> {
     })
 }
 
-pub fn list_thread_messages(conn: &Connection, thread_id: &str) -> rusqlite::Result<Vec<ThreadMessageRow>> {
+pub fn list_thread_messages(
+    conn: &Connection,
+    thread_id: &str,
+) -> rusqlite::Result<Vec<ThreadMessageRow>> {
     let mut stmt = conn.prepare(
         "SELECT message_id, from_address, subject, date FROM messages WHERE thread_id = ?1 ORDER BY date ASC",
     )?;

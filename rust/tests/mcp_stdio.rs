@@ -3,7 +3,8 @@
 use serde_json::json;
 use tempfile::tempdir;
 use zmail::{
-    handle_request_line, open_memory, persist_message, tool_schemas_stable, ParsedMessage, TOOL_NAMES,
+    handle_request_line, open_memory, persist_message, tool_schemas_stable, ParsedMessage,
+    TOOL_NAMES,
 };
 
 const MAILBOX: &str = "[Gmail]/All Mail";

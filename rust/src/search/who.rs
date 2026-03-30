@@ -140,10 +140,7 @@ pub fn who(conn: &Connection, opts: &WhoOptions) -> rusqlite::Result<WhoResult> 
             bump(&mut e.last_contact, &date);
         }
 
-        for a in parse_addrs(&to_j)
-            .into_iter()
-            .chain(parse_addrs(&cc_j))
-        {
+        for a in parse_addrs(&to_j).into_iter().chain(parse_addrs(&cc_j)) {
             let al = a.to_lowercase();
             let e = map.entry(al.clone()).or_default();
             if e.display.is_empty() {

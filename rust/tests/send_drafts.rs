@@ -1,11 +1,11 @@
 //! Integration tests: SMTP resolution from IMAP host, draft store, threading headers, send-test filter, dry-run.
 
 use tempfile::tempdir;
+use zmail::config::SmtpJson;
 use zmail::{
     filter_recipients_send_test, list_drafts, plan_send, read_draft, resolve_smtp_for_imap_host,
     write_draft, DraftMeta, SendPlan, SendTestMode,
 };
-use zmail::config::SmtpJson;
 
 #[test]
 fn smtp_resolve_gmail() {

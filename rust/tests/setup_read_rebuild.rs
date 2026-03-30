@@ -42,13 +42,17 @@ fn setup_env_var_fallback() {
 #[test]
 fn status_json_output() {
     let dir = tempdir().unwrap();
-    let bin = option_env!("CARGO_BIN_EXE_zmail").unwrap();
+    let bin = env!("CARGO_BIN_EXE_zmail");
     let out = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
         .args(["status", "--json"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "stderr: {}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert!(v.get("sync").is_some());
     assert!(v["sync"].get("totalMessages").is_some());
@@ -81,13 +85,17 @@ fn read_message_text_output() {
     persist_message(&conn, &p, MAILBOX, 1, "[]", rel).unwrap();
     drop(conn);
 
-    let bin = option_env!("CARGO_BIN_EXE_zmail").unwrap();
+    let bin = env!("CARGO_BIN_EXE_zmail");
     let out = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
         .args(["read", "<mid-read@test>"])
         .output()
         .unwrap();
-    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(s.contains("Body line one"));
 }

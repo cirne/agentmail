@@ -6,11 +6,11 @@ use serde_json::{json, Value};
 
 use crate::attachments::list_attachments_for_message;
 use crate::collect_stats;
+use crate::search::who::{who, WhoOptions};
 use crate::search::{search_with_meta, SearchOptions};
 use crate::send::{list_drafts, plan_send, read_draft, SendPlan};
 use crate::status::get_status;
 use crate::thread_view::list_thread_messages;
-use crate::search::who::{who, WhoOptions};
 
 #[derive(Debug, Deserialize)]
 pub struct JsonRpcRequest {
@@ -157,7 +157,8 @@ fn tool_call(
             );
             Ok(row
                 .map(|(a, b, c)| {
-                    serde_json::json!({ "messageId": a, "subject": b, "fromAddress": c }).to_string()
+                    serde_json::json!({ "messageId": a, "subject": b, "fromAddress": c })
+                        .to_string()
                 })
                 .unwrap_or_else(|_| "{}".into()))
         }
@@ -200,9 +201,7 @@ fn tool_call(
                 dry_run: dry,
                 ..Default::default()
             };
-            plan_send(&p)
-                .map(|_| if dry { "dry_run".into() } else { "sent".into() })
-                .map_err(|e| e)
+            plan_send(&p).map(|_| if dry { "dry_run".into() } else { "sent".into() })
         }
         "list_drafts" => {
             let dir = data_dir.join("drafts");
@@ -213,9 +212,7 @@ fn tool_call(
         "get_draft" => {
             let did = args.get("draftId").and_then(|x| x.as_str()).unwrap_or("x");
             let p = data_dir.join("drafts").join(format!("{did}.md"));
-            read_draft(&p)
-                .map(|d| d.body)
-                .map_err(|e| e.to_string())
+            read_draft(&p).map(|d| d.body).map_err(|e| e.to_string())
         }
         "delete_draft" => Ok("\"ok\"".into()),
         _ => Err(format!("Unknown tool {name}")),

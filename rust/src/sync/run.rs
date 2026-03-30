@@ -193,6 +193,51 @@ fn progress_line(options: &SyncOptions, msg: &str) {
     }
 }
 
+/// Mirror Node `logSyncMetrics`: structured "Sync complete" + one-line "Sync metrics" for agents tailing `sync.log`.
+fn log_sync_metrics(logger: &SyncFileLogger, r: &SyncResult) {
+    let complete = serde_json::json!({
+        "synced": r.synced,
+        "messagesFetched": r.messages_fetched,
+        "bytesDownloaded": r.bytes_downloaded,
+        "durationMs": r.duration_ms,
+        "bandwidthBytesPerSec": r.bandwidth_bytes_per_sec.round() as i64,
+        "messagesPerMinute": r.messages_per_minute.round() as i64,
+    })
+    .to_string();
+    logger.info("Sync complete", Some(&complete));
+
+    let duration_sec = (r.duration_ms as f64) / 1000.0;
+    let down = format_bytes_u64(r.bytes_downloaded);
+    let bandwidth = format_bytes_per_sec(r.bandwidth_bytes_per_sec);
+    let throughput = format!("{} msg/min", r.messages_per_minute.round() as i64);
+    let summary = format!(
+        "{} new, {} fetched | {} down | {} | {} | {duration_sec:.2}s",
+        r.synced, r.messages_fetched, down, bandwidth, throughput
+    );
+    let metrics_line = serde_json::json!({ "summary": summary }).to_string();
+    logger.info("Sync metrics", Some(&metrics_line));
+    let finished = serde_json::json!({ "outcome": "ok", "success": true }).to_string();
+    logger.info("Sync run finished", Some(&finished));
+}
+
+fn format_bytes_u64(n: u64) -> String {
+    format_bytes_f64(n as f64)
+}
+
+fn format_bytes_f64(n: f64) -> String {
+    if n >= 1024.0 * 1024.0 {
+        format!("{:.2} MB", n / (1024.0 * 1024.0))
+    } else if n >= 1024.0 {
+        format!("{:.2} KB", n / 1024.0)
+    } else {
+        format!("{:.0} B", n)
+    }
+}
+
+fn format_bytes_per_sec(n: f64) -> String {
+    format!("{}/s", format_bytes_f64(n))
+}
+
 fn ensure_maildir(maildir: &Path) -> Result<(), RunSyncError> {
     for sub in ["cur", "new", "tmp", "attachments"] {
         std::fs::create_dir_all(maildir.join(sub))?;
@@ -206,7 +251,6 @@ fn ymd_minus_one_day(ymd: &str) -> Option<String> {
         .map(|x| x.format("%Y-%m-%d").to_string())
 }
 
-
 struct RunSyncLockedPrelude {
     exclude_lower: HashSet<String>,
     log_path_str: String,
@@ -217,6 +261,7 @@ enum RunSyncPreAcquire {
     AcquireLock(RunSyncLockedPrelude),
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_sync_pre_acquire(
     conn: &mut Connection,
     logger: &SyncFileLogger,
@@ -229,8 +274,7 @@ fn run_sync_pre_acquire(
 ) -> Result<RunSyncPreAcquire, RunSyncError> {
     let log_path_str = logger.log_path().to_string_lossy().to_string();
     logger.write_separator(pid_u32);
-    let exclude_lower: HashSet<String> =
-        exclude_labels.iter().map(|s| s.to_lowercase()).collect();
+    let exclude_lower: HashSet<String> = exclude_labels.iter().map(|s| s.to_lowercase()).collect();
 
     let lock_row: Option<SyncLockRow> = conn
         .query_row(
@@ -249,7 +293,10 @@ fn run_sync_pre_acquire(
     if is_sync_lock_held(lock_row.as_ref()) {
         logger.info("Sync already running, exiting", None);
         let duration_ms = start.elapsed().as_millis() as u64;
-        return Ok(RunSyncPreAcquire::Done(SyncResult::empty(duration_ms, log_path_str)));
+        return Ok(RunSyncPreAcquire::Done(SyncResult::empty(
+            duration_ms,
+            log_path_str,
+        )));
     }
 
     ensure_maildir(maildir_path)?;
@@ -268,6 +315,7 @@ fn run_sync_pre_acquire(
     }))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn run_sync_imap_phase(
     transport: &mut dyn SyncImapTransport,
     conn: &mut Connection,
@@ -291,20 +339,24 @@ fn run_sync_imap_phase(
         }
     };
 
-    if options.direction == SyncDirection::Forward {
-        if should_early_exit_forward(options.force, state, &status) {
-            conn.execute(
-                "UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1",
-                [],
-            )?;
-            release_lock(conn, Some(pid))?;
-            let duration_ms = start.elapsed().as_millis() as u64;
-            let mut r = SyncResult::empty(duration_ms, log_path_str.clone());
-            r.early_exit = Some(true);
-            logger.info("Early exit: no new messages", None);
-            progress_line(options, "No new mail (server reports nothing after last sync).");
-            return Ok(r);
-        }
+    if options.direction == SyncDirection::Forward
+        && should_early_exit_forward(options.force, state, &status)
+    {
+        conn.execute(
+            "UPDATE sync_summary SET last_sync_at = datetime('now') WHERE id = 1",
+            [],
+        )?;
+        release_lock(conn, Some(pid))?;
+        let duration_ms = start.elapsed().as_millis() as u64;
+        let mut r = SyncResult::empty(duration_ms, log_path_str.clone());
+        r.early_exit = Some(true);
+        logger.info("Early exit: no new messages", None);
+        log_sync_metrics(logger, &r);
+        progress_line(
+            options,
+            "No new mail (server reports nothing after last sync).",
+        );
+        return Ok(r);
     }
 
     progress_line(options, "Opening mailbox…");
@@ -342,7 +394,8 @@ fn run_sync_imap_phase(
                     logger.info(
                         "Forward sync (MAX uid recovery)",
                         Some(
-                            format!("{{\"localMax\":{local_max},\"uids\":{}}}", uids.len()).as_str(),
+                            format!("{{\"localMax\":{local_max},\"uids\":{}}}", uids.len())
+                                .as_str(),
                         ),
                     );
                 }
@@ -366,8 +419,7 @@ fn run_sync_imap_phase(
                 }
             }
 
-            let imap_eff = ymd_to_imap_since(&effective_since_ymd)
-                .map_err(RunSyncError::Config)?;
+            let imap_eff = ymd_to_imap_since(&effective_since_ymd).map_err(RunSyncError::Config)?;
 
             uids = transport.uid_search_keys(&format!("SINCE {imap_eff}"))?;
             logger.info(
@@ -393,22 +445,17 @@ fn run_sync_imap_phase(
                             logger.info(
                                 "Filtered UIDs (range expand)",
                                 Some(
-                                    format!(
-                                        "{{\"before\":{before},\"after\":{}}}",
-                                        uids.len()
-                                    )
-                                    .as_str(),
+                                    format!("{{\"before\":{before},\"after\":{}}}", uids.len())
+                                        .as_str(),
                                 ),
                             );
                         } else {
-                            let all_le =
-                                !uids.is_empty() && uids.iter().all(|&u| u <= st_last);
+                            let all_le = !uids.is_empty() && uids.iter().all(|&u| u <= st_last);
                             if all_le {
                                 if let Some(oldest_s) =
                                     oldest_message_date_for_folder(conn, mailbox)?
                                 {
-                                    let oldest_day: String =
-                                        oldest_s.chars().take(10).collect();
+                                    let oldest_day: String = oldest_s.chars().take(10).collect();
                                     if let Some(prev) = ymd_minus_one_day(&oldest_day) {
                                         if chrono::NaiveDate::parse_from_str(&prev, "%Y-%m-%d")
                                             .map(|d| d >= since_date)
@@ -416,9 +463,8 @@ fn run_sync_imap_phase(
                                         {
                                             let before_imap = ymd_to_imap_since(&prev)
                                                 .map_err(RunSyncError::Config)?;
-                                            let q = format!(
-                                                "SINCE {imap_since} BEFORE {before_imap}"
-                                            );
+                                            let q =
+                                                format!("SINCE {imap_since} BEFORE {before_imap}");
                                             uids = transport.uid_search_keys(&q)?;
                                         } else {
                                             uids.clear();
@@ -458,13 +504,12 @@ fn run_sync_imap_phase(
         )?;
         release_lock(conn, Some(pid))?;
         let duration_ms = start.elapsed().as_millis() as u64;
-        return Ok(SyncResult::empty(duration_ms, log_path_str.clone()));
+        let r = SyncResult::empty(duration_ms, log_path_str.clone());
+        log_sync_metrics(logger, &r);
+        return Ok(r);
     }
 
-    progress_line(
-        options,
-        &format!("Downloading {} message(s)…", uids.len()),
-    );
+    progress_line(options, &format!("Downloading {} message(s)…", uids.len()));
 
     let batch_size = match options.direction {
         SyncDirection::Forward => BATCH_SIZE_FORWARD,
@@ -526,12 +571,7 @@ fn run_sync_imap_phase(
 
             let basename = maildir_basename(msg.uid, &parsed.message_id);
             let cur = maildir_path.join("cur");
-            let written = write_maildir_message(
-                &cur,
-                &basename,
-                &msg.raw,
-                &msg.labels,
-            )?;
+            let written = write_maildir_message(&cur, &basename, &msg.raw, &msg.labels)?;
             let labels_json = serde_json::to_string(&msg.labels).unwrap_or_else(|_| "[]".into());
 
             let inserted = persist_message(
@@ -614,14 +654,7 @@ fn run_sync_imap_phase(
             Some(new_message_ids)
         },
     };
-    let summary = serde_json::json!({
-        "synced": synced,
-        "messagesFetched": messages_fetched,
-        "bytesDownloaded": bytes_downloaded,
-        "durationMs": duration_ms,
-    })
-    .to_string();
-    logger.info("Sync complete", Some(summary.as_str()));
+    log_sync_metrics(logger, &r);
     Ok(r)
 }
 
@@ -737,7 +770,9 @@ where
         .map_err(|_| RunSyncError::Imap("IMAP connect thread disconnected".into()))?;
     let mut session = connect_result?;
 
-    let mut transport = super::transport::RealImapTransport { session: &mut session };
+    let mut transport = super::transport::RealImapTransport {
+        session: &mut session,
+    };
     let sync_result = run_sync_imap_phase(
         &mut transport,
         conn,
@@ -759,7 +794,10 @@ where
 }
 
 /// Build [`SyncOptions`] after resolving `since` CLI/config into `YYYY-MM-DD`.
-pub fn resolve_sync_since_ymd(cfg: &Config, since_cli: Option<&str>) -> Result<String, RunSyncError> {
+pub fn resolve_sync_since_ymd(
+    cfg: &Config,
+    since_cli: Option<&str>,
+) -> Result<String, RunSyncError> {
     let spec = since_cli
         .map(str::trim)
         .filter(|s| !s.is_empty())

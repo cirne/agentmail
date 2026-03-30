@@ -16,7 +16,9 @@ pub fn parse_since_to_date(since: &str) -> Result<String, String> {
                 r#"Invalid --since value: "{since}". Use a number plus optional unit: d (days), w (weeks), m (months), y (years). Example: 7d, 5w, 3m, 2y."#
             )
         })?;
-    let num: i64 = caps[1].parse().map_err(|_| format!("Invalid --since value: \"{since}\""))?;
+    let num: i64 = caps[1]
+        .parse()
+        .map_err(|_| format!("Invalid --since value: \"{since}\""))?;
     if num <= 0 {
         return Err(format!(
             r#"Invalid --since value: "{since}". Number must be positive."#

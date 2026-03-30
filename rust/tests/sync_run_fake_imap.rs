@@ -11,8 +11,8 @@ fn open_temp_db(dir: &std::path::Path) -> Connection {
     let p = dir.join("data");
     std::fs::create_dir_all(&p).unwrap();
     let db_path = p.join("zmail.db");
-    let mut conn = db::open_file(&db_path).unwrap();
-    apply_schema(&mut conn).unwrap();
+    let conn = db::open_file(&db_path).unwrap();
+    apply_schema(&conn).unwrap();
     conn
         .execute(
             "UPDATE sync_summary SET is_running = 0, owner_pid = NULL, sync_lock_started_at = NULL WHERE id = 1",
@@ -50,16 +50,7 @@ fn early_exit_forward_skips_examine_and_returns_flag() {
         force: false,
         progress_stderr: false,
     };
-    let r = run_sync(
-        &mut fake,
-        &mut conn,
-        &logger,
-        "INBOX",
-        &maildir,
-        &[],
-        &opts,
-    )
-    .unwrap();
+    let r = run_sync(&mut fake, &mut conn, &logger, "INBOX", &maildir, &[], &opts).unwrap();
     assert_eq!(r.synced, 0);
     assert_eq!(r.early_exit, Some(true));
     assert!(fake.fetch_batches.is_empty());
@@ -100,18 +91,13 @@ fn forward_checkpoint_fetches_and_persists() {
         force: false,
         progress_stderr: false,
     };
-    let r = run_sync(
-        &mut fake,
-        &mut conn,
-        &logger,
-        "INBOX",
-        &maildir,
-        &[],
-        &opts,
-    )
-    .unwrap();
+    let r = run_sync(&mut fake, &mut conn, &logger, "INBOX", &maildir, &[], &opts).unwrap();
     assert_eq!(r.synced, 1);
-    assert!(r.new_message_ids.as_ref().unwrap().contains(&"<u1@test>".to_string()));
+    assert!(r
+        .new_message_ids
+        .as_ref()
+        .unwrap()
+        .contains(&"<u1@test>".to_string()));
     let n: i64 = conn
         .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
         .unwrap();
@@ -135,16 +121,7 @@ fn pre_lock_held_returns_empty_without_imap() {
         force: false,
         progress_stderr: false,
     };
-    let r = run_sync(
-        &mut fake,
-        &mut conn,
-        &logger,
-        "INBOX",
-        &maildir,
-        &[],
-        &opts,
-    )
-    .unwrap();
+    let r = run_sync(&mut fake, &mut conn, &logger, "INBOX", &maildir, &[], &opts).unwrap();
     assert_eq!(r.synced, 0);
     assert!(r.early_exit.is_none());
     release_lock(&conn, Some(pid)).unwrap();
@@ -188,16 +165,7 @@ fn backward_batch_skips_duplicate_message_id() {
         force: false,
         progress_stderr: false,
     };
-    let r = run_sync(
-        &mut fake,
-        &mut conn,
-        &logger,
-        "INBOX",
-        &maildir,
-        &[],
-        &opts,
-    )
-    .unwrap();
+    let r = run_sync(&mut fake, &mut conn, &logger, "INBOX", &maildir, &[], &opts).unwrap();
     assert_eq!(r.synced, 0);
     let n: i64 = conn
         .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))

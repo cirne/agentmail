@@ -52,12 +52,8 @@ mod tests {
     #[test]
     fn send_test_on_allowlist() {
         let allow = vec!["a@b.com".into()];
-        let out = filter_recipients_send_test(
-            SendTestMode::On,
-            &[String::from("A@B.com")],
-            &allow,
-        )
-        .unwrap();
+        let out = filter_recipients_send_test(SendTestMode::On, &[String::from("A@B.com")], &allow)
+            .unwrap();
         assert_eq!(out, vec!["A@B.com"]);
     }
 

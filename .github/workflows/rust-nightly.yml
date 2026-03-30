@@ -1,0 +1,110 @@
+name: Rust nightly
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "rust/**"
+      - ".github/workflows/rust-nightly.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: rust-nightly
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            ext: tar.gz
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            ext: tar.gz
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            ext: zip
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Linux deps (native-tls / OpenSSL)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build release
+        run: cargo build --release
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          SHORT_SHA="${GITHUB_SHA:0:7}"
+          DATE=$(date -u +%Y%m%d)
+          NAME="zmail-nightly-${DATE}-${SHORT_SHA}-${{ matrix.target }}"
+          mkdir -p "${{ github.workspace }}/dist"
+          cp target/release/zmail "${{ github.workspace }}/dist/zmail"
+          cd "${{ github.workspace }}/dist"
+          tar czvf "${NAME}.${{ matrix.ext }}" zmail
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          $date = (Get-Date).ToUniversalTime().ToString("yyyyMMdd")
+          $name = "zmail-nightly-$date-$short-${{ matrix.target }}"
+          New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/dist" | Out-Null
+          Copy-Item target/release/zmail.exe "${{ github.workspace }}/dist/zmail.exe"
+          Set-Location "${{ github.workspace }}/dist"
+          Compress-Archive -Path zmail.exe -DestinationPath "$name.zip" -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bundle-${{ matrix.target }}
+          path: ${{ github.workspace }}/dist/zmail-nightly-*.*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: bundle-*
+          path: dist
+          merge-multiple: true
+
+      - name: SHA256 checksums
+        run: |
+          cd dist
+          sha256sum zmail-nightly-* > SHA256SUMS
+
+      - uses: ncipollo/release-action@v1
+        with:
+          tag: nightly
+          name: zmail nightly (main)
+          body: |
+            Automated prerelease from `main`.
+
+            **Commit:** ${{ github.sha }}
+            **Workflow run:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          prerelease: true
+          allowUpdates: true
+          removeArtifacts: true
+          artifacts: "dist/*"

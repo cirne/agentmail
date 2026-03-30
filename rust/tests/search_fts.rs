@@ -3,13 +3,14 @@
 use std::process::Command;
 
 use zmail::{
-    escape_fts5_query, open_memory, parse_search_query, persist_message, resolve_search_json_format,
-    search_result_to_slim_json_row, search_with_meta, ParsedMessage, SearchOptions,
-    SearchResultFormatPreference, SEARCH_AUTO_SLIM_THRESHOLD,
+    escape_fts5_query, open_memory, parse_search_query, persist_message,
+    resolve_search_json_format, search_result_to_slim_json_row, search_with_meta, ParsedMessage,
+    SearchOptions, SearchResultFormatPreference, SEARCH_AUTO_SLIM_THRESHOLD,
 };
 
 const MAILBOX: &str = "[Gmail]/All Mail";
 
+#[allow(clippy::too_many_arguments)]
 fn insert_msg(
     conn: &rusqlite::Connection,
     mid: &str,
@@ -421,19 +422,11 @@ fn json_format_slim_vs_full() {
         zmail::SearchJsonFormat::Full
     );
     assert_eq!(
-        resolve_search_json_format(
-            999,
-            SearchResultFormatPreference::Full,
-            true
-        ),
+        resolve_search_json_format(999, SearchResultFormatPreference::Full, true),
         zmail::SearchJsonFormat::Full
     );
     assert_eq!(
-        resolve_search_json_format(
-            1,
-            SearchResultFormatPreference::Slim,
-            true
-        ),
+        resolve_search_json_format(1, SearchResultFormatPreference::Slim, true),
         zmail::SearchJsonFormat::Slim
     );
 }
@@ -496,7 +489,7 @@ fn fts5_special_chars_escaped() {
 #[test]
 fn search_exits_zero() {
     let dir = tempfile::tempdir().unwrap();
-    let bin = option_env!("CARGO_BIN_EXE_zmail").expect("binary");
+    let bin = env!("CARGO_BIN_EXE_zmail");
     let st = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
         .args(["search", "anything", "--limit", "5"])

@@ -6,8 +6,8 @@ pub mod schema;
 use rusqlite::{Connection, OpenFlags};
 use std::path::Path;
 
-pub use schema::SCHEMA_VERSION;
 use schema::SCHEMA;
+pub use schema::SCHEMA_VERSION;
 
 #[derive(Debug, thiserror::Error)]
 pub enum DbError {
@@ -51,9 +51,7 @@ pub fn open_file(path: &Path) -> Result<Connection, DbError> {
 pub fn apply_schema(conn: &Connection) -> Result<(), DbError> {
     conn.execute_batch(SCHEMA)?;
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
-    conn.execute_batch(
-        "INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0);",
-    )?;
+    conn.execute_batch("INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0);")?;
 
     let mut stmt = conn.prepare("PRAGMA table_info(sync_summary)")?;
     let cols: Vec<String> = stmt
@@ -103,7 +101,10 @@ mod tests {
         let conn = open_memory().unwrap();
         let mode = journal_mode(&conn).unwrap();
         // In-memory DBs often report `memory`; file-backed uses WAL after pragma.
-        assert!(mode == "wal" || mode == "memory", "unexpected journal_mode={mode}");
+        assert!(
+            mode == "wal" || mode == "memory",
+            "unexpected journal_mode={mode}"
+        );
     }
 
     #[test]

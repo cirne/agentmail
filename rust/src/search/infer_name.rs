@@ -9,10 +9,7 @@ fn capitalize_words(s: &str) -> String {
             let mut c = word.chars();
             match c.next() {
                 None => String::new(),
-                Some(f) => {
-                    f.to_uppercase().to_string()
-                        + &c.as_str().to_lowercase()
-                }
+                Some(f) => f.to_uppercase().to_string() + &c.as_str().to_lowercase(),
             }
         })
         .collect::<Vec<_>>()
@@ -23,12 +20,25 @@ static RE_DOT_UNDERSCORE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([a-z]+)[._]([a-z]+)$").unwrap());
 static RE_CAMEL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^([a-z]+)([A-Z][a-z]+)$").unwrap());
-static RE_SINGLE: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"^([a-z])([a-z]{5,})$").unwrap());
+static RE_SINGLE: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"^([a-z])([a-z]{5,})$").unwrap());
 
 const SKIP_WORDS: &[&str] = &[
-    "the", "my", "our", "new", "old", "recipient", "sender", "user", "admin", "support", "info",
-    "contact", "mail", "email", "noreply", "no-reply",
+    "the",
+    "my",
+    "our",
+    "new",
+    "old",
+    "recipient",
+    "sender",
+    "user",
+    "admin",
+    "support",
+    "info",
+    "contact",
+    "mail",
+    "email",
+    "noreply",
+    "no-reply",
 ];
 
 const COMMON_FIRST: &[&str] = &[
@@ -40,9 +50,31 @@ const COMMON_ENDINGS: &[&str] = &[
 ];
 
 fn consonant_start(s: &str) -> bool {
-    s.chars()
-        .next()
-        .is_some_and(|c| matches!(c, 'b'|'c'|'d'|'f'|'g'|'h'|'j'|'k'|'l'|'m'|'n'|'p'|'q'|'r'|'s'|'t'|'v'|'w'|'x'|'y'|'z'))
+    s.chars().next().is_some_and(|c| {
+        matches!(
+            c,
+            'b' | 'c'
+                | 'd'
+                | 'f'
+                | 'g'
+                | 'h'
+                | 'j'
+                | 'k'
+                | 'l'
+                | 'm'
+                | 'n'
+                | 'p'
+                | 'q'
+                | 'r'
+                | 's'
+                | 't'
+                | 'v'
+                | 'w'
+                | 'x'
+                | 'y'
+                | 'z'
+        )
+    })
 }
 
 /// Heuristic sync inference from full email address.
@@ -138,9 +170,7 @@ pub fn infer_name_from_address(address: &str) -> Option<String> {
         let is_common_first = COMMON_FIRST.contains(&best.0.as_str());
         const MIN_SCORE: i32 = 20;
         const HIGH_SCORE: i32 = 24;
-        if best.2 >= MIN_SCORE
-            && (has_name_ending || best.2 >= HIGH_SCORE || is_common_first)
-        {
+        if best.2 >= MIN_SCORE && (has_name_ending || best.2 >= HIGH_SCORE || is_common_first) {
             return Some(capitalize_words(&format!("{} {}", best.0, best.1)));
         }
     }
@@ -149,11 +179,10 @@ pub fn infer_name_from_address(address: &str) -> Option<String> {
         let initial = c.get(1).unwrap().as_str();
         let last = c.get(2).unwrap().as_str();
         let ambiguous = ["son", "sen", "man", "ton"];
-        let looks_ambiguous = ambiguous.iter().any(|e| last.ends_with(e) && last.len() <= 7);
-        if (5..=6).contains(&last.len())
-            && consonant_start(last)
-            && !looks_ambiguous
-        {
+        let looks_ambiguous = ambiguous
+            .iter()
+            .any(|e| last.ends_with(e) && last.len() <= 7);
+        if (5..=6).contains(&last.len()) && consonant_start(last) && !looks_ambiguous {
             return Some(capitalize_words(&format!(
                 "{} {}",
                 initial.to_uppercase(),

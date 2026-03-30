@@ -14,7 +14,10 @@ pub struct SetupArgs {
 }
 
 /// Resolve credential from CLI arg or `process_env` map (ZMAIL_* keys).
-pub fn resolve_setup_email(args: &SetupArgs, env: &std::collections::HashMap<String, String>) -> Option<String> {
+pub fn resolve_setup_email(
+    args: &SetupArgs,
+    env: &std::collections::HashMap<String, String>,
+) -> Option<String> {
     args.email
         .clone()
         .filter(|s| !s.trim().is_empty())
@@ -22,7 +25,10 @@ pub fn resolve_setup_email(args: &SetupArgs, env: &std::collections::HashMap<Str
         .filter(|s| !s.trim().is_empty())
 }
 
-pub fn resolve_setup_password(args: &SetupArgs, env: &std::collections::HashMap<String, String>) -> Option<String> {
+pub fn resolve_setup_password(
+    args: &SetupArgs,
+    env: &std::collections::HashMap<String, String>,
+) -> Option<String> {
     args.password
         .clone()
         .filter(|s| !s.is_empty())
@@ -31,7 +37,12 @@ pub fn resolve_setup_password(args: &SetupArgs, env: &std::collections::HashMap<
 }
 
 /// Write `config.json` + `.env` under `home` (creates dirs).
-pub fn write_setup(home: &Path, email: &str, password: &str, openai_key: Option<&str>) -> std::io::Result<()> {
+pub fn write_setup(
+    home: &Path,
+    email: &str,
+    password: &str,
+    openai_key: Option<&str>,
+) -> std::io::Result<()> {
     fs::create_dir_all(home)?;
     let cfg = json!({
         "imap": {
@@ -42,7 +53,10 @@ pub fn write_setup(home: &Path, email: &str, password: &str, openai_key: Option<
         "sync": { "defaultSince": "1y" },
         "inbox": { "defaultWindow": "24h" },
     });
-    fs::write(home.join("config.json"), serde_json::to_string_pretty(&cfg)?)?;
+    fs::write(
+        home.join("config.json"),
+        serde_json::to_string_pretty(&cfg)?,
+    )?;
 
     let mut dotenv = format!("ZMAIL_IMAP_PASSWORD={password}\n");
     if let Some(k) = openai_key.filter(|s| !s.is_empty()) {
@@ -64,7 +78,8 @@ pub struct StatsJson {
 pub fn collect_stats(conn: &rusqlite::Connection) -> rusqlite::Result<StatsJson> {
     let message_count: i64 = conn.query_row("SELECT COUNT(*) FROM messages", [], |r| r.get(0))?;
     let thread_count: i64 = conn.query_row("SELECT COUNT(*) FROM threads", [], |r| r.get(0))?;
-    let attachment_count: i64 = conn.query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))?;
+    let attachment_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM attachments", [], |r| r.get(0))?;
     let people_count: i64 = conn.query_row("SELECT COUNT(*) FROM people", [], |r| r.get(0))?;
     Ok(StatsJson {
         message_count,

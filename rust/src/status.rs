@@ -40,7 +40,11 @@ pub fn format_time_ago(iso_date: Option<&str>) -> Option<TimeAgo> {
         ("just now".into(), "PT0S".into())
     } else if min < 60 {
         (
-            format!("{} {} ago", min, if min == 1 { "minute" } else { "minutes" }),
+            format!(
+                "{} {} ago",
+                min,
+                if min == 1 { "minute" } else { "minutes" }
+            ),
             format!("PT{min}M"),
         )
     } else if hr < 24 {
@@ -60,7 +64,11 @@ pub fn format_time_ago(iso_date: Option<&str>) -> Option<TimeAgo> {
         )
     } else if month < 12 {
         (
-            format!("{} {} ago", month, if month == 1 { "month" } else { "months" }),
+            format!(
+                "{} {} ago",
+                month,
+                if month == 1 { "month" } else { "months" }
+            ),
             format!("P{}D", month * 30),
         )
     } else {
@@ -91,18 +99,20 @@ pub struct StatusData {
     pub date_range: Option<(String, String)>,
 }
 
+type SyncSummaryRow = (
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    Option<String>,
+    i64,
+    Option<String>,
+    i64,
+    Option<i64>,
+    Option<String>,
+);
+
 pub fn get_status(conn: &Connection) -> Result<StatusData, rusqlite::Error> {
-    let sync_row: Option<(
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        Option<String>,
-        i64,
-        Option<String>,
-        i64,
-        Option<i64>,
-        Option<String>,
-    )> = conn
+    let sync_row: Option<SyncSummaryRow> = conn
         .query_row(
             "SELECT earliest_synced_date, latest_synced_date, target_start_date, sync_start_earliest_date,
                     total_messages, last_sync_at, is_running, owner_pid, sync_lock_started_at
@@ -258,12 +268,7 @@ pub fn print_status_text(conn: &Connection) -> Result<(), rusqlite::Error> {
     }
 
     if let Some(ago) = format_time_ago(status.date_range.as_ref().map(|(_, l)| l.as_str())) {
-        println!(
-            "{}{} ({})",
-            pad("Newest mail:"),
-            ago.human,
-            ago.duration
-        );
+        println!("{}{} ({})", pad("Newest mail:"), ago.human, ago.duration);
     }
 
     let last_sync_ago = if status.sync.is_running {

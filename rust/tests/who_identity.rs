@@ -3,8 +3,8 @@
 use std::process::Command;
 
 use zmail::{
-    infer_name_from_address, is_noreply, name_matches_phonetically, normalize_address,
-    open_memory, parse_signature_block, persist_message, who, ParsedMessage, WhoOptions,
+    infer_name_from_address, is_noreply, name_matches_phonetically, normalize_address, open_memory,
+    parse_signature_block, persist_message, who, ParsedMessage, WhoOptions,
 };
 
 const MAILBOX: &str = "[Gmail]/All Mail";
@@ -180,7 +180,7 @@ fn phonetic_jon_john() {
 #[test]
 fn who_exits_zero() {
     let dir = tempfile::tempdir().unwrap();
-    let bin = option_env!("CARGO_BIN_EXE_zmail").unwrap();
+    let bin = env!("CARGO_BIN_EXE_zmail");
     let st = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
         .args(["who", "--limit", "3"])

@@ -21,7 +21,7 @@ pub use process_lock::{
     acquire_lock, is_process_alive, is_sync_lock_held, release_lock, LockResult, SyncLockRow,
 };
 pub use run::{
-    resolve_sync_since_ymd, resolve_sync_mailbox, run_sync, run_sync_with_parallel_imap_connect,
+    resolve_sync_mailbox, resolve_sync_since_ymd, run_sync, run_sync_with_parallel_imap_connect,
     should_early_exit_forward, SyncDirection, SyncOptions, SyncResult,
 };
 pub use sync_log::{sync_log_path, SyncFileLogger};

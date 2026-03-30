@@ -3,9 +3,7 @@
 use mail_parser::MessageParser;
 
 fn strip_id(s: &str) -> String {
-    s.trim()
-        .trim_matches(|c| c == '<' || c == '>')
-        .to_string()
+    s.trim().trim_matches(|c| c == '<' || c == '>').to_string()
 }
 
 pub fn extract_threading_headers(raw: &[u8]) -> (Option<String>, Vec<String>) {

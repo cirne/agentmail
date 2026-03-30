@@ -4,8 +4,7 @@ use chrono::{Duration, Utc};
 use regex::Regex;
 use std::sync::LazyLock;
 
-static ROLLING: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)^(\d+)([dhmwy])?$").unwrap());
+static ROLLING: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)^(\d+)([dhmwy])?$").unwrap());
 static ISO_DATE: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"^(\d{4})-(\d{2})-(\d{2})$").unwrap());
 
@@ -27,10 +26,7 @@ pub fn parse_inbox_window_to_iso_cutoff(spec: &str) -> Result<String, String> {
         return Err("Inbox window spec is empty.".into());
     }
     if let Some(c) = ISO_DATE.captures(trimmed) {
-        return Ok(format!(
-            "{}-{}-{}T00:00:00.000Z",
-            &c[1], &c[2], &c[3]
-        ));
+        return Ok(format!("{}-{}-{}T00:00:00.000Z", &c[1], &c[2], &c[3]));
     }
     let Some(c) = ROLLING.captures(trimmed) else {
         return Err(format!(
@@ -44,7 +40,9 @@ pub fn parse_inbox_window_to_iso_cutoff(spec: &str) -> Result<String, String> {
         .unwrap_or('d');
     let hpu = hours_per_unit(unit).ok_or_else(|| format!("Invalid unit in \"{trimmed}\""))?;
     if num <= 0 {
-        return Err(format!("Invalid inbox window: \"{trimmed}\". Number must be positive."));
+        return Err(format!(
+            "Invalid inbox window: \"{trimmed}\". Number must be positive."
+        ));
     }
     let hours = num * hpu;
     let cutoff = Utc::now() - Duration::hours(hours);

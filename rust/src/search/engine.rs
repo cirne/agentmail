@@ -62,6 +62,7 @@ fn merge_effective_opts(opts: &SearchOptions) -> SearchOptions {
     e
 }
 
+#[allow(clippy::too_many_arguments)]
 fn row_from_cols(
     message_id: String,
     thread_id: String,
@@ -86,7 +87,10 @@ fn row_from_cols(
     }
 }
 
-fn filter_only_search(conn: &Connection, opts: &SearchOptions) -> rusqlite::Result<(Vec<RankedSearchRow>, i64)> {
+fn filter_only_search(
+    conn: &Connection,
+    opts: &SearchOptions,
+) -> rusqlite::Result<(Vec<RankedSearchRow>, i64)> {
     let fc = build_filter_clause(opts, false);
     let where_sql = build_where_sql(&fc);
     let where_clause = if where_sql.is_empty() {
@@ -100,7 +104,9 @@ fn filter_only_search(conn: &Connection, opts: &SearchOptions) -> rusqlite::Resu
     let total: i64 = if count_vals.is_empty() {
         conn.query_row(&count_sql, [], |r| r.get(0))?
     } else {
-        conn.query_row(&count_sql, params_from_iter(count_vals.iter()), |r| r.get(0))?
+        conn.query_row(&count_sql, params_from_iter(count_vals.iter()), |r| {
+            r.get(0)
+        })?
     };
 
     let limit = opts.limit.unwrap_or(50);
@@ -154,7 +160,10 @@ fn filter_only_search(conn: &Connection, opts: &SearchOptions) -> rusqlite::Resu
     Ok((results, total))
 }
 
-fn fts_search(conn: &Connection, opts: &SearchOptions) -> rusqlite::Result<(Vec<RankedSearchRow>, i64)> {
+fn fts_search(
+    conn: &Connection,
+    opts: &SearchOptions,
+) -> rusqlite::Result<(Vec<RankedSearchRow>, i64)> {
     let q = opts.query.as_deref().unwrap_or("").trim();
     if q.is_empty() {
         return Ok((Vec::new(), 0));
@@ -174,7 +183,9 @@ fn fts_search(conn: &Connection, opts: &SearchOptions) -> rusqlite::Result<(Vec<
     let count_sql = format!(
         "SELECT COUNT(*) FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid {where_clause}"
     );
-    let total: i64 = conn.query_row(&count_sql, params_from_iter(count_vals.iter()), |r| r.get(0))?;
+    let total: i64 = conn.query_row(&count_sql, params_from_iter(count_vals.iter()), |r| {
+        r.get(0)
+    })?;
 
     let limit = opts.limit.unwrap_or(50);
     let offset = opts.offset;
@@ -242,7 +253,10 @@ fn fts_search(conn: &Connection, opts: &SearchOptions) -> rusqlite::Result<(Vec<
 }
 
 /// Main entry (sync API).
-pub fn search_with_meta(conn: &Connection, opts: &SearchOptions) -> rusqlite::Result<SearchResultSet> {
+pub fn search_with_meta(
+    conn: &Connection,
+    opts: &SearchOptions,
+) -> rusqlite::Result<SearchResultSet> {
     let started = std::time::Instant::now();
     let eff = merge_effective_opts(opts);
     let q = eff.query.as_deref().unwrap_or("").trim();

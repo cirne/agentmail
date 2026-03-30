@@ -67,7 +67,10 @@ pub fn convert_to_or_query(query: &str) -> String {
     }
     replaced.push_str(&query[last_end..]);
 
-    let parts: Vec<&str> = replaced.split_whitespace().filter(|p| !p.is_empty()).collect();
+    let parts: Vec<&str> = replaced
+        .split_whitespace()
+        .filter(|p| !p.is_empty())
+        .collect();
     if parts.len() <= 1 {
         return escape_fts5_query(query);
     }
@@ -111,10 +114,7 @@ mod tests {
     #[test]
     fn escape_or_splits_parts_with_dots() {
         // Operator token is consumed by the split; joined parts are space-separated quoted segments.
-        assert_eq!(
-            escape_fts5_query("a.com OR b.com"),
-            "\"a.com\" \"b.com\""
-        );
+        assert_eq!(escape_fts5_query("a.com OR b.com"), "\"a.com\" \"b.com\"");
     }
 
     #[test]

@@ -53,7 +53,11 @@ pub fn load_refresh_new_mail(
     if new_message_ids.is_empty() {
         return Ok(Vec::new());
     }
-    let placeholders = new_message_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let placeholders = new_message_ids
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
     let sql = format!(
         "SELECT message_id, from_address, from_name, subject, date,
          COALESCE(TRIM(SUBSTR(body_text, 1, 200)), '') ||
@@ -89,9 +93,13 @@ pub fn load_refresh_new_mail(
         )
         .collect();
 
-    rows = sort_rows_by_sender_contact_rank(conn, owner_address, rows, |r| &r.from_address, |r| {
-        &r.date
-    })?;
+    rows = sort_rows_by_sender_contact_rank(
+        conn,
+        owner_address,
+        rows,
+        |r| &r.from_address,
+        |r| &r.date,
+    )?;
 
     rows.truncate(10);
 
@@ -168,7 +176,8 @@ pub fn print_refresh_text(sync: &SyncResult, new_mail: &[RefreshPreviewRow]) {
     if !new_mail.is_empty() {
         println!();
         println!("New mail:");
-        const SEP: &str = "────────────────────────────────────────────────────────────────────────";
+        const SEP: &str =
+            "────────────────────────────────────────────────────────────────────────";
         for m in new_mail {
             println!("{SEP}");
             println!("{}  {}", &m.date[..m.date.len().min(10)], m.from_address);

@@ -27,7 +27,7 @@ Node.js 20+, TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native
 
 ### Rust port (in-repo)
 
-A **Rust** implementation lives under **`rust/`** (same CLI/MCP contract and `~/.zmail` goals; see **[ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)**). It is **not** the published npm package yet — use it from a clone for development and benchmarking.
+A **Rust** implementation lives under **`rust/`** (same CLI/MCP contract and `~/.zmail` goals; see **[ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)**). **Parity tracker (remaining work, intentional differences, risks):** [docs/RUST_PORT.md](docs/RUST_PORT.md). It is **not** the published npm package yet — use it from a clone for development and benchmarking.
 
 ```bash
 cd rust

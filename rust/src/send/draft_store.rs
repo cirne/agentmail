@@ -23,7 +23,9 @@ pub struct DraftFile {
 fn split_frontmatter(raw: &str) -> Option<(DraftMeta, String)> {
     let raw = raw.trim_start_matches('\u{feff}');
     let rest = raw.strip_prefix("---")?;
-    let rest = rest.strip_prefix('\n').or_else(|| rest.strip_prefix("\r\n"))?;
+    let rest = rest
+        .strip_prefix('\n')
+        .or_else(|| rest.strip_prefix("\r\n"))?;
     let end = rest.find("\n---\n").or_else(|| rest.find("\n---\r\n"))?;
     let yaml_part = rest[..end].trim();
     let body = rest[end + 5..]
@@ -147,9 +149,6 @@ mod tests {
         write_draft(dir.path(), "a", &DraftMeta::default(), "y").unwrap();
         let list = list_drafts(dir.path(), false).unwrap();
         assert_eq!(list.len(), 2);
-        assert_eq!(
-            list[0].get("id").and_then(|v| v.as_str()),
-            Some("a")
-        );
+        assert_eq!(list[0].get("id").and_then(|v| v.as_str()), Some("a"));
     }
 }

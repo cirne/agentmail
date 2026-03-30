@@ -80,7 +80,9 @@ fn extract_docx_non_null() {
     let path = dir.path().join("d.docx");
     let mut file = fs::File::create(&path).unwrap();
     docx_rs::Docx::new()
-        .add_paragraph(docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Lorem ipsum dolor")))
+        .add_paragraph(
+            docx_rs::Paragraph::new().add_run(docx_rs::Run::new().add_text("Lorem ipsum dolor")),
+        )
         .build()
         .pack(&mut file)
         .unwrap();
@@ -138,7 +140,11 @@ fn read_attachment_extracts_on_demand() {
     )
     .unwrap();
     let id: i64 = conn
-        .query_row("SELECT id FROM attachments WHERE message_id = 'm1'", [], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM attachments WHERE message_id = 'm1'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     let bytes = read_stored_file(&csv_path.to_string_lossy(), dir.path()).unwrap();
     let t = extract_and_cache(&conn, id, &bytes, "text/csv", "a.csv", false)
@@ -165,11 +171,14 @@ fn read_attachment_caches_in_db() {
     )
     .unwrap();
     let id: i64 = conn
-        .query_row("SELECT id FROM attachments WHERE message_id = 'm2'", [], |r| r.get(0))
+        .query_row(
+            "SELECT id FROM attachments WHERE message_id = 'm2'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     let bytes = read_stored_file(&csv_path.to_string_lossy(), dir.path()).unwrap();
-    extract_and_cache(&conn, id, &bytes, "text/csv", "b.csv", true)
-        .unwrap();
+    extract_and_cache(&conn, id, &bytes, "text/csv", "b.csv", true).unwrap();
     let cached: String = conn
         .query_row(
             "SELECT extracted_text FROM attachments WHERE id = ?1",

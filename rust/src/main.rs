@@ -4,17 +4,15 @@ use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::thread;
-use std::time::Duration;
 use zmail::{
     build_refresh_json_value, collect_stats, connect_imap_session, db, handle_request_line,
-    is_sync_lock_held, list_thread_messages, load_config, load_refresh_new_mail, print_refresh_text,
-    print_status_text, read_message_bytes, rebuild_from_maildir, resolve_search_json_format,
-    resolve_setup_email, resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd,
-    search_result_to_slim_json_row, search_with_meta, status,
+    is_sync_lock_held, list_thread_messages, load_config, load_refresh_new_mail,
+    print_refresh_text, print_status_text, read_message_bytes, rebuild_from_maildir,
+    resolve_search_json_format, resolve_setup_email, resolve_setup_password, resolve_sync_mailbox,
+    resolve_sync_since_ymd, search_result_to_slim_json_row, search_with_meta, status,
     sync_log_path, who, write_setup, LoadConfigOptions, SearchOptions,
-    SearchResultFormatPreference, SetupArgs, SyncDirection, SyncFileLogger, SyncLockRow, SyncOptions,
-    WhoOptions,
+    SearchResultFormatPreference, SetupArgs, SyncDirection, SyncFileLogger, SyncLockRow,
+    SyncOptions, WhoOptions,
 };
 
 #[derive(Parser)]
@@ -138,10 +136,7 @@ fn print_sync_foreground_metrics(r: &zmail::SyncResult) {
         "  messages:  {} new, {} fetched",
         r.synced, r.messages_fetched
     );
-    println!(
-        "  downloaded: {:.2} MB ({} bytes)",
-        mb, r.bytes_downloaded
-    );
+    println!("  downloaded: {:.2} MB ({} bytes)", mb, r.bytes_downloaded);
     println!("  bandwidth: {:.1} KB/s", kbps);
     println!(
         "  throughput: {} msg/min",
@@ -223,7 +218,10 @@ fn run_sync_foreground_refresh(
     Ok(r)
 }
 
-fn run_sync_background(cfg: &zmail::Config, since_override: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+fn run_sync_background(
+    cfg: &zmail::Config,
+    since_override: Option<&str>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let home = zmail_home_path();
     if cfg.imap_user.trim().is_empty() || cfg.imap_password.trim().is_empty() {
         return Err("IMAP user/password required. Run `zmail setup`.".into());
@@ -271,29 +269,42 @@ fn run_sync_background(cfg: &zmail::Config, since_override: Option<&str>) -> Res
     cmd.stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());
-    cmd.spawn()?;
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // Match Node `detached: true`: new session so the child is not tied to our TTY.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+
+    let pid = {
+        let child = cmd.spawn()?;
+        child.id()
+    };
 
     let log = sync_log_path(&home);
-    println!("Sync log: {}", log.display());
-
-    let start_count: i64 = {
+    let empty_index: i64 = {
         let c = db::open_file(cfg.db_path())?;
         c.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?
     };
-    let started = std::time::Instant::now();
-    while started.elapsed() < Duration::from_secs(60) {
-        thread::sleep(Duration::from_secs(2));
-        let c = db::open_file(cfg.db_path())?;
-        let count: i64 = c.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?;
-        if count > start_count {
-            println!("Sync running… {count} messages in index");
-            return Ok(());
-        }
+
+    println!();
+    println!("Sync running in background.");
+    println!("  PID:    {pid}");
+    println!("  Log:    {}", log.display());
+    println!("  Status: zmail status");
+    if empty_index == 0 {
+        println!();
+        println!("Initial sync can take a while — tail the log or run `zmail status`.");
+        println!("When messages appear, try: zmail search \"invoice\"  |  zmail who \"name\"");
     }
-    println!(
-        "Sync started in background. Check `zmail status` or tail {}",
-        log.display()
-    );
     Ok(())
 }
 
@@ -360,10 +371,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 print!("{}", p.body_text);
             }
         }
-        Commands::Thread {
-            thread_id,
-            json,
-        } => {
+        Commands::Thread { thread_id, json } => {
             let cfg = load_config(LoadConfigOptions {
                 home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
                 env: None,
@@ -374,7 +382,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", serde_json::to_string_pretty(&rows)?);
             } else {
                 for r in rows {
-                    println!("{}  {}  {}", &r.date[..r.date.len().min(10)], r.from_address, r.subject);
+                    println!(
+                        "{}  {}  {}",
+                        &r.date[..r.date.len().min(10)],
+                        r.from_address,
+                        r.subject
+                    );
                 }
             }
         }
@@ -385,7 +398,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
             let mut conn = db::open_file(cfg.db_path())?;
             let n = rebuild_from_maildir(&mut conn, cfg.maildir_path())?;
-            println!("Reindexed {n} messages from {}", cfg.maildir_path().display());
+            println!(
+                "Reindexed {n} messages from {}",
+                cfg.maildir_path().display()
+            );
         }
         Commands::Mcp => {
             let cfg = load_config(LoadConfigOptions {
@@ -489,11 +505,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                 }
             } else {
-                let fmt = resolve_search_json_format(
-                    run.results.len(),
-                    pref,
-                    true,
-                );
+                let fmt = resolve_search_json_format(run.results.len(), pref, true);
                 let rows: Vec<serde_json::Value> = match fmt {
                     zmail::SearchJsonFormat::Slim => run
                         .results
@@ -570,11 +582,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let conn = db::open_file(cfg.db_path())?;
             if json {
                 let s = status::get_status(&conn)?;
-                let latest_mail_ago = status::format_time_ago(
-                    s.date_range
-                        .as_ref()
-                        .map(|(_, l)| l.as_str()),
-                );
+                let latest_mail_ago =
+                    status::format_time_ago(s.date_range.as_ref().map(|(_, l)| l.as_str()));
                 let last_sync_ago = if s.sync.is_running {
                     None
                 } else {

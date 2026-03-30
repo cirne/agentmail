@@ -247,7 +247,10 @@ fn maildir_sidecar_written() {
 
 #[test]
 fn filter_uids_after_last() {
-    assert_eq!(filter_uids_after(&[98, 99, 100, 101, 102], 100), vec![101, 102]);
+    assert_eq!(
+        filter_uids_after(&[98, 99, 100, 101, 102], 100),
+        vec![101, 102]
+    );
 }
 
 #[test]

@@ -169,10 +169,7 @@ pub fn parse_raw_message(raw: &[u8]) -> ParsedMessage {
     );
 
     let (body_text, body_html) = if let Some(t) = msg.body_text(0) {
-        (
-            t.into_owned(),
-            msg.body_html(0).map(|h| h.into_owned()),
-        )
+        (t.into_owned(), msg.body_html(0).map(|h| h.into_owned()))
     } else if let Some(h) = msg.body_html(0) {
         let html = h.into_owned();
         let md = htmd::convert(&html).unwrap_or(html.clone());

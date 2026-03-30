@@ -31,7 +31,7 @@ fn xlsx_to_csv(bytes: &[u8]) -> Option<String> {
     let range = wb.worksheet_range(&name).ok()?;
     let mut out = String::new();
     for row in range.rows() {
-        let parts: Vec<String> = row.iter().map(|c| format_cell(c)).collect();
+        let parts: Vec<String> = row.iter().map(format_cell).collect();
         out.push_str(&parts.join(","));
         out.push('\n');
     }
@@ -88,7 +88,10 @@ pub struct AttachmentListRow {
     pub index: i64,
 }
 
-pub fn list_attachments_for_message(conn: &Connection, message_id: &str) -> rusqlite::Result<Vec<AttachmentListRow>> {
+pub fn list_attachments_for_message(
+    conn: &Connection,
+    message_id: &str,
+) -> rusqlite::Result<Vec<AttachmentListRow>> {
     let mut stmt = conn.prepare(
         "SELECT id, filename, mime_type, size, extracted_text FROM attachments WHERE message_id = ?1 ORDER BY id",
     )?;

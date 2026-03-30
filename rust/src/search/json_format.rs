@@ -86,11 +86,7 @@ mod tests {
     #[test]
     fn resolve_auto_never_slim_when_disabled() {
         assert_eq!(
-            resolve_search_json_format(
-                100,
-                SearchResultFormatPreference::Auto,
-                false,
-            ),
+            resolve_search_json_format(100, SearchResultFormatPreference::Auto, false,),
             SearchJsonFormat::Full
         );
     }

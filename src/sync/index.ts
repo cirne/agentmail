@@ -350,6 +350,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
             ...phaseTimings,
             totalMs: durationMs,
           });
+          fileLogger.info("Sync run finished", { outcome: "ok", success: true });
           fileLogger.close();
           restoreLogger();
           return result;
@@ -611,6 +612,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
           ...phaseTimings,
           totalMs: durationMs,
         });
+        fileLogger.info("Sync run finished", { outcome: "ok", success: true });
         fileLogger.close();
         restoreLogger();
         return result;
@@ -874,6 +876,7 @@ export async function runSync(options?: SyncOptions): Promise<SyncResult> {
         ...phaseTimings,
         totalMs: durationMs,
       });
+      fileLogger.info("Sync run finished", { outcome: "ok", success: true });
       
       // Note: People profiles are built dynamically on-demand (no pre-computed index)
       // This ensures results are always current and improve as more data is indexed.

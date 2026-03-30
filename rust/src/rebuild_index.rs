@@ -33,9 +33,7 @@ fn collect_eml_paths(root: &Path) -> Vec<PathBuf> {
 
 /// Clear indexed mail (keeps schema); then re-import every `.eml` under `maildir_root`.
 pub fn rebuild_from_maildir(conn: &mut Connection, maildir_root: &Path) -> rusqlite::Result<usize> {
-    conn.execute_batch(
-        "DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;",
-    )?;
+    conn.execute_batch("DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;")?;
 
     let paths = collect_eml_paths(maildir_root);
     let parsed: Vec<(PathBuf, Vec<u8>)> = paths
@@ -67,10 +65,11 @@ pub fn rebuild_from_maildir(conn: &mut Connection, maildir_root: &Path) -> rusql
 }
 
 /// Same as [`rebuild_from_maildir`] but single-threaded parse (for tests).
-pub fn rebuild_from_maildir_sequential(conn: &mut Connection, maildir_root: &Path) -> rusqlite::Result<usize> {
-    conn.execute_batch(
-        "DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;",
-    )?;
+pub fn rebuild_from_maildir_sequential(
+    conn: &mut Connection,
+    maildir_root: &Path,
+) -> rusqlite::Result<usize> {
+    conn.execute_batch("DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;")?;
     let paths = collect_eml_paths(maildir_root);
     let tx = conn.transaction()?;
     let mut n = 0usize;

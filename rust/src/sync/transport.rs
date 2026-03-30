@@ -1,8 +1,8 @@
 //! Injectable IMAP transport for sync (`run_sync`) and tests.
 
-use imap::Session;
 use imap::types::Mailbox;
 use imap::Connection;
+use imap::Session;
 
 use super::error::RunSyncError;
 
@@ -27,7 +27,10 @@ pub trait SyncImapTransport {
     /// Returns UIDVALIDITY after EXAMINE (0 if missing).
     fn examine_mailbox(&mut self, mailbox: &str) -> Result<u32, RunSyncError>;
     fn uid_search_keys(&mut self, query: &str) -> Result<Vec<u32>, RunSyncError>;
-    fn uid_fetch_rfc822_batch(&mut self, uid_csv: &str) -> Result<Vec<FetchedMessage>, RunSyncError>;
+    fn uid_fetch_rfc822_batch(
+        &mut self,
+        uid_csv: &str,
+    ) -> Result<Vec<FetchedMessage>, RunSyncError>;
 }
 
 fn mailbox_to_status(m: &Mailbox) -> ImapStatusData {
@@ -69,7 +72,10 @@ impl SyncImapTransport for RealImapTransport<'_> {
         Ok(v)
     }
 
-    fn uid_fetch_rfc822_batch(&mut self, uid_csv: &str) -> Result<Vec<FetchedMessage>, RunSyncError> {
+    fn uid_fetch_rfc822_batch(
+        &mut self,
+        uid_csv: &str,
+    ) -> Result<Vec<FetchedMessage>, RunSyncError> {
         if uid_csv.is_empty() {
             return Ok(Vec::new());
         }
@@ -100,11 +106,7 @@ impl SyncImapTransport for RealImapTransport<'_> {
                 .gmail_labels()
                 .map(|it| it.map(str::to_string).collect())
                 .unwrap_or_default();
-            out.push(FetchedMessage {
-                uid,
-                raw,
-                labels,
-            });
+            out.push(FetchedMessage { uid, raw, labels });
         }
         Ok(out)
     }
@@ -133,11 +135,11 @@ impl SyncImapTransport for FakeImapTransport {
         Ok(self.search_uids.clone())
     }
 
-    fn uid_fetch_rfc822_batch(&mut self, _uid_csv: &str) -> Result<Vec<FetchedMessage>, RunSyncError> {
-        Ok(self
-            .fetch_batches
-            .pop_front()
-            .unwrap_or_default())
+    fn uid_fetch_rfc822_batch(
+        &mut self,
+        _uid_csv: &str,
+    ) -> Result<Vec<FetchedMessage>, RunSyncError> {
+        Ok(self.fetch_batches.pop_front().unwrap_or_default())
     }
 }
 

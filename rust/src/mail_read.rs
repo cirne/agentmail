@@ -12,7 +12,11 @@ pub fn resolve_raw_path(raw_path: &str, data_dir: &Path) -> PathBuf {
     }
 }
 
-pub fn read_message_bytes(conn: &Connection, message_id: &str, data_dir: &Path) -> rusqlite::Result<std::io::Result<Vec<u8>>> {
+pub fn read_message_bytes(
+    conn: &Connection,
+    message_id: &str,
+    data_dir: &Path,
+) -> rusqlite::Result<std::io::Result<Vec<u8>>> {
     let raw: String = conn.query_row(
         "SELECT raw_path FROM messages WHERE message_id = ?1",
         [message_id],

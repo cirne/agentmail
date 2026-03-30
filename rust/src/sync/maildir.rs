@@ -29,7 +29,10 @@ pub fn write_maildir_message(
     let meta = MetaSidecar {
         labels: labels.to_vec(),
     };
-    fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".into()))?;
+    fs::write(
+        &meta_path,
+        serde_json::to_string_pretty(&meta).unwrap_or_else(|_| "{}".into()),
+    )?;
     let relative_raw_path = format!("maildir/cur/{basename}.eml");
     Ok(MaildirWrite {
         eml_path,

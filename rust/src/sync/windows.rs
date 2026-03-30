@@ -31,7 +31,10 @@ pub fn same_calendar_day(a: &str, b: &str) -> bool {
 }
 
 /// Load `last_uid` for folder from `sync_state`, if any.
-pub fn last_uid_for_folder(conn: &Connection, folder: &str) -> Result<Option<i64>, rusqlite::Error> {
+pub fn last_uid_for_folder(
+    conn: &Connection,
+    folder: &str,
+) -> Result<Option<i64>, rusqlite::Error> {
     conn.query_row(
         "SELECT last_uid FROM sync_state WHERE folder = ?1",
         [folder],

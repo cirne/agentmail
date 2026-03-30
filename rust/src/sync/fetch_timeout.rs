@@ -11,7 +11,8 @@ const FETCH_ALL_TIMEOUT_MAX_MS: u64 = 300_000;
 pub const FETCH_ALL_TIMEOUT_EXTRA_ATTEMPTS: u32 = 1;
 
 pub fn compute_fetch_all_timeout_ms(batch_len: usize) -> u64 {
-    let scaled = 30_000u64.saturating_add((batch_len as u64).saturating_mul(FETCH_ALL_TIMEOUT_PER_UID_MS));
+    let scaled =
+        30_000u64.saturating_add((batch_len as u64).saturating_mul(FETCH_ALL_TIMEOUT_PER_UID_MS));
     scaled.clamp(FETCH_ALL_TIMEOUT_MIN_MS, FETCH_ALL_TIMEOUT_MAX_MS)
 }
 

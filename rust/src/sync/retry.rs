@@ -26,7 +26,11 @@ impl RetryPolicy {
 /// Runs `op` until success or `max_attempts` is exhausted. Sleeps with exponential backoff between tries.
 ///
 /// `on_retry` is invoked after each failure when another attempt will follow (`attempt` is 1-based).
-pub fn retry_with_backoff<T, E, F, H>(policy: &RetryPolicy, mut op: F, mut on_retry: H) -> Result<T, E>
+pub fn retry_with_backoff<T, E, F, H>(
+    policy: &RetryPolicy,
+    mut op: F,
+    mut on_retry: H,
+) -> Result<T, E>
 where
     F: FnMut() -> Result<T, E>,
     H: FnMut(usize, &E, Duration),

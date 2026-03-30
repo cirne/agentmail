@@ -15,25 +15,18 @@ pub struct ExtractedSignature {
     pub alt_emails: Vec<String>,
 }
 
-static RE_URL: LazyLock<Regex> =
-    LazyLock::new(|| Regex::new(r"(?i)https?://[^\s]+").unwrap());
+static RE_URL: LazyLock<Regex> = LazyLock::new(|| Regex::new(r"(?i)https?://[^\s]+").unwrap());
 static RE_EMAIL: LazyLock<Regex> =
     LazyLock::new(|| Regex::new(r"[\w.+-]+@[\w.-]+\.\w{2,}").unwrap());
-static RE_PHONE_CANDIDATE: LazyLock<Regex> = LazyLock::new(|| {
-    Regex::new(r"\(?\s*\d{3}\s*\)?[-.\s]*\d{3}[-.\s]*\d{4}").unwrap()
-});
+static RE_PHONE_CANDIDATE: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"\(?\s*\d{3}\s*\)?[-.\s]*\d{3}[-.\s]*\d{4}").unwrap());
 
 fn try_parse_us_phone(slice: &str) -> Option<String> {
     let n = phonenumber::parse(Some(country::Id::US), slice).ok()?;
     if !n.is_valid() {
         return None;
     }
-    Some(
-        n.format()
-            .mode(Mode::National)
-            .to_string()
-            .replace(' ', ""),
-    )
+    Some(n.format().mode(Mode::National).to_string().replace(' ', ""))
 }
 
 /// First plausible US phone in text (libphonenumber validation when possible).
@@ -48,8 +41,10 @@ pub fn extract_phone_from_text(text: &str) -> Option<String> {
 
 /// Structured parse of a signature block (already isolated).
 pub fn parse_signature_block(signature_text: &str, sender_address: &str) -> ExtractedSignature {
-    let mut out = ExtractedSignature::default();
-    out.phone = extract_phone_from_text(signature_text);
+    let mut out = ExtractedSignature {
+        phone: extract_phone_from_text(signature_text),
+        ..Default::default()
+    };
 
     for cap in RE_URL.captures_iter(signature_text) {
         let u = cap.get(0).unwrap().as_str().trim().to_string();
@@ -67,7 +62,11 @@ pub fn parse_signature_block(signature_text: &str, sender_address: &str) -> Extr
         }
     }
 
-    for line in signature_text.lines().map(str::trim).filter(|l| !l.is_empty()) {
+    for line in signature_text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+    {
         if line.len() > 80 {
             continue;
         }

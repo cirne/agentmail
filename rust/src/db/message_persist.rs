@@ -75,8 +75,18 @@ fn label_noise(labels_json: &str) -> bool {
         let lower = label.to_lowercase();
         matches!(
             lower.as_str(),
-            "promotions" | "\\promotions" | "social" | "\\social" | "forums" | "\\forums"
-                | "spam" | "\\spam" | "junk" | "\\junk" | "bulk" | "\\bulk"
+            "promotions"
+                | "\\promotions"
+                | "social"
+                | "\\social"
+                | "forums"
+                | "\\forums"
+                | "spam"
+                | "\\spam"
+                | "junk"
+                | "\\junk"
+                | "bulk"
+                | "\\bulk"
         ) || lower.starts_with("[superhuman]/ai/") && {
             let cat = &lower["[superhuman]/ai/".len()..];
             matches!(cat, "marketing" | "news" | "social" | "pitch")
@@ -141,21 +151,16 @@ pub fn persist_attachments_from_parsed(
         return Ok(());
     }
     let attachments_dir: PathBuf = maildir_path.join("attachments").join(message_id);
-    create_dir_all(&attachments_dir).map_err(|e| {
-        rusqlite::Error::ToSqlConversionFailure(Box::new(e))
-    })?;
+    create_dir_all(&attachments_dir)
+        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
 
     for att in attachments {
         let unique = ensure_unique_filename(&attachments_dir, &att.filename);
         let disk_path = attachments_dir.join(&unique);
-        write(&disk_path, &att.content).map_err(|e| {
-            rusqlite::Error::ToSqlConversionFailure(Box::new(e))
-        })?;
+        write(&disk_path, &att.content)
+            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
         let stored_path = format!("attachments/{message_id}/{unique}");
-        let ext = unique
-            .rsplit_once('.')
-            .map(|(_, e)| e)
-            .unwrap_or("");
+        let ext = unique.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
         let mime = if !att.mime_type.is_empty() {
             att.mime_type.as_str()
         } else {

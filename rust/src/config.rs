@@ -58,7 +58,10 @@ pub struct ResolvedSmtp {
 }
 
 /// Infer SMTP from IMAP host (see `src/send/smtp-resolve.ts`).
-pub fn resolve_smtp_settings(imap_host: &str, overrides: Option<&SmtpJson>) -> Result<ResolvedSmtp, String> {
+pub fn resolve_smtp_settings(
+    imap_host: &str,
+    overrides: Option<&SmtpJson>,
+) -> Result<ResolvedSmtp, String> {
     let h = imap_host.trim().to_lowercase();
     let base: Option<ResolvedSmtp> = if h == "imap.gmail.com" {
         Some(ResolvedSmtp {
@@ -66,15 +69,12 @@ pub fn resolve_smtp_settings(imap_host: &str, overrides: Option<&SmtpJson>) -> R
             port: 587,
             secure: false,
         })
-    } else if h.starts_with("imap.") {
-        let rest = &h["imap.".len()..];
-        Some(ResolvedSmtp {
+    } else {
+        h.strip_prefix("imap.").map(|rest| ResolvedSmtp {
             host: format!("smtp.{rest}"),
             port: 587,
             secure: false,
         })
-    } else {
-        None
     };
 
     let o = overrides;
@@ -82,11 +82,11 @@ pub fn resolve_smtp_settings(imap_host: &str, overrides: Option<&SmtpJson>) -> R
         Some(b) => b,
         None => {
             if let Some(s) = o {
-                if s.host.is_some() && s.port.is_some() && s.secure.is_some() {
+                if let (Some(host), Some(port), Some(secure)) = (&s.host, s.port, s.secure) {
                     return Ok(ResolvedSmtp {
-                        host: s.host.clone().unwrap(),
-                        port: s.port.unwrap(),
-                        secure: s.secure.unwrap(),
+                        host: host.clone(),
+                        port,
+                        secure,
                     });
                 }
             }
@@ -187,12 +187,18 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
     let env_file = load_env_file(&home);
     let json = load_config_json(&home);
 
-    let process_env: HashMap<String, String> = opts.env.unwrap_or_else(|| {
-        std::env::vars().collect()
-    });
+    let process_env: HashMap<String, String> =
+        opts.env.unwrap_or_else(|| std::env::vars().collect());
 
-    fn effective(key: &str, env_file: &HashMap<String, String>, process: &HashMap<String, String>) -> Option<String> {
-        process.get(key).cloned().or_else(|| env_file.get(key).cloned())
+    fn effective(
+        key: &str,
+        env_file: &HashMap<String, String>,
+        process: &HashMap<String, String>,
+    ) -> Option<String> {
+        process
+            .get(key)
+            .cloned()
+            .or_else(|| env_file.get(key).cloned())
     }
 
     let imap_host = json
@@ -211,7 +217,8 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
         .or_else(|| effective("ZMAIL_EMAIL", &env_file, &process_env))
         .unwrap_or_default();
 
-    let imap_password = effective("ZMAIL_IMAP_PASSWORD", &env_file, &process_env).unwrap_or_default();
+    let imap_password =
+        effective("ZMAIL_IMAP_PASSWORD", &env_file, &process_env).unwrap_or_default();
 
     let data_dir = home.join("data");
     let db_path = data_dir.join("zmail.db");

@@ -85,9 +85,7 @@ pub fn parse_search_query(raw: &str) -> ParsedSearchQuery {
         let re_trim = Regex::new(r"(?i)^\s*(OR|AND)\s+|\s+(OR|AND)\s*$").unwrap();
         query = re_trim.replace_all(&query, "").trim().to_string();
     }
-    query = query
-        .replace(" or ", " OR ")
-        .replace(" and ", " AND ");
+    query = query.replace(" or ", " OR ").replace(" and ", " AND ");
     result.query = query;
     result
 }

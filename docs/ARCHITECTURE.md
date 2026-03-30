@@ -5,6 +5,8 @@ See [VISION.md](./VISION.md) for the product vision and goals.
 
 **Why one file:** ADRs cross-reference each other heavily (e.g. ADR-016 → ADR-017 → ADR-020) and an agent making an architectural decision benefits from scanning the full decision log for context and shape, not just one answer. Keeping everything here also means grep and semantic search find everything without following links. If this file grows unwieldy (say, past ADR-030), split into individual files under `docs/adr/` with an index table here — same pattern as [OPPORTUNITIES.md](./OPPORTUNITIES.md).
 
+**Rust port:** Remaining parity work, intentional differences from Node, and ecosystem risks — [RUST_PORT.md](./RUST_PORT.md) (companion to [ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover)).
+
 ---
 
 ## Decision Log
@@ -568,16 +570,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Checkpoint (in-repo):** Area-named integration tests under **`rust/tests/`** (plus `#[cfg(test)]` unit tests in `rust/src/`) run via **`cargo test`** — sync/index/search/who/attachments/send-drafts/MCP/ask-shaped coverage against temp dirs; not a substitute for production bakeoffs on real mailboxes.
 
-**Remaining work (cutover and parity):**
-
-| Area | Status / next steps |
-|------|---------------------|
-| **Distribution** | No crates.io/npm replacement yet; decide single binary vs dual publish, install script, version skew with `@cirne/zmail`. See [OPP-030](opportunities/OPP-030-rust-port-cutover.md). |
-| **Production validation** | Run Rust binary against real `ZMAIL_HOME` + IMAP; compare outputs to Node CLI for **sync/refresh**, search/who/read/thread/MCP JSON shapes edge cases. |
-| **CI** | Add **`rust/`** job: `cargo clippy`, `cargo test` (stable Rust). |
-| **Docs & skill** | After cutover: update `skills/zmail/`, install.sh, and `AGENTS.md` primary install path; until then, Rust is **developer-only** (see [AGENTS.md](../AGENTS.md#rust-port-in-repo)). |
-| **BUG-025 / MCP parity** | Node MCP still tracks [BUG-025](bugs/BUG-025-mcp-cli-parity-alignment-skill.md); Rust MCP tests lock param keys — extend if CLI adds tools or renames params. |
-| **Schema** | Same no-migration philosophy (ADR-021); any Rust-only schema drift must bump version and document alongside TS. |
+**Master tracker:** **[RUST_PORT.md](RUST_PORT.md)** — remaining CLI/MCP/feature gaps vs Node, intentional differences (SQLite bundling, IMAP stack, parallelism model), known risks (e.g. `imap` crate pre-1.0, attachment stack parity), production validation, and pointers to [BUG-025](bugs/BUG-025-mcp-cli-parity-alignment-skill.md) / [BUG-026](bugs/BUG-026-who-nicknames-i18n-and-query-contract.md). High-level **packaging and cutover sequencing** stay in [OPP-030](opportunities/OPP-030-rust-port-cutover.md). **CI:** [`.github/workflows/rust-ci.yml`](../.github/workflows/rust-ci.yml), [`.github/workflows/rust-release.yml`](../.github/workflows/rust-release.yml), [`.github/workflows/rust-nightly.yml`](../.github/workflows/rust-nightly.yml).
 
 **Rationale:** Rust removes the native Node addon / `NODE_MODULE_VERSION` class of failures (OPP-024), improves single-binary distribution, and keeps SQLite file-backed. Parallel development avoids a flag-day rewrite; cutover is a separate product/packaging decision ([OPP-030](opportunities/OPP-030-rust-port-cutover.md)).
 
@@ -585,4 +578,4 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ## Open Questions
 
-- **Rust cutover packaging:** How end users install the Rust binary (and whether npm remains a thin wrapper or is retired) — tracked in [ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover) and [OPP-030](opportunities/OPP-030-rust-port-cutover.md).
+- **Rust cutover packaging:** How end users install the Rust binary (and whether npm remains a thin wrapper or is retired) — tracked in [ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover), [RUST_PORT.md](RUST_PORT.md), and [OPP-030](opportunities/OPP-030-rust-port-cutover.md).

@@ -4,7 +4,9 @@ use std::collections::HashMap;
 use std::process::Command;
 
 use tempfile::tempdir;
-use zmail::{journal_mode, list_user_tables, load_config, open_file, open_memory, LoadConfigOptions};
+use zmail::{
+    journal_mode, list_user_tables, load_config, open_file, open_memory, LoadConfigOptions,
+};
 
 #[test]
 fn schema_creates_all_tables() {
@@ -71,7 +73,7 @@ fn config_reads_env_overrides() {
 #[test]
 fn status_exits_zero() {
     let dir = tempdir().unwrap();
-    let bin = option_env!("CARGO_BIN_EXE_zmail").expect("CARGO_BIN_EXE_zmail set by cargo test");
+    let bin = env!("CARGO_BIN_EXE_zmail");
     let status = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
         .args(["status"])

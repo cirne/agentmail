@@ -62,9 +62,10 @@ impl SyncFileLogger {
     }
 
     fn write_line(&self, line: &str) -> std::io::Result<()> {
-        let mut f = self.file.lock().map_err(|e| {
-            std::io::Error::other(format!("log mutex: {e}"))
-        })?;
+        let mut f = self
+            .file
+            .lock()
+            .map_err(|e| std::io::Error::other(format!("log mutex: {e}")))?;
         f.write_all(line.as_bytes())?;
         f.flush()?;
         Ok(())

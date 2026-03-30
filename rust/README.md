@@ -2,7 +2,9 @@
 
 In-repo port of zmail: IMAP sync, SQLite + FTS5, CLI, MCP stdio, attachments, SMTP/drafts, and LLM-shaped commands. Targets the same **`ZMAIL_HOME`** / **`~/.zmail`** layout as the Node implementation.
 
-**Docs:** [ADR-025](../docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover) (decisions, remaining work), [AGENTS.md](../AGENTS.md#rust-port-in-repo) (how to run from the monorepo), [OPP-030](../docs/opportunities/OPP-030-rust-port-cutover.md) (packaging cutover).
+**Docs:** [RUST_PORT.md](../docs/RUST_PORT.md) (remaining parity, intentional differences, risks), [ADR-025](../docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover) (decision record), [AGENTS.md](../AGENTS.md#rust-port-in-repo) (how to run from the monorepo), [OPP-030](../docs/opportunities/OPP-030-rust-port-cutover.md) (packaging cutover).
+
+**CI:** [`.github/workflows/rust-ci.yml`](../.github/workflows/rust-ci.yml) (fmt, clippy, test, release build on Ubuntu). Releases: `rust-release.yml` (tag `v*`), nightly binaries: `rust-nightly.yml` (branch `main`).
 
 ```bash
 cargo test

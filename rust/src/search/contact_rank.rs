@@ -2,8 +2,8 @@
 
 use rusqlite::Connection;
 
-use super::normalize::normalize_address;
 use super::noreply::is_noreply;
+use super::normalize::normalize_address;
 use super::types::SearchResult;
 
 const WEIGHT_SENT: f64 = 2.2;
@@ -63,12 +63,8 @@ fn parse_json_addresses(raw: &str) -> Vec<String> {
 }
 
 fn owner_sees_message(owner_norm: &str, to_raw: &[String], cc_raw: &[String]) -> bool {
-    to_raw
-        .iter()
-        .any(|a| normalize_address(a) == owner_norm)
-        || cc_raw
-            .iter()
-            .any(|a| normalize_address(a) == owner_norm)
+    to_raw.iter().any(|a| normalize_address(a) == owner_norm)
+        || cc_raw.iter().any(|a| normalize_address(a) == owner_norm)
 }
 
 #[derive(Clone)]
@@ -141,7 +137,8 @@ fn compute_owner_centric_stats(
         }
     }
 
-    let mut stats: std::collections::HashMap<String, ContactFields> = std::collections::HashMap::new();
+    let mut stats: std::collections::HashMap<String, ContactFields> =
+        std::collections::HashMap::new();
     for c in &candidates {
         stats.insert(c.clone(), ContactFields::default());
     }
@@ -160,11 +157,12 @@ fn compute_owner_centric_stats(
         let to_norm: Vec<String> = to_raw.iter().map(|x| normalize_address(x)).collect();
         let cc_norm: Vec<String> = cc_raw.iter().map(|x| normalize_address(x)).collect();
 
-        if candidates.contains(&from_n) && owner_sees_message(&owner_norm, &to_raw, &cc_raw) {
-            if !is_noreply(&m.from_address) {
-                if let Some(s) = stats.get_mut(&from_n) {
-                    s.received_count += 1;
-                }
+        if candidates.contains(&from_n)
+            && owner_sees_message(&owner_norm, &to_raw, &cc_raw)
+            && !is_noreply(&m.from_address)
+        {
+            if let Some(s) = stats.get_mut(&from_n) {
+                s.received_count += 1;
             }
         }
 
@@ -216,7 +214,6 @@ fn compute_owner_centric_stats(
                 }
             }
         }
-
     }
 
     Ok(stats)
@@ -253,8 +250,10 @@ pub fn sort_rows_by_sender_contact_rank<T: Clone>(
     if rows.is_empty() {
         return Ok(rows);
     }
-    let norms: std::collections::HashSet<String> =
-        rows.iter().map(|r| normalize_address(from_address(r))).collect();
+    let norms: std::collections::HashSet<String> = rows
+        .iter()
+        .map(|r| normalize_address(from_address(r)))
+        .collect();
     let norms_vec: Vec<String> = norms.into_iter().collect();
     let rank_map = contact_rank_map_for_addresses(conn, owner, &norms_vec)?;
     let mut out: Vec<(T, f64, String)> = rows
@@ -323,7 +322,7 @@ pub fn apply_contact_rank_rerank(
     }
 
     let mut all_addresses = std::collections::HashSet::new();
-    for (_mid, (from_a, to_j, cc_j)) in &by_id {
+    for (from_a, to_j, cc_j) in by_id.values() {
         all_addresses.insert(normalize_address(from_a));
         for a in parse_json_addresses(to_j) {
             all_addresses.insert(normalize_address(&a));
