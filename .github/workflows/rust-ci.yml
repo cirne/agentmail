@@ -8,6 +8,7 @@ on:
   push:
     branches:
       - main
+      - rust
     paths:
       - "rust/**"
       - ".github/workflows/rust-ci.yml"

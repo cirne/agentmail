@@ -12,7 +12,7 @@ on:
       - ".nvmrc"
       - ".github/workflows/ci.yml"
   push:
-    branches: [main]
+    branches: [main, rust]
     paths:
       - "src/**"
       - "package.json"
