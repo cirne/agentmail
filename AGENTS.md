@@ -1,19 +1,23 @@
 # zmail — Agent Guide
 
-**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. **Primary in-repo implementation:** **Rust** at the repository root (`cargo build`, `cargo test`). **Reference / published npm package:** **Node.js 20+** under **`node/`** (`tsx` dev, `npm install -g @cirne/zmail`; see [OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). **Outbound mail** uses SMTP send-as-user (`zmail send`, `zmail draft`, MCP tools); optional `ZMAIL_SEND_TEST=1` restricts recipients for dev/test (see [ADR-024](docs/ARCHITECTURE.md#adr-024-outbound-email--smtp-send-as-user--local-drafts)).
+**zmail** is an agent-first email system. It syncs email from IMAP providers, indexes it locally, and exposes it as a queryable dataset via a CLI and MCP server. **Primary implementation:** **Rust** at the repository root (`cargo build`, `cargo test`). **End-user install:** prebuilt **Rust** binaries from **GitHub Releases** via **`install.sh`** (no Node). **`node/`** remains a **TypeScript reference** and optional **`@cirne/zmail`** npm artifact for parity work ([OPP-007](docs/opportunities/archive/OPP-007-packaging-npm-homebrew.md)). **Outbound mail** uses SMTP send-as-user (`zmail send`, `zmail draft`, MCP tools); optional `ZMAIL_SEND_TEST=1` restricts recipients for dev/test (see [ADR-024](docs/ARCHITECTURE.md#adr-024-outbound-email--smtp-send-as-user--local-drafts)).
 
-**Quick install (Rust binary from source):**
+**Quick install (prebuilt Rust binary — default):**
+```bash
+curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
+# If there is no stable Release yet, the script installs from the nightly prerelease automatically.
+# Force nightly: bash -s -- --nightly   or   ZMAIL_CHANNEL=nightly
+# Override install dir: INSTALL_PREFIX=~/bin curl -fsSL ... | bash
+```
+
+**From source (dev / contributors):**
 ```bash
 cargo build --release
 # ./target/release/zmail --help
 # Optional: ./install-rust-binary.sh
 ```
 
-**Quick install (npm — Node reference build):**
-```bash
-npm install -g @cirne/zmail
-# Alternative: curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
-```
+**Legacy npm CLI (reference / parity only):** `npm install -g @cirne/zmail` or `bash node/install-npm-legacy.sh` — requires Node 20+.
 
 ## Key documents
 
@@ -30,7 +34,7 @@ npm install -g @cirne/zmail
 
 **Rust (default in this repo):** workspace root — `clap` CLI, **`rusqlite`** with bundled SQLite, **`imap`** crate, FTS5, MCP stdio. **Dev:** `cargo run`, `cargo test`; **release:** `cargo build --release` → `./target/release/zmail`. See **[ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)** and **[docs/RUST_README.md](docs/RUST_README.md)**.
 
-**Node (reference / npm):** **`node/`** — TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native addon, OS page cache — not a whole-DB-in-RAM WASM/sql.js model), FTS5, imapflow. Application code uses an **async** `SqliteDatabase` facade (`prepare` / `get` / `all` / `run` / `exec` return Promises; see `~/db` under `node/src/`). Dev: `tsx` from `node/`; install: `npm install -g @cirne/zmail` (or `cd node && npm run build` → `node/dist/index.js`).
+**Node (reference / npm):** **`node/`** — TypeScript parity and **`@cirne/zmail`** on npm; **not** the default install path. **file-backed** SQLite via **`better-sqlite3`**, FTS5, imapflow. Dev: `tsx` from `node/`; `cd node && npm run build` → `node/dist/index.js`. Global npm install is legacy for parity; prefer **`install.sh`** or **`cargo build --release`**.
 
 **Native addon ABI (Node only):** `better-sqlite3` ships a `.node` binary for Node’s `NODE_MODULE_VERSION`. On first `zmail` run, **`ensure-better-sqlite-native`** loads the addon; if the ABI is wrong, it runs **`npm rebuild better-sqlite3`** from the install directory (same as manual `npm rebuild` with the `node` that runs `zmail`). **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
@@ -46,7 +50,7 @@ cargo run -- refresh
 cargo build --release && ./target/release/zmail status
 ```
 
-If both **`zmail`** (from `npm install -g @cirne/zmail`) and **`./target/release/zmail`** are on your **`PATH`**, the shell resolves whichever comes first — use an explicit path or alias when comparing behavior.
+If multiple **`zmail`** binaries are on **`PATH`** (e.g. npm global + `~/.local/bin`), the shell resolves whichever comes first — use an explicit path or alias when comparing behavior.
 
 ## Node.js version (nvm)
 
