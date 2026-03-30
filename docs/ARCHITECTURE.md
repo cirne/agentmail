@@ -110,7 +110,7 @@ zmail mcp                       ← start MCP server (stdio)
 
 MCP remains the right interface for remote/hosted deployments where the index lives on a server the agent can't shell into.
 
-Both modes hit the same SQLite index. The binary is the same artifact.
+Both modes hit the same SQLite index. **Published distribution today** is the Node-based CLI (`npm install -g @cirne/zmail`; ADR-008). **In-repo Rust port** (`rust/`, ADR-025) targets the same CLI/MCP contract and `~/.zmail` layout for eventual cutover.
 
 **See also:** [OPP-004: People Index and Writable Contacts](opportunities/archive/OPP-004-people-index-contacts.md) — roadmap for people index at index time, `zmail contact`, and MCP who/contact tools.
 
@@ -156,6 +156,8 @@ FTS5 virtual tables on `body_text` and `subject` live in the same `.db` file.
 ### ADR-008: Language & Runtime — TypeScript + Node.js
 
 **Decision:** TypeScript on Node.js 20+. Dev: `tsx` runs source directly; distribution: `tsc` + `tsc-alias` → `dist/`, install via `npm install -g @cirne/zmail` (see [OPP-007](opportunities/archive/OPP-007-packaging-npm-homebrew.md)).
+
+**Parallel implementation:** A **Rust** port lives under **`rust/`** ([ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover)). Until packaging cutover, **this ADR remains authoritative** for the published npm artifact and for agent-facing install docs (`AGENTS.md`, `skills/zmail/`).
 
 **Rationale:**
 - Node.js is ubiquitous; no separate runtime (Bun) required. Aligns with OpenClaw/Claude Code (`npm i -g`).
@@ -558,6 +560,29 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ---
 
+### ADR-025: Rust Port — Parallel Implementation (Pre-Cutover)
+
+**Decision:** Maintain a **Rust** implementation in **`rust/`** alongside the existing **Node + TypeScript** tree at repo root. Both target the same **agent contract**: `ZMAIL_HOME` / `~/.zmail` (`config.json`, `.env`, `data/`, maildir layout), FTS5 SQLite schema semantics, CLI subcommands, and MCP stdio tools. **`rust/target/`** is gitignored; CI/dev run **`cargo test`** from **`rust/`**.
+
+**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests `rust/tests/phase1.rs` … **`phase9.rs`** (config/schema/status through LLM-shaped flows and MCP param stability).
+
+**Checkpoint (in-repo):** Phases 1–9 exercised in **`cargo test`** — sync/index/search/who/attachments/send-drafts/MCP/ask-shaped tests against temp dirs; not a substitute for production bakeoffs on real mailboxes.
+
+**Remaining work (cutover and parity):**
+
+| Area | Status / next steps |
+|------|---------------------|
+| **Distribution** | No crates.io/npm replacement yet; decide single binary vs dual publish, install script, version skew with `@cirne/zmail`. See [OPP-030](opportunities/OPP-030-rust-port-cutover.md). |
+| **Production validation** | Run Rust binary against real `ZMAIL_HOME` + IMAP; compare outputs to Node CLI for search/who/read/thread/MCP JSON shapes edge cases. |
+| **CI** | Add **`rust/`** job: `cargo clippy`, `cargo test` (stable Rust). |
+| **Docs & skill** | After cutover: update `skills/zmail/`, install.sh, and `AGENTS.md` primary install path; until then, Rust is **developer-only** (see [AGENTS.md](../AGENTS.md#rust-port-in-repo)). |
+| **BUG-025 / MCP parity** | Node MCP still tracks [BUG-025](bugs/BUG-025-mcp-cli-parity-alignment-skill.md); Rust MCP tests lock param keys — extend if CLI adds tools or renames params. |
+| **Schema** | Same no-migration philosophy (ADR-021); any Rust-only schema drift must bump version and document alongside TS. |
+
+**Rationale:** Rust removes the native Node addon / `NODE_MODULE_VERSION` class of failures (OPP-024), improves single-binary distribution, and keeps SQLite file-backed. Parallel development avoids a flag-day rewrite; cutover is a separate product/packaging decision ([OPP-030](opportunities/OPP-030-rust-port-cutover.md)).
+
+---
+
 ## Open Questions
 
-_(none — all major decisions resolved)_
+- **Rust cutover packaging:** How end users install the Rust binary (and whether npm remains a thin wrapper or is retired) — tracked in [ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover) and [OPP-030](opportunities/OPP-030-rust-port-cutover.md).

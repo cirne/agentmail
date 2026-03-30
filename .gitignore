@@ -2,6 +2,9 @@
 node_modules/
 .bun/
 
+# Rust (port lives in rust/ until cutover)
+rust/target/
+
 # Build output
 dist/
 build/

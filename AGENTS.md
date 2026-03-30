@@ -25,6 +25,19 @@ Node.js 20+, TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native
 
 **Native addon ABI:** `better-sqlite3` ships a `.node` binary for Node’s `NODE_MODULE_VERSION`. On first `zmail` run, **`ensure-better-sqlite-native`** loads the addon; if the ABI is wrong, it runs **`npm rebuild better-sqlite3`** from the install directory (same as manual `npm rebuild` with the `node` that runs `zmail`). **`npm install -g` does not apply package `overrides`;** the published tarball ships **`bundledDependencies`** for the Excel stack so global installs get maintainer-resolved versions — see **ADR-023** in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md).
 
+### Rust port (in-repo)
+
+A **Rust** implementation lives under **`rust/`** (same CLI/MCP contract and `~/.zmail` goals; see **[ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)**). It is **not** the published npm package yet — use it from a clone for development and benchmarking.
+
+```bash
+cd rust
+cargo test                    # integration tests (phase1–phase9)
+cargo run -- search "foo"     # dev binary; same subcommand style as Node zmail
+cargo build --release && ./target/release/zmail status
+```
+
+If both **`zmail`** (from `npm install -g @cirne/zmail`) and **`./target/release/zmail`** are on your **`PATH`**, the shell resolves whichever comes first — use an explicit path or alias when comparing behavior. **Remaining packaging and cutover:** [OPP-030](docs/opportunities/OPP-030-rust-port-cutover.md).
+
 ## Node.js version (nvm)
 
 **Required for development.** Always use the Node version pinned in [`.nvmrc`](.nvmrc) so it matches **`package.json` → `engines`** and the toolchain behaves consistently.
@@ -42,7 +55,7 @@ Node.js 20+, TypeScript, **file-backed** SQLite via **`better-sqlite3`** (native
 ## Project structure
 
 ```
-src/
+src/            Node + TypeScript (published CLI today)
   cli/          entrypoint and subcommands
   inbox/        LLM notable-mail scan (`zmail inbox`)
   sync/         IMAP sync engine
@@ -52,6 +65,7 @@ src/
   attachments/  document extraction → markdown
   mcp/          MCP server tools
   lib/          shared utilities
+rust/           Rust port (pre-cutover); see ADR-025 and rust/README.md
 ```
 
 ## Development rules
