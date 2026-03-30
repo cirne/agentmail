@@ -33,7 +33,7 @@ cargo install-local   # build --release + install (set INSTALL_PREFIX; default ~
 
 ## Tech stack
 
-**Rust (default in this repo):** workspace root — `clap` CLI, **`rusqlite`** with bundled SQLite, **`imap`** crate, FTS5, MCP stdio. **Dev:** `cargo run`, `cargo test`; **release:** `cargo build --release` → `./target/release/zmail`. See **[ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)** and **[docs/RUST_README.md](docs/RUST_README.md)**.
+**Rust (default in this repo):** workspace root — `clap` CLI, **`rusqlite`** with bundled SQLite, **`imap`** crate, FTS5, MCP stdio. **Dev:** `cargo run`, `cargo test`; **release:** `cargo build --release` → `./target/release/zmail`. See **[ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover)** and the root **[README.md](README.md)** (architecture and developing from source).
 
 **Node (reference / npm):** **`node/`** — TypeScript parity and **`@cirne/zmail`** on npm; **not** the default install path. **file-backed** SQLite via **`better-sqlite3`**, FTS5, imapflow. Dev: `tsx` from `node/`; `cd node && npm run build` → `node/dist/index.js`. Global npm install is legacy for parity; prefer **`install.sh`** or **`cargo build --release`**.
 

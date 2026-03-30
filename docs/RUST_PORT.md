@@ -85,7 +85,7 @@ These are **acceptable by default** unless we explicitly decide to match Node.
 | [ARCHITECTURE.md § ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover) | Decision record (parallel implementation, stack summary). |
 | [OPP-030](opportunities/OPP-030-rust-port-cutover.md) | Packaging sequence and cutover. |
 | [AGENTS.md](../AGENTS.md) | How to build and run Rust and Node from the monorepo. |
-| [RUST_README.md](RUST_README.md) | Short developer pointer for the Rust workspace. |
+| [README.md](../README.md) | Repo overview; architecture, docs index, and developing from source (Rust). |
 
 ## Rust send: edge cases not yet ported
 

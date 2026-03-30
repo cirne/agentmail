@@ -45,6 +45,6 @@
 ## Acceptance criteria (when closing)
 
 - [ ] Chosen direction documented (data file vs generated vs reduced heuristics).
-- [ ] Node and Rust behavior aligned **or** differences explicitly documented in [docs/RUST_README.md](../../docs/RUST_README.md) / ADR-025 notes.
+- [ ] Node and Rust behavior aligned **or** differences explicitly documented in [README.md](../../README.md) / ADR-025 notes.
 - [ ] If multi-term `who` is added: CLI, MCP, tests, and agent-facing docs updated; param-sync tests pass.
 - [ ] Publishable skill / AGENTS guidance matches actual query syntax (no misleading `|` OR unless implemented).

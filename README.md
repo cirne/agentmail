@@ -116,12 +116,36 @@ For a **maildir-only** SQLite reindex without deleting raw email (same steps as 
 
 ## Architecture
 
-**Primary implementation:** Rust (workspace root — `cargo build`, `cargo test`). **Reference / npm package:** TypeScript + Node.js 20+ under **`node/`** (published as `@cirne/zmail`). All data stored locally on a persistent volume — no cloud sync service, no third-party access to your email. 
+**Primary implementation:** Rust at the workspace root — IMAP sync, SQLite + FTS5, CLI, MCP (stdio), attachments, SMTP/drafts, and LLM-shaped commands (`zmail ask`, `zmail inbox`, etc.). Uses the same **`ZMAIL_HOME`** / **`~/.zmail`** layout as the TypeScript reference under **`node/`**. **Reference / npm:** Node.js 20+ under **`node/`** (published as `@cirne/zmail`). All data stays on your machine — no cloud sync service, no third-party access to your email.
 
 **Documentation:**
-- [`AGENTS.md`](AGENTS.md) — single source of truth for installation, commands, and development
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical decisions and rationale
+- [`AGENTS.md`](AGENTS.md) — installation, commands, and development
+- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical decisions and rationale ([ADR-025](docs/ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover): Rust port)
+- [`docs/RUST_PORT.md`](docs/RUST_PORT.md) — remaining parity vs Node, intentional differences, risks
+- [`docs/opportunities/OPP-030-rust-port-cutover.md`](docs/opportunities/OPP-030-rust-port-cutover.md) — packaging and cutover
 - [`docs/VISION.md`](docs/VISION.md) — product vision
+
+**CI and releases:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (fmt, clippy, test, release build on Ubuntu); [`.github/workflows/release.yml`](.github/workflows/release.yml) (push tag `v*` for a GitHub Release; manual dispatch for test builds); [`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) (daily UTC + manual dispatch).
+
+### Developing from source (Rust)
+
+From the repository root:
+
+```bash
+cargo test
+cargo run -- --help
+cargo build --release
+./target/release/zmail status
+# IMAP sync (same ZMAIL_HOME / credentials as Node)
+cargo run -- sync --foreground --since 7d
+cargo run -- refresh
+# Natural-language Q&A (OpenAI; same key as `zmail ask` via Node)
+cargo run -- ask "summarize invoices from last week" --verbose
+```
+
+Unit tests live in `src/` under `#[cfg(test)] mod tests { ... }` next to the code they exercise. Integration tests are one crate per file under `tests/` (e.g. `search_fts`, `mcp_stdio`) and exercise the public CLI end-to-end. After changing a module, a fast check is `cargo test --lib <filter>`; run full `cargo test` before merging.
+
+**Install:** prebuilt binary via `install.sh` (above) or `cargo build --release`; local prefix install with `cargo install-local` (see [`AGENTS.md`](AGENTS.md)). Copy-only after a build: `cp target/release/zmail "$INSTALL_PREFIX/zmail" && chmod 755 "$INSTALL_PREFIX/zmail"`. The `@cirne/zmail` npm package under `node/` remains for parity and legacy use ([OPP-030](docs/opportunities/OPP-030-rust-port-cutover.md)).
 
 ## Status
 
