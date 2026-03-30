@@ -1,15 +1,9 @@
 name: Nightly
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "rust-toolchain.toml"
-      - "src/**"
-      - "tests/**"
-      - ".github/workflows/nightly.yml"
+  schedule:
+    # Daily; GitHub Actions cron is UTC only. Runs against default branch (main).
+    - cron: "0 6 * * *"
   workflow_dispatch:
 
 concurrency:
