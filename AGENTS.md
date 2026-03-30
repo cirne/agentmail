@@ -7,8 +7,9 @@
 curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 # If there is no stable Release yet, the script installs from the nightly prerelease automatically.
 # Force nightly: bash -s -- --nightly   or   ZMAIL_CHANNEL=nightly
-# Override install dir: INSTALL_PREFIX=~/bin curl -fsSL ... | bash
+# Custom prefix (must be on `bash`, not `curl`):  curl -fsSL ... | INSTALL_PREFIX=~/bin bash
 ```
+**Troubleshooting:** If you see **`BASH_SOURCE[0]: unbound variable`**, `raw.githubusercontent.com` is serving a **cached old** `install.sh` (npm-era wrapper). Open [install.sh on GitHub](https://github.com/cirne/zmail/blob/main/install.sh) and confirm the file starts with **“Install prebuilt zmail (Rust)”** — if it does but `curl` still fails, install from the **commit** URL shown on that page (**Raw**), or clone the repo and run **`bash install.sh`** locally.
 
 **From source (dev / contributors):**
 ```bash

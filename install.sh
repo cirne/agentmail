@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# install.sh — Rust binary installer (rev 2026-03-30; invalidates stale raw.githubusercontent caches)
 # Install prebuilt zmail (Rust) from GitHub Releases — no Node/npm.
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
