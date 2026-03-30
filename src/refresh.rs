@@ -237,15 +237,17 @@ const MESSAGE_SEPARATOR: &str =
 const TEXT_WRAP_WIDTH: usize = 100;
 
 fn wrap_line(line: &str, width: usize) -> Vec<String> {
+    debug_assert!(width > 0, "wrap_line width must be positive");
     if line.len() <= width {
         return vec![line.to_string()];
     }
     let mut out = Vec::new();
     let mut rest = line;
     while rest.len() > width {
-        let mut break_at = rest[..width].rfind(' ').unwrap_or(width);
+        let chunk_end = rest.floor_char_boundary(width);
+        let mut break_at = rest[..chunk_end].rfind(' ').unwrap_or(chunk_end);
         if break_at <= width / 2 {
-            break_at = width;
+            break_at = chunk_end;
         }
         out.push(rest[..break_at].trim_end().to_string());
         rest = rest[break_at..].trim_start();
@@ -333,5 +335,38 @@ pub fn print_inbox_style_text(
         }
         println!();
         println!("{MESSAGE_SEPARATOR}");
+    }
+}
+
+#[cfg(test)]
+mod wrap_line_tests {
+    use super::wrap_line;
+
+    /// Regression: fixed-byte slice at `width` must not split a multi-byte char (e.g. U+2026 …).
+    #[test]
+    fn wrap_line_does_not_panic_on_ellipsis_at_byte_boundary() {
+        let line = format!("{}…", "x".repeat(98));
+        assert!(line.len() > 100);
+        let lines = wrap_line(&line, 100);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0], "x".repeat(98));
+        assert_eq!(lines[1], "…");
+    }
+
+    #[test]
+    fn wrap_line_prefers_space_break_inside_chunk() {
+        let line = format!("{} word {}", "a".repeat(80), "b".repeat(40));
+        let lines = wrap_line(&line, 100);
+        assert!(
+            lines.iter().all(|l| l.len() <= 100),
+            "each line should be at most 100 bytes: {lines:?}"
+        );
+        assert!(lines.len() >= 2);
+        assert!(lines[0].contains("word"));
+    }
+
+    #[test]
+    fn wrap_line_short_line_unchanged() {
+        assert_eq!(wrap_line("hello", 100), vec!["hello".to_string()]);
     }
 }

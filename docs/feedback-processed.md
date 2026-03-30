@@ -45,6 +45,7 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `feature-get-messages-token-efficiency.md` | 2026-03-24 | Matched existing opportunity; MCP `get_messages` result order aligned with `messageIds` | [OPP-018](opportunities/archive/OPP-018-reduce-agent-round-trips.md) — archived 2026-03-24; profiles + batch auto-summary shipped |
 | `feature-search-slim-results.md` | 2026-03-24 | Fixed in place | CLI + MCP search: auto slim JSON when more than 50 results; `format` + hint; `--result-format` / `resultFormat` — `src/search/search-json-format.ts` |
 | `feature-attachment-metadata-in-search.md` | 2026-03-24 | Fixed in place | Full JSON search: `attachments` array with `id`, `filename`, `mimeType`, `size`, `extracted`, `index`; slim rows: count + `attachmentTypes` — `src/cli/index.ts`, `src/search/search-json-format.ts`, `src/attachments/list-for-message.ts`, `src/lib/types.ts` |
+| `bug-inbox-text-utf8-panic.md` | 2026-03-30 | Created bug, fixed | [BUG-028 archived](bugs/archive/BUG-028-inbox-text-utf8-snippet-panic.md) — `inbox --text`: `wrap_line` uses `floor_char_boundary` |
 
 ---
 
