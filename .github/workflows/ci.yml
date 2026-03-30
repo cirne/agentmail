@@ -22,6 +22,7 @@ on:
       - "vitest.eval.config.ts"
       - ".nvmrc"
       - ".github/workflows/ci.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read

@@ -11,6 +11,7 @@ on:
     paths:
       - "rust/**"
       - ".github/workflows/rust-ci.yml"
+  workflow_dispatch:
 
 permissions:
   contents: read

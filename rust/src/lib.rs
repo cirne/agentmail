@@ -1,5 +1,6 @@
 //! zmail library — Rust port (see repo `rust/` during migration).
 
+pub mod ask;
 pub mod ask_stub;
 pub mod attachments;
 pub mod config;
@@ -16,6 +17,7 @@ pub mod status;
 pub mod sync;
 pub mod thread_view;
 
+pub use ask::{run_ask, RunAskError, RunAskOptions};
 pub use ask_stub::{
     ask_rejects_old_explicit_year, ask_rejects_stale_date_range, draft_rewrite_stub,
 };
@@ -24,7 +26,8 @@ pub use attachments::{
     AttachmentListRow,
 };
 pub use config::{
-    load_config, resolve_smtp_settings, Config, ConfigJson, LoadConfigOptions, ResolvedSmtp,
+    load_config, resolve_openai_api_key, resolve_smtp_settings, Config, ConfigJson,
+    LoadConfigOptions, ResolvedSmtp,
 };
 pub use db::message_persist::{fts_match_count, persist_attachments_from_parsed, persist_message};
 pub use db::{

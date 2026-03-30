@@ -8,11 +8,11 @@ use zmail::{
     build_refresh_json_value, collect_stats, connect_imap_session, db, handle_request_line,
     is_sync_lock_held, list_thread_messages, load_config, load_refresh_new_mail,
     print_refresh_text, print_status_text, read_message_bytes, rebuild_from_maildir,
-    resolve_search_json_format, resolve_setup_email, resolve_setup_password, resolve_sync_mailbox,
-    resolve_sync_since_ymd, search_result_to_slim_json_row, search_with_meta, status,
-    sync_log_path, who, write_setup, LoadConfigOptions, SearchOptions,
-    SearchResultFormatPreference, SetupArgs, SyncDirection, SyncFileLogger, SyncLockRow,
-    SyncOptions, WhoOptions,
+    resolve_openai_api_key, resolve_search_json_format, resolve_setup_email,
+    resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd, run_ask,
+    search_result_to_slim_json_row, search_with_meta, status, sync_log_path, who, write_setup,
+    LoadConfigOptions, RunAskOptions, SearchOptions, SearchResultFormatPreference, SetupArgs,
+    SyncDirection, SyncFileLogger, SyncLockRow, SyncOptions, WhoOptions,
 };
 
 #[derive(Parser)]
@@ -117,6 +117,13 @@ enum Commands {
         include_noise: bool,
         #[arg(long)]
         text: bool,
+    },
+    /// Answer a question about your email (requires ZMAIL_OPENAI_API_KEY)
+    Ask {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        question: Vec<String>,
+        #[arg(long, short = 'v')]
+        verbose: bool,
     },
 }
 
@@ -339,6 +346,50 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("Note: credential validation not yet implemented in Rust port.");
             }
             println!("Wrote config under {}", home.display());
+        }
+        Commands::Ask {
+            mut question,
+            verbose,
+        } => {
+            let cfg = load_config(LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            });
+            if question.first().is_some_and(|s| s == "--") {
+                question.remove(0);
+            }
+            let q = question.join(" ");
+            let q = q.trim();
+            if q.is_empty() {
+                eprintln!("Usage: zmail ask <question> [--verbose]");
+                eprintln!("  Answer a question about your email using an internal agent (requires ZMAIL_OPENAI_API_KEY).");
+                eprintln!();
+                eprintln!("Example: zmail ask \"summarize my tech news this week\"");
+                eprintln!("  Use --verbose (or -v) to log pipeline progress (phase 1, context assembly, etc.).");
+                std::process::exit(1);
+            }
+            let Some(api_key) = resolve_openai_api_key(&LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            }) else {
+                eprintln!("zmail ask requires an LLM API key.");
+                eprintln!("Set ZMAIL_OPENAI_API_KEY or run 'zmail setup' with --openai-key.");
+                std::process::exit(1);
+            };
+            let conn = db::open_file(cfg.db_path())?;
+            let rt = tokio::runtime::Runtime::new()?;
+            rt.block_on(run_ask(
+                q,
+                &conn,
+                &cfg.data_dir,
+                &cfg.imap_user,
+                cfg.attachments_cache_extracted_text,
+                &api_key,
+                RunAskOptions {
+                    stream: true,
+                    verbose,
+                },
+            ))?;
         }
         Commands::Stats { json } => {
             let cfg = load_config(LoadConfigOptions {

@@ -18,7 +18,7 @@ This document is the **single place** for (1) remaining work toward parity and r
 
 ### Production validation
 
-- Run the Rust binary against real `ZMAIL_HOME` + IMAP and compare to Node for **sync**, **refresh**, and JSON/text outputs for **search**, **who**, **read**, **thread**, **status**, **MCP** — especially edge cases (large mailboxes, provider quirks, date boundaries).
+- Run the Rust binary against real `ZMAIL_HOME` + IMAP and compare to Node for **sync**, **refresh**, and JSON/text outputs for **search**, **who**, **read**, **thread**, **status**, **`ask`**, **MCP** — especially edge cases (large mailboxes, provider quirks, date boundaries).
 - Integration tests under `rust/tests/` are necessary but not sufficient (ADR-025 checkpoint).
 
 ### Feature parity — CLI
@@ -27,7 +27,7 @@ The Rust binary currently focuses on core read/sync/index flows. **Not exposed a
 
 | Area | Notes |
 |------|--------|
-| **`zmail ask`** | No full LLM pipeline; guardrails/tests exist (`ask_stub`). |
+| **`zmail ask`** | **Implemented:** Nano → context assembly → Mini (`gpt-4.1-nano` / `gpt-4.1-mini`), matching Node’s architecture; requires `ZMAIL_OPENAI_API_KEY`. Automated LLM-as-judge parity is still Node (`ask.eval.test.ts`); **`search` `includeThreads`** in the investigation tool is not wired in Rust yet (short-term parity gap). |
 | **`zmail inbox`** | Window parsing exists; no full notable-mail scan. |
 | **`zmail attachment` `list` / `read`** | Extraction libraries exist; no dedicated CLI subcommands. |
 | **`zmail send` / `zmail draft` `*`** | Draft storage helpers exist; **SMTP send** returns an error unless `dry_run` (`send::plan_send`). |

@@ -13,6 +13,8 @@ cargo build --release
 # IMAP sync (same `ZMAIL_HOME` / credentials as Node)
 cargo run -- sync --foreground --since 7d
 cargo run -- refresh
+# Natural-language Q&A (OpenAI; same key as Node `zmail ask`)
+cargo run -- ask "summarize invoices from last week" --verbose
 ```
 
 **Tests:** Unit tests live in `src/` under `#[cfg(test)] mod tests { ... }` next to the code they exercise. Integration tests (one crate per file under `tests/`, e.g. `config_schema_status`, `search_fts`, `mcp_stdio`) exercise the public `zmail` API end-to-end. After changing a module, a fast check is `cargo test --lib <filter>` from this directory; run full `cargo test` before merge.

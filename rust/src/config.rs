@@ -181,6 +181,17 @@ fn zmail_home(explicit: Option<PathBuf>) -> PathBuf {
     })
 }
 
+fn effective_env(
+    key: &str,
+    env_file: &HashMap<String, String>,
+    process: &HashMap<String, String>,
+) -> Option<String> {
+    process
+        .get(key)
+        .cloned()
+        .or_else(|| env_file.get(key).cloned())
+}
+
 /// Load config like TS `loadConfig(options?)`.
 pub fn load_config(opts: LoadConfigOptions) -> Config {
     let home = zmail_home(opts.home);
@@ -189,17 +200,6 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
 
     let process_env: HashMap<String, String> =
         opts.env.unwrap_or_else(|| std::env::vars().collect());
-
-    fn effective(
-        key: &str,
-        env_file: &HashMap<String, String>,
-        process: &HashMap<String, String>,
-    ) -> Option<String> {
-        process
-            .get(key)
-            .cloned()
-            .or_else(|| env_file.get(key).cloned())
-    }
 
     let imap_host = json
         .imap
@@ -214,11 +214,11 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
         .imap
         .as_ref()
         .and_then(|i| i.user.clone())
-        .or_else(|| effective("ZMAIL_EMAIL", &env_file, &process_env))
+        .or_else(|| effective_env("ZMAIL_EMAIL", &env_file, &process_env))
         .unwrap_or_default();
 
     let imap_password =
-        effective("ZMAIL_IMAP_PASSWORD", &env_file, &process_env).unwrap_or_default();
+        effective_env("ZMAIL_IMAP_PASSWORD", &env_file, &process_env).unwrap_or_default();
 
     let data_dir = home.join("data");
     let db_path = data_dir.join("zmail.db");
@@ -259,6 +259,22 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
         db_path,
         maildir_path,
     }
+}
+
+/// Resolve OpenAI API key from process env and `~/.zmail/.env` (same keys as Node `config.openai`).
+pub fn resolve_openai_api_key(opts: &LoadConfigOptions) -> Option<String> {
+    let home = zmail_home(opts.home.clone());
+    let env_file = load_env_file(&home);
+    let process_env: HashMap<String, String> = opts
+        .env
+        .clone()
+        .unwrap_or_else(|| std::env::vars().collect());
+    effective_env("ZMAIL_OPENAI_API_KEY", &env_file, &process_env)
+        .filter(|s: &String| !s.trim().is_empty())
+        .or_else(|| {
+            effective_env("OPENAI_API_KEY", &env_file, &process_env)
+                .filter(|s: &String| !s.trim().is_empty())
+        })
 }
 
 #[cfg(test)]
