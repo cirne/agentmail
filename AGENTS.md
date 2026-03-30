@@ -25,6 +25,7 @@ cargo install-local   # build --release + install (set INSTALL_PREFIX; default ~
 - **End users of zmail (publishable skill `/zmail`):** [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md) — [Agent Skills](https://agentskills.io/specification.md) playbook (`name: zmail`); install, setup, sync, usage; see [`skills/README.md`](skills/README.md). Distinct from internal **`.cursor/skills/*`** below.
 - **Developing this repo in Cursor:** `.cursor/skills/` — internal skills (`commit`, `db-dev`, `install-local`, `process-feedback`). Not the publishable user skill in `skills/zmail/`.
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — technical decisions and rationale (**read before making storage, sync, or interface decisions**)
+- [`docs/RELEASING.md`](docs/RELEASING.md) — **maintainers:** tag and ship Rust binaries (GitHub Releases + `Cargo.toml` version alignment)
 - [`docs/MCP.md`](docs/MCP.md) — MCP server interface documentation (**read for agent integration**)
 - [`docs/VISION.md`](docs/VISION.md) — product vision
 - [`docs/OPPORTUNITIES.md`](docs/OPPORTUNITIES.md) — product improvement ideas

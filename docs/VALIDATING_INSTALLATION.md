@@ -1,5 +1,7 @@
 # Validating Installation
 
+**Scope:** This document focuses on **validating the install script** and legacy **npm** release paths. **Cutting a new Rust GitHub Release** (version bump, git tag, CI artifacts, `install.sh --version`) is documented in **[RELEASING.md](RELEASING.md)**.
+
 This document describes how to validate the install script, manual npm release, and distribution pipeline to ensure everything works correctly before and after releases.
 
 ## Overview

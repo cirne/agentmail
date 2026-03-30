@@ -125,7 +125,7 @@ For a **maildir-only** SQLite reindex without deleting raw email (same steps as 
 - [`docs/opportunities/OPP-030-rust-port-cutover.md`](docs/opportunities/OPP-030-rust-port-cutover.md) — packaging and cutover
 - [`docs/VISION.md`](docs/VISION.md) — product vision
 
-**CI and releases:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (fmt, clippy, test, release build on Ubuntu); [`.github/workflows/release.yml`](.github/workflows/release.yml) (push tag `v*` for a GitHub Release; manual dispatch for test builds); [`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) (daily UTC + manual dispatch).
+**CI and releases:** [`.github/workflows/ci.yml`](.github/workflows/ci.yml) (fmt, clippy, test, release build on Ubuntu); [`.github/workflows/release.yml`](.github/workflows/release.yml) (push tag `v*` for a GitHub Release; manual dispatch for test builds); [`.github/workflows/nightly.yml`](.github/workflows/nightly.yml) (daily UTC + manual dispatch). **Cutting a versioned Rust release:** [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ### Developing from source (Rust)
 

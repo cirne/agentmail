@@ -14,6 +14,7 @@ This document is the **single place** for (1) remaining work toward parity and r
 
 ### Packaging and distribution
 
+- **How to ship a versioned Rust binary:** [RELEASING.md](RELEASING.md) (tag + `Cargo.toml`, GitHub Releases, `install.sh`).
 - Choose and document the default install path (GitHub releases, Homebrew, npm as thin wrapper, etc.); align version story with `@cirne/zmail`. Tracked in **OPP-030**.
 
 ### Production validation
