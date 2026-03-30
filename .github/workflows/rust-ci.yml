@@ -16,37 +16,53 @@ on:
 permissions:
   contents: read
 
-defaults:
-  run:
-    working-directory: rust
-
 jobs:
   test:
-    # main may not have rust/ until the port lands; skip instead of failing on missing working dir
-    if: hashFiles('rust/Cargo.toml') != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      # hashFiles() is not valid in jobs.<id>.if; detect at step level instead.
+      # main may not have rust/ until the port lands — skip cargo steps, succeed.
+      - name: Detect Rust workspace
+        id: rustws
+        run: |
+          if [ -f rust/Cargo.toml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Install Linux deps (native-tls / OpenSSL)
+        if: steps.rustws.outputs.present == 'true'
         run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
+        if: steps.rustws.outputs.present == 'true'
         with:
           components: rustfmt, clippy
 
       - uses: Swatinem/rust-cache@v2
+        if: steps.rustws.outputs.present == 'true'
         with:
           workspaces: rust
 
       - name: Format
+        if: steps.rustws.outputs.present == 'true'
+        working-directory: rust
         run: cargo fmt --all -- --check
 
       - name: Clippy
+        if: steps.rustws.outputs.present == 'true'
+        working-directory: rust
         run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
+        if: steps.rustws.outputs.present == 'true'
+        working-directory: rust
         run: cargo test
 
       - name: Release build smoke
+        if: steps.rustws.outputs.present == 'true'
+        working-directory: rust
         run: cargo build --release
