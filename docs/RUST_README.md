@@ -4,7 +4,7 @@ Primary in-repo implementation: IMAP sync, SQLite + FTS5, CLI, MCP stdio, attach
 
 **Docs:** [RUST_PORT.md](RUST_PORT.md) (remaining parity vs Node, intentional differences, risks), [ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover) (decision record), [AGENTS.md](../AGENTS.md) (commands and layout), [OPP-030](opportunities/OPP-030-rust-port-cutover.md) (packaging cutover).
 
-**CI:** [`.github/workflows/rust-ci.yml`](../.github/workflows/rust-ci.yml) (fmt, clippy, test, release build on Ubuntu). Releases: `rust-release.yml` (tag `v*`), nightly binaries: `rust-nightly.yml` (branch `main`).
+**CI:** [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) (fmt, clippy, test, release build on Ubuntu). Releases: [`release.yml`](../.github/workflows/release.yml) (tag `v*`), nightly binaries: [`nightly.yml`](../.github/workflows/nightly.yml) (branch `main`).
 
 From the **repository root**:
 

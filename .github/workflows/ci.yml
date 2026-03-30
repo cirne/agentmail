@@ -3,24 +3,20 @@ name: CI
 on:
   pull_request:
     paths:
-      - "node/src/**"
-      - "node/package.json"
-      - "node/package-lock.json"
-      - "node/tsconfig*.json"
-      - "node/vitest.config.ts"
-      - "node/vitest.eval.config.ts"
-      - ".nvmrc"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "src/**"
+      - "tests/**"
       - ".github/workflows/ci.yml"
   push:
     branches: [main]
     paths:
-      - "node/src/**"
-      - "node/package.json"
-      - "node/package-lock.json"
-      - "node/tsconfig*.json"
-      - "node/vitest.config.ts"
-      - "node/vitest.eval.config.ts"
-      - ".nvmrc"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "rust-toolchain.toml"
+      - "src/**"
+      - "tests/**"
       - ".github/workflows/ci.yml"
   workflow_dispatch:
 
@@ -28,25 +24,46 @@ permissions:
   contents: read
 
 jobs:
-  node:
+  test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: node
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/setup-node@v4
+      - name: Detect Rust workspace
+        id: rustws
+        run: |
+          if [ -f Cargo.toml ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Linux deps (native-tls / OpenSSL)
+        if: steps.rustws.outputs.present == 'true'
+        run: sudo apt-get update && sudo apt-get install -y libssl-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.rustws.outputs.present == 'true'
         with:
-          node-version-file: .nvmrc
-          cache: npm
-          cache-dependency-path: node/package-lock.json
+          components: rustfmt, clippy
 
-      - name: Install dependencies
-        run: npm ci
+      - uses: Swatinem/rust-cache@v2
+        if: steps.rustws.outputs.present == 'true'
+        with:
+          workspaces: "."
 
-      - name: Lint
-        run: npm run lint
+      - name: Format
+        if: steps.rustws.outputs.present == 'true'
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        if: steps.rustws.outputs.present == 'true'
+        run: cargo clippy --all-targets -- -D warnings
 
       - name: Test
-        run: npm test
+        if: steps.rustws.outputs.present == 'true'
+        run: cargo test
+
+      - name: Release build smoke
+        if: steps.rustws.outputs.present == 'true'
+        run: cargo build --release

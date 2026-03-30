@@ -44,7 +44,7 @@ description: Pre-commit checklist for the Rust-first codebase (format, clippy, t
   - **Reference only:** The npm package under `node/` may still contain `npm run eval` / Vitest eval tests for historical parity; that is **not** the default gate for commits here. Use it only if you are explicitly comparing or verifying parity with the reference implementation
 
 ### 3. Formatting and static analysis (Rust)
-- [ ] **Rust style and Clippy must be clean** (matches CI: `.github/workflows/rust-ci.yml`)
+- [ ] **Rust style and Clippy must be clean** (matches CI: `.github/workflows/ci.yml`)
   - `cargo fmt --all -- --check` — no formatting drift
   - `cargo clippy --all-targets -- -D warnings` — fix all Clippy warnings (CI treats warnings as errors)
   - Prefer idiomatic Rust: avoid unnecessary clones, use `?` and proper error types, keep modules small and testable
