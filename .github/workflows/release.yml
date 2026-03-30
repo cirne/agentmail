@@ -4,6 +4,16 @@ on:
   push:
     tags:
       - "v[0-9]*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Label embedded in archive names (e.g. test-20260330). For a real release, push a v* tag instead."
+        required: true
+        default: "test"
+      create_github_release:
+        description: "If true, create/update a GitHub Release with tag = version label. If false, bundles attach only to the workflow run (typical test build)."
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -24,6 +34,8 @@ jobs:
             target: x86_64-pc-windows-msvc
             ext: zip
     runs-on: ${{ matrix.os }}
+    env:
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
 
@@ -44,13 +56,11 @@ jobs:
 
       - name: Package (Unix)
         if: runner.os != 'Windows'
-        env:
-          TAG: ${{ github.ref_name }}
         run: |
           mkdir -p "${{ github.workspace }}/dist"
           cp target/release/zmail "${{ github.workspace }}/dist/zmail"
           cd "${{ github.workspace }}/dist"
-          tar czvf "zmail-${TAG}-${{ matrix.target }}.${{ matrix.ext }}" zmail
+          tar czvf "zmail-${RELEASE_VERSION}-${{ matrix.target }}.${{ matrix.ext }}" zmail
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
@@ -59,7 +69,7 @@ jobs:
           New-Item -ItemType Directory -Force -Path "${{ github.workspace }}/dist" | Out-Null
           Copy-Item target/release/zmail.exe "${{ github.workspace }}/dist/zmail.exe"
           Set-Location "${{ github.workspace }}/dist"
-          Compress-Archive -Path zmail.exe -DestinationPath "zmail-${{ github.ref_name }}-${{ matrix.target }}.zip" -Force
+          Compress-Archive -Path zmail.exe -DestinationPath "zmail-$env:RELEASE_VERSION-${{ matrix.target }}.zip" -Force
 
       - uses: actions/upload-artifact@v4
         with:
@@ -69,6 +79,8 @@ jobs:
   release:
     needs: build
     runs-on: ubuntu-latest
+    env:
+      RELEASE_VERSION: ${{ github.event_name == 'workflow_dispatch' && inputs.version || github.ref_name }}
     steps:
       - uses: actions/download-artifact@v4
         with:
@@ -81,9 +93,18 @@ jobs:
           cd dist
           sha256sum zmail-* > SHA256SUMS
 
-      - uses: ncipollo/release-action@v1
+      - name: Upload workflow artifacts (manual test build, no GitHub Release)
+        if: github.event_name == 'workflow_dispatch' && inputs.create_github_release == false
+        uses: actions/upload-artifact@v4
         with:
-          tag: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          name: zmail-release-${{ env.RELEASE_VERSION }}
+          path: dist/*
+
+      - name: Create GitHub Release
+        if: github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && inputs.create_github_release)
+        uses: ncipollo/release-action@v1
+        with:
+          tag: ${{ env.RELEASE_VERSION }}
+          name: ${{ env.RELEASE_VERSION }}
           artifacts: "dist/*"
-          generateReleaseNotes: true
+          generateReleaseNotes: ${{ github.event_name == 'push' }}
