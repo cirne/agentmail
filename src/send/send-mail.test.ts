@@ -32,6 +32,11 @@ describe("sendDraftById", () => {
       db,
       dataDir,
       maildirPath: "",
+      env: {
+        ...process.env,
+        ZMAIL_EMAIL: "dry-run-test@example.com",
+        ZMAIL_IMAP_PASSWORD: "not-used-in-dry-run",
+      },
     });
     expect(r.ok).toBe(true);
     expect(r.dryRun).toBe(true);

@@ -22,6 +22,8 @@ defaults:
 
 jobs:
   test:
+    # main may not have rust/ until the port lands; skip instead of failing on missing working dir
+    if: hashFiles('rust/Cargo.toml') != ''
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
