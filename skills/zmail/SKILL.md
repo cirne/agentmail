@@ -5,22 +5,20 @@ description: >-
   structured JSON (no webmail UI). Assistants search, read, thread, attachments, draft, and send via CLI or MCP
   without leaving chat or terminal. Built for Claude Code, OpenClaw, Cursor, and any host with shell or MCP.
   Local-first primitives keep mail on-device; OpenAI powers `zmail ask`, `zmail inbox`, setup/wizard, and `draft edit`.
-  Requires Node 20+, `npm install -g @cirne/zmail` or `npx @cirne/zmail`, IMAP credentials, and an API key for LLM
-  paths; native better-sqlite3 (rebuilds on ABI mismatch). OTP/login codes: optional `refresh`, then `search` + `read`
-  (skill § Login / OTP). Optional `who --enrich` may call third-party APIs. Source: github.com/cirne/zmail.
+  Requires `zmail` on PATH (install via install.sh from GitHub Releases — no Node), IMAP credentials, and an API key
+  for LLM paths. OTP/login codes: optional `refresh`, then `search` + `read` (skill § Login / OTP). Optional `who --enrich`
+  may call third-party APIs. Source: github.com/cirne/zmail.
 license: "Refer to https://github.com/cirne/zmail for project license and terms."
 compatibility: >-
-  Node.js 20+; npm; `zmail` on PATH after global install. Network: IMAP, OpenAI (ask/inbox/setup),
-  optional enrich providers. Disk: ~/.zmail (SQLite + maildir). Native addon: better-sqlite3 (rebuilt on first run if needed).
+  `zmail` binary on PATH (from install.sh or cargo build). Network: IMAP, OpenAI (ask/inbox/setup),
+  optional enrich providers. Disk: ~/.zmail (SQLite + maildir).
 metadata:
-  version: "0.2.3"
+  version: "0.2.4"
   homepage: "https://github.com/cirne/zmail"
   repository: "https://github.com/cirne/zmail"
   openclaw:
     requires:
       bins:
-        - node
-        - npm
         - zmail
       config:
         - ZMAIL_EMAIL
@@ -43,8 +41,8 @@ Use this block to keep **ClawHub / OpenClaw registry fields** aligned with the s
 | Topic | What to declare |
 |--------|------------------|
 | **Provenance** | Source and issues: **[github.com/cirne/zmail](https://github.com/cirne/zmail)** |
-| **Install** | **`npm install -g @cirne/zmail`** or **`npx @cirne/zmail`** (Node **20+**). Native **`better-sqlite3`**; on ABI mismatch, first **`zmail`** run rebuilds via **`ensure-better-sqlite-native`** (or run **`npm rebuild better-sqlite3`** yourself with the same `node` that runs `zmail`). |
-| **On PATH** | Global npm `bin` must be on **`PATH`**, or use **`npx @cirne/zmail`** for one-off invocations. |
+| **Install** | **`curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh \| bash`** (prebuilt Rust binary from GitHub Releases). Prerelease: add **`--nightly`**. See repo **`AGENTS.md`**. Legacy npm **`@cirne/zmail`** exists for reference only. |
+| **On PATH** | Default install: **`~/.local/bin/zmail`** — ensure **`~/.local/bin`** is on **`PATH`**, or set **`INSTALL_PREFIX`**. |
 | **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and optional **`zmail who --enrich`**. |
 | **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, **`zmail draft edit`** (LLM revision), and **`who --enrich`** can send **email-derived or draft content** to **OpenAI** or other APIs—only use if the **mailbox owner** accepts that. Primitives **`search` / `read` / `thread` / `attachment`** (without enrich) and **`zmail draft rewrite`** (literal body replace, no LLM) are local only once mail is synced. |
 | **Credentials on disk** | Secrets live under **`ZMAIL_HOME/.env`** (and non-secret settings in **`config.json`**). They are used only to talk to **your** IMAP host and (when configured) **OpenAI**—not to third-party analytics or the zmail project. Treat **`.env`** like any password file (permissions, backups, don’t paste into chats). |
@@ -59,8 +57,8 @@ OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://d
 
 ## Agent checklist
 
-1. Confirm **Node.js 20+** (`node -v`).
-2. `npm install -g @cirne/zmail` (see [Install](#install)).
+1. Install **`zmail`** (see [Install](#install)); confirm **`which zmail`**.
+2. If **`~/.local/bin`** was added, **`hash -r`** / new shell so **`PATH`** picks up the binary.
 3. Choose setup: **[`zmail wizard`](#zmail-wizard-interactive-humans)** (TTY) or **[`zmail setup`](#zmail-setup-agents--automation)** (flags/env, no prompts).
 4. User must have a **Gmail app password** (or compatible IMAP credentials)—[Gmail: app password](#gmail-get-an-app-password).
 5. Run **`zmail sync --since …`** then **`zmail refresh`** / **`zmail status`**.
@@ -75,12 +73,14 @@ OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://d
 ## Install
 
 ```bash
-node -v   # must be v20+
-npm install -g @cirne/zmail
+curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 ```
 
-- If **`better-sqlite3`** fails to load (wrong Node ABI), the CLI may rebuild automatically on first run; if not, run **`npm rebuild better-sqlite3`** using the **same** `node` binary that runs `zmail`.
-- **Global install note:** `npm` may install to a directory that is not on `PATH`; ensure that global `bin` is on `PATH`, or use `npx @cirne/zmail` for one-off commands.
+- **Prerelease / nightly builds:** `curl -fsSL .../install.sh | bash -s -- --nightly`
+- **Specific version:** `ZMAIL_VERSION=v1.2.3 curl -fsSL .../install.sh | bash` (or pass **`--version v1.2.3`** to the script when run from a clone).
+- **Install directory:** defaults to **`~/.local/bin`**; override with **`INSTALL_PREFIX`**.
+- **From source:** clone the repo, **`cargo build --release`**, **`./install-rust-binary.sh`** (see **`AGENTS.md`**).
+- **Windows:** download the **`.zip`** for **`x86_64-pc-windows-msvc`** from [Releases](https://github.com/cirne/zmail/releases); the shell installer is macOS/Linux only.
 
 Config and data default to **`ZMAIL_HOME`** (default **`~/.zmail`**): `config.json`, `.env`, and `data/` (SQLite + maildir).
 
@@ -256,7 +256,7 @@ Copy the **`zmail`** directory (this skill) into an **end-user** location—not 
 |------|----------------|
 | Cursor | `~/.cursor/skills/zmail/` or another project’s `.cursor/skills/zmail/` |
 | Claude Code | `~/.claude/skills/zmail/` |
-| OpenClaw | `<workspace>/skills/zmail/`, `~/.openclaw/skills/zmail/`, or from this repo: **`cd node && npm run install-skill:openclaw`** ([OpenClaw creating skills](https://docs.openclaw.ai/tools/creating-skills)) |
+| OpenClaw | `<workspace>/skills/zmail/`, `~/.openclaw/skills/zmail/` — copy this folder from the repo or npm package tarball ([OpenClaw creating skills](https://docs.openclaw.ai/tools/creating-skills)) |
 
 Folder name must stay **`zmail`** to match frontmatter `name` ([Agent Skills spec](https://agentskills.io/specification.md)). Copy the **whole** `skills/zmail/` directory (includes `references/`).
 

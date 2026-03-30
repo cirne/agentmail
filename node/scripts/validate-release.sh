@@ -27,7 +27,7 @@ section "Release Validation Checklist"
 section "Install Script"
 check "install.sh syntax valid" bash -n "$REPO_ROOT/install.sh"
 check "install.sh is executable" [ -x "$REPO_ROOT/install.sh" ]
-check "install.sh references npm package" grep -q "@cirne/zmail" "$REPO_ROOT/node/install.sh"
+check "install.sh uses GitHub Releases" grep -q "api.github.com/repos" "$REPO_ROOT/install.sh"
 
 # Package.json checks
 section "Package Configuration"

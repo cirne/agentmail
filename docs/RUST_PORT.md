@@ -39,7 +39,7 @@ This document is the **single place** for (1) remaining work toward parity and r
 
 ### Documentation and user-facing install
 
-- After cutover: update `skills/zmail/`, `install.sh`, **AGENTS.md** primary install path, and any publishable docs that still assume npm-only. **AGENTS.md** now leads with Rust; npm remains documented for `@cirne/zmail`.
+- **Done:** `install.sh` installs prebuilt Rust binaries from GitHub Releases; **AGENTS.md** and **`skills/zmail/`** lead with that path. **`@cirne/zmail`** (npm) remains documented as reference-only.
 
 ### Schema
 

@@ -1,42 +1,56 @@
 ---
 name: install-local
-description: Install zmail globally from the local dev directory (npm run install-cli) — build dist/ then npm install -g . Same as testing the published package without the registry.
+description: Install the Rust zmail binary from a local clone (cargo + install-rust-binary.sh) and optionally link the publishable skill. For npm parity work only, use node/install-npm-legacy.sh or npm run install-cli.
 ---
 
 # Install zmail from a local clone (dev)
 
-## Preferred command
+## Preferred: Rust binary (matches releases)
 
-From the **repository root** (after `nvm use`):
+From the **repository root**:
 
 ```bash
+cargo build --release
+INSTALL_PREFIX="$HOME/.local/bin" ./install-rust-binary.sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+Or test the same path as end users (downloads from GitHub):
+
+```bash
+bash install.sh --nightly   # or omit for latest stable Release
+```
+
+## Publishable skill (`/zmail`) on Claude Code / OpenClaw
+
+Copy or symlink **`skills/zmail/`** from the repo (not `.cursor/skills/`):
+
+```bash
+ln -sf "$(pwd)/skills/zmail" ~/.claude/skills/zmail
+# OpenClaw example:
+# ln -sf "$(pwd)/skills/zmail" ~/.openclaw/skills/zmail
+```
+
+Legacy helper (requires **Node** + **`cd node`**): **`npm run install-skill:claude`** / **`npm run install-skill:openclaw`** — same outcome as a symlink into those dirs.
+
+## Legacy: npm global CLI (parity only)
+
+Only when you need the **Node** reference binary:
+
+```bash
+nvm use   # from repo root
 cd node && npm run install-cli
 ```
 
-This runs **`npm run build`** (compile to `dist/`), then **`npm install -g .`**, then installs the publishable **`skills/zmail/`** tree into **`~/.claude/skills/zmail`** (symlink to the repo by default) so **Claude Code** can use **`/zmail`** as a global skill. Skip the skill step with **`ZMAIL_SKIP_CLAUDE_SKILL=1`**. Install only the skill: **`npm run install-skill:claude`**.
-
-## Requirements
-
-- **Node.js 20+** (see `engines` in `node/package.json`). **`node/.npmrc`** sets **`engine-strict=true`**, so `npm install` / `npm install -g .` **fail** with `EBADENGINE` if Node is too old — not a warning.
-- Write access to the global npm prefix (sometimes requires fixing npm permissions or using a Node version manager)
-
-## After install
-
-- Run `zmail` from any directory; config/data default to `~/.zmail` (or `ZMAIL_HOME`).
-- **`better-sqlite3`** is a native addon; first **`zmail`** run may run **`npm rebuild better-sqlite3`** if the addon’s ABI does not match the running Node (`ensure-better-sqlite-native`).
-- **Claude Code:** restart or start a new session so **`/zmail`** loads from **`~/.claude/skills/zmail`**. Copy instead of symlink: **`ZMAIL_CLAUDE_SKILL_MODE=copy`**.
+See **`node/install-npm-legacy.sh`** for **`npm install -g @cirne/zmail`**-style flow without the full **`install-cli`** script.
 
 ## Remove
 
-```bash
-npm uninstall -g @cirne/zmail
-```
+- Rust binary: `rm -f "$(command -v zmail)"` or remove from `INSTALL_PREFIX`.
+- npm: `npm uninstall -g @cirne/zmail`
 
 ## When to use
 
-- Dogfood the **same path as end users** (`bin` → `dist/index.js`) while developing in the repo
-- Verify global install, native addon, and CLI behavior before publish
-
-## Not this
-
-- Day-to-day dev from the repo without touching global install: **`cd node && npm run zmail -- <cmd>`** or **`cd node && npx tsx src/index.ts -- <cmd>`**
+- Dogfood **`./target/release/zmail`** against real **`ZMAIL_HOME`**
+- Compare behavior to GitHub Release builds
+- Optional: verify npm package layout before publish

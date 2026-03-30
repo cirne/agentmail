@@ -12,20 +12,20 @@ Modern email systems are human-first — designed around inbox browsing and manu
 
 ## Quick start
 
-1. **Install** (see [AGENTS.md](AGENTS.md) for full installation options)
+1. **Install** (see [AGENTS.md](AGENTS.md) for options)
 
-   **From source (Rust CLI — primary in this repo):**
+   **Prebuilt Rust binary (recommended):**
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
+   ```
+
+   **From source** (repository root):
    ```bash
    cargo build --release
-   # Optionally: ./install-rust-binary.sh   # copies target/release/zmail into PATH
+   # Optionally: ./install-rust-binary.sh
    ```
 
-   **Published npm package** (Node reference implementation under `node/`):
-   ```bash
-   npm install -g @cirne/zmail
-   ```
-
-   **Node development** (parity tests, eval harness, publish):
+   **Node reference** (`node/` — parity tests, eval harness, legacy npm package):
    ```bash
    cd node && npm install
    ```
@@ -34,7 +34,7 @@ Modern email systems are human-first — designed around inbox browsing and manu
    ```bash
    zmail setup
    ```
-   Or from the repo (Node):
+   Or from the repo via Node:
    ```bash
    cd node && npm run zmail -- setup
    ```

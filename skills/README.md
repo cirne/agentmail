@@ -1,6 +1,6 @@
 # User-facing skills (publishable)
 
-Directories here are **[Agent Skills](https://agentskills.io/specification.md)-shaped** playbooks for **people who use zmail** (install, sync, search, `zmail ask`, etc.). They ship with the npm package and can be copied into **end-user** agent skill paths or published to registries (e.g. ClawHub).
+Directories here are **[Agent Skills](https://agentskills.io/specification.md)-shaped** playbooks for **people who use zmail** (install, sync, search, `zmail ask`, etc.). They live in this repo and are also included in the **`@cirne/zmail`** npm tarball for copy-out; **install the CLI** with **`install.sh`** (Rust binary from GitHub Releases) — see **`AGENTS.md`**.
 
 **Product skill name:** **`/zmail`** — the folder and frontmatter `name` are `zmail` (spec requirement); many hosts surface that as the **`/zmail`** slash command.
 
@@ -11,34 +11,26 @@ Directories here are **[Agent Skills](https://agentskills.io/specification.md)-s
 | Path | Audience |
 |------|-----------|
 | [`zmail/`](zmail/) | Agents helping an **end user** run the **installed** CLI — not for editing this repo. |
-| [`zmail/references/CANONICAL-DOCS.md`](zmail/references/CANONICAL-DOCS.md) | **CLI-first discovery** (`zmail --help`, per-command `--help`), **hints** in JSON/text output, and links to repo/npm docs — prefer the live CLI over memorizing this README. |
+| [`zmail/references/CANONICAL-DOCS.md`](zmail/references/CANONICAL-DOCS.md) | **CLI-first discovery** (`zmail --help`, per-command `--help`), **hints** in JSON/text output, and links to repo docs — prefer the live CLI over memorizing this README. |
 
 ## OpenClaw (this machine)
 
 [OpenClaw — Creating skills](https://docs.openclaw.ai/tools/creating-skills) expects a directory with `SKILL.md` under a skills root (e.g. `<workspace>/skills/` or `~/.openclaw/skills/` — see [Skills](https://docs.openclaw.ai/tools/skills) for precedence).
 
-From a **clone of this repo**, copy the whole **`skills/zmail/`** tree (not only `SKILL.md`; include `references/`):
+From a **clone of this repo**, copy or symlink the whole **`skills/zmail/`** tree (not only `SKILL.md`; include `references/`):
 
 ```bash
-npm run install-skill:openclaw
+ln -sf "$(pwd)/skills/zmail" ~/.openclaw/skills/zmail
 ```
 
-Default target: **`~/.openclaw/skills/zmail`**. Override with **`OPENCLAW_ZMAIL_SKILL_DIR`** if your workspace uses another path (example from the docs: `~/.openclaw/workspace/skills/zmail`):
-
-```bash
-OPENCLAW_ZMAIL_SKILL_DIR="$HOME/.openclaw/workspace/skills/zmail" npm run install-skill:openclaw
-```
-
-Preview: `npm run install-skill:openclaw -- --dry-run`. Then start a new session or restart the gateway so OpenClaw reloads skills.
+If you use the **Node** dev tree, **`cd node && npm run install-skill:openclaw`** is still available. Override target: **`OPENCLAW_ZMAIL_SKILL_DIR`**.
 
 ## Claude Code (this machine)
 
 [Claude Code — Skills](https://docs.claude.com/en/docs/claude-code/skills) loads skills from **`~/.claude/skills/`** (and project `.claude/skills/`). From a **clone of this repo**:
 
 ```bash
-npm run install-skill:claude
+ln -sf "$(pwd)/skills/zmail" ~/.claude/skills/zmail
 ```
 
-Default: symlink **`skills/zmail/`** → **`~/.claude/skills/zmail`**. **`npm run install-cli`** runs this step after the global CLI install (skip: **`ZMAIL_SKIP_CLAUDE_SKILL=1`**). Override destination: **`ZMAIL_CLAUDE_SKILL_DIR`**. Copy instead of symlink: **`ZMAIL_CLAUDE_SKILL_MODE=copy`**.
-
-Preview: `npm run install-skill:claude -- --dry-run`.
+Legacy: **`cd node && npm run install-skill:claude`** (symlinks into **`~/.claude/skills/zmail`**). Override: **`ZMAIL_CLAUDE_SKILL_DIR`**. Copy instead of symlink: **`ZMAIL_CLAUDE_SKILL_MODE=copy`**.

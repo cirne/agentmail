@@ -10,11 +10,11 @@ This file is for the **end-user `/zmail` skill** (`skills/zmail/`). For **develo
 
 **Discovery order (recommended):**
 
-1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — short command list (same text as **`CLI_USAGE`** in **`node/src/lib/onboarding.ts`** for the npm CLI; Rust mirrors the surface). Workflows (e.g. **`zmail ask`** vs primitives, **draft + send**, MCP): **`docs/ASK.md`**, **`docs/MCP.md`**, **`skills/zmail/references/DRAFT-AND-SEND.md`**, **`skills/zmail/references/AUTH-CODES.md`**, **`SKILL.md`** § Agent workflow.
+1. **`zmail`**, **`zmail --help`**, **`zmail -h`**, or **`zmail help`** — short command list (canonical string **`CLI_USAGE`** lives in **`node/src/lib/onboarding.ts`**; the Rust CLI mirrors the same surface). Workflows (e.g. **`zmail ask`** vs primitives, **draft + send**, MCP): **`docs/ASK.md`**, **`docs/MCP.md`**, **`skills/zmail/references/DRAFT-AND-SEND.md`**, **`skills/zmail/references/AUTH-CODES.md`**, **`SKILL.md`** § Agent workflow.
 2. **`zmail <command> --help`** — flags and examples for that command (e.g. `zmail search --help`, `zmail who --help`, `zmail attachment list --help`).
 3. **Run a command** and read the **structured output** — zmail **embeds hints** so you learn the next step without opening docs (see below).
 
-Top-level help is maintained in code as **`CLI_USAGE`** in **`node/src/lib/onboarding.ts`** (same text the npm CLI prints). When in doubt, compare this skill or `AGENTS.md` to that file.
+Top-level help is maintained in code as **`CLI_USAGE`** in **`node/src/lib/onboarding.ts`** (Rust prints the same list). When in doubt, compare this skill or `AGENTS.md` to that file.
 
 ---
 
@@ -33,9 +33,9 @@ zmail is designed so **the tool teaches its own capabilities** as you use it.
 
 ---
 
-## Markdown references (repo or npm package root)
+## Markdown references (repository or npm package layout)
 
-Paths below are relative to the **repository root** or the **installed `@cirne/zmail` package root** (the parent of `skills/zmail/`). If you only have the global CLI, open the same paths under your global install, e.g.:
+Paths below are relative to the **repository root** or, if you use the legacy npm package, the **installed `@cirne/zmail` package root** (parent of `skills/zmail/`). From a clone, use paths as written. From npm:
 
 `$(npm root -g)/@cirne/zmail/AGENTS.md` (exact layout depends on npm version and OS).
 

@@ -24,4 +24,4 @@ cargo run -- ask "summarize invoices from last week" --verbose
 
 Install helper for a built release binary: `./install-rust-binary.sh` (optional `INSTALL_PREFIX`).
 
-The published **`npm install -g @cirne/zmail`** artifact is still produced from **`node/`** until packaging fully switches (OPP-030).
+End-user install is **`install.sh`** (GitHub Release assets) or **`cargo build --release`**. The **`@cirne/zmail`** npm package under **`node/`** remains for parity and legacy use (OPP-030).
