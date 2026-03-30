@@ -3,11 +3,17 @@
 use clap::{Parser, Subcommand};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::process::Stdio;
+use std::thread;
+use std::time::Duration;
 use zmail::{
-    collect_stats, db, handle_request_line, list_thread_messages, load_config, print_status_text,
-    read_message_bytes, rebuild_from_maildir, resolve_search_json_format, resolve_setup_email,
-    resolve_setup_password, search_result_to_slim_json_row, search_with_meta, status, who,
-    write_setup, LoadConfigOptions, SearchOptions, SearchResultFormatPreference, SetupArgs,
+    build_refresh_json_value, collect_stats, connect_imap_session, db, handle_request_line,
+    is_sync_lock_held, list_thread_messages, load_config, load_refresh_new_mail, print_refresh_text,
+    print_status_text, read_message_bytes, rebuild_from_maildir, resolve_search_json_format,
+    resolve_setup_email, resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd,
+    search_result_to_slim_json_row, search_with_meta, status,
+    sync_log_path, who, write_setup, LoadConfigOptions, SearchOptions,
+    SearchResultFormatPreference, SetupArgs, SyncDirection, SyncFileLogger, SyncLockRow, SyncOptions,
     WhoOptions,
 };
 
@@ -95,6 +101,200 @@ enum Commands {
         #[arg(long)]
         json: bool,
     },
+    /// Backfill mail (backward sync). Default: background subprocess; use --foreground to block.
+    Sync {
+        /// Positional duration (e.g. `7d`, `180d`, `1y`) — same as `--since`
+        duration: Option<String>,
+        /// Rolling window — overrides `sync.defaultSince` when set
+        #[arg(long)]
+        since: Option<String>,
+        #[arg(long, alias = "fg")]
+        foreground: bool,
+    },
+    /// Fetch new messages since last checkpoint (forward sync)
+    Refresh {
+        #[arg(long)]
+        force: bool,
+        #[arg(long)]
+        include_noise: bool,
+        #[arg(long)]
+        text: bool,
+    },
+}
+
+fn zmail_home_path() -> PathBuf {
+    std::env::var("ZMAIL_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| dirs::home_dir().expect("HOME").join(".zmail"))
+}
+
+fn print_sync_foreground_metrics(r: &zmail::SyncResult) {
+    let sec = (r.duration_ms as f64) / 1000.0;
+    let mb = (r.bytes_downloaded as f64) / (1024.0 * 1024.0);
+    let kbps = r.bandwidth_bytes_per_sec / 1024.0;
+    println!();
+    println!("Sync metrics:");
+    println!(
+        "  messages:  {} new, {} fetched",
+        r.synced, r.messages_fetched
+    );
+    println!(
+        "  downloaded: {:.2} MB ({} bytes)",
+        mb, r.bytes_downloaded
+    );
+    println!("  bandwidth: {:.1} KB/s", kbps);
+    println!(
+        "  throughput: {} msg/min",
+        r.messages_per_minute.round() as i64
+    );
+    println!("  duration:  {sec:.2}s");
+    println!("Sync log: {}", r.log_path);
+}
+
+fn run_sync_foreground_backward(
+    cfg: &zmail::Config,
+    since_override: Option<&str>,
+) -> Result<zmail::SyncResult, Box<dyn std::error::Error>> {
+    let home = zmail_home_path();
+    if cfg.imap_user.trim().is_empty() || cfg.imap_password.trim().is_empty() {
+        return Err("IMAP user/password required. Run `zmail setup`.".into());
+    }
+    let logger = SyncFileLogger::open(&home)?;
+    let mut conn = db::open_file(cfg.db_path())?;
+    let mailbox = resolve_sync_mailbox(cfg);
+    let since_ymd = resolve_sync_since_ymd(cfg, since_override)?;
+    eprintln!("zmail: Connecting to {}…", cfg.imap_host);
+    let host = cfg.imap_host.clone();
+    let port = cfg.imap_port;
+    let user = cfg.imap_user.clone();
+    let pass = cfg.imap_password.clone();
+    let opts = SyncOptions {
+        direction: SyncDirection::Backward,
+        since_ymd,
+        force: false,
+        progress_stderr: true,
+    };
+    let r = zmail::run_sync_with_parallel_imap_connect(
+        &mut conn,
+        &logger,
+        &mailbox,
+        cfg.maildir_path(),
+        &cfg.sync_exclude_labels,
+        &opts,
+        move || connect_imap_session(&host, port, &user, &pass),
+    )?;
+    eprintln!("zmail: Connected.");
+    Ok(r)
+}
+
+fn run_sync_foreground_refresh(
+    cfg: &zmail::Config,
+    force: bool,
+) -> Result<zmail::SyncResult, Box<dyn std::error::Error>> {
+    let home = zmail_home_path();
+    if cfg.imap_user.trim().is_empty() || cfg.imap_password.trim().is_empty() {
+        return Err("IMAP user/password required. Run `zmail setup`.".into());
+    }
+    let logger = SyncFileLogger::open(&home)?;
+    let mut conn = db::open_file(cfg.db_path())?;
+    let mailbox = resolve_sync_mailbox(cfg);
+    let since_ymd = resolve_sync_since_ymd(cfg, None)?;
+    eprintln!("zmail: Connecting to {}…", cfg.imap_host);
+    let host = cfg.imap_host.clone();
+    let port = cfg.imap_port;
+    let user = cfg.imap_user.clone();
+    let pass = cfg.imap_password.clone();
+    let opts = SyncOptions {
+        direction: SyncDirection::Forward,
+        since_ymd,
+        force,
+        progress_stderr: true,
+    };
+    let r = zmail::run_sync_with_parallel_imap_connect(
+        &mut conn,
+        &logger,
+        &mailbox,
+        cfg.maildir_path(),
+        &cfg.sync_exclude_labels,
+        &opts,
+        move || connect_imap_session(&host, port, &user, &pass),
+    )?;
+    eprintln!("zmail: Connected.");
+    Ok(r)
+}
+
+fn run_sync_background(cfg: &zmail::Config, since_override: Option<&str>) -> Result<(), Box<dyn std::error::Error>> {
+    let home = zmail_home_path();
+    if cfg.imap_user.trim().is_empty() || cfg.imap_password.trim().is_empty() {
+        return Err("IMAP user/password required. Run `zmail setup`.".into());
+    }
+    let conn = db::open_file(cfg.db_path())?;
+    let lock_row: Option<SyncLockRow> = conn
+        .query_row(
+            "SELECT is_running, owner_pid, sync_lock_started_at FROM sync_summary WHERE id = 1",
+            [],
+            |row| {
+                Ok(SyncLockRow {
+                    is_running: row.get(0)?,
+                    owner_pid: row.get(1)?,
+                    sync_lock_started_at: row.get(2)?,
+                })
+            },
+        )
+        .ok();
+    if is_sync_lock_held(lock_row.as_ref()) {
+        println!(
+            "Sync already running (PID: {:?})\n",
+            lock_row.and_then(|r| r.owner_pid)
+        );
+        print_status_text(&conn)?;
+        return Ok(());
+    }
+    drop(conn);
+
+    let mut auth = connect_imap_session(
+        &cfg.imap_host,
+        cfg.imap_port,
+        &cfg.imap_user,
+        &cfg.imap_password,
+    )?;
+    let _ = auth.logout();
+
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(&exe);
+    cmd.arg("sync").arg("--foreground");
+    if let Some(s) = since_override {
+        if !s.is_empty() {
+            cmd.arg("--since").arg(s);
+        }
+    }
+    cmd.stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    cmd.spawn()?;
+
+    let log = sync_log_path(&home);
+    println!("Sync log: {}", log.display());
+
+    let start_count: i64 = {
+        let c = db::open_file(cfg.db_path())?;
+        c.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?
+    };
+    let started = std::time::Instant::now();
+    while started.elapsed() < Duration::from_secs(60) {
+        thread::sleep(Duration::from_secs(2));
+        let c = db::open_file(cfg.db_path())?;
+        let count: i64 = c.query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))?;
+        if count > start_count {
+            println!("Sync running… {count} messages in index");
+            return Ok(());
+        }
+    }
+    println!(
+        "Sync started in background. Check `zmail status` or tail {}",
+        log.display()
+    );
+    Ok(())
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -314,6 +514,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     out["timings"] = serde_json::to_value(&run.timings)?;
                 }
                 println!("{}", serde_json::to_string_pretty(&out)?);
+            }
+        }
+        Commands::Sync {
+            duration,
+            since,
+            foreground,
+        } => {
+            let cfg = load_config(LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            });
+            let since_spec = since
+                .as_deref()
+                .or(duration.as_deref())
+                .map(str::trim)
+                .filter(|s| !s.is_empty());
+            if foreground {
+                let r = run_sync_foreground_backward(&cfg, since_spec)?;
+                print_sync_foreground_metrics(&r);
+            } else {
+                run_sync_background(&cfg, since_spec)?;
+            }
+        }
+        Commands::Refresh {
+            force,
+            include_noise,
+            text,
+        } => {
+            let cfg = load_config(LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
+                env: None,
+            });
+            let conn = db::open_file(cfg.db_path())?;
+            let r = run_sync_foreground_refresh(&cfg, force)?;
+            let ids = r.new_message_ids.clone().unwrap_or_default();
+            let new_mail = load_refresh_new_mail(
+                &conn,
+                &ids,
+                include_noise,
+                (!cfg.imap_user.trim().is_empty()).then_some(cfg.imap_user.as_str()),
+            )?;
+            if text {
+                print_refresh_text(&r, &new_mail);
+            } else {
+                let v = build_refresh_json_value(&r, &new_mail);
+                println!("{}", serde_json::to_string_pretty(&v)?);
             }
         }
         Commands::Status { json } => {

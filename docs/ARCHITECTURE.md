@@ -564,7 +564,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Decision:** Maintain a **Rust** implementation in **`rust/`** alongside the existing **Node + TypeScript** tree at repo root. Both target the same **agent contract**: `ZMAIL_HOME` / `~/.zmail` (`config.json`, `.env`, `data/`, maildir layout), FTS5 SQLite schema semantics, CLI subcommands, and MCP stdio tools. **`rust/target/`** is gitignored; CI/dev run **`cargo test`** from **`rust/`**.
 
-**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests in **`rust/tests/*.rs`** named by area (e.g. `config_schema_status`, `sync_parse_maildir`, `search_fts`, `who_identity`, `setup_read_rebuild`, `attachments_extract`, `send_drafts`, `mcp_stdio`, `ask_inbox_guards`) covering config/DB through MCP and ask-shaped flows.
+**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), **`imap`** (TLS IMAP client) for `zmail sync` / `zmail refresh`, `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests in **`rust/tests/*.rs`** named by area (e.g. `config_schema_status`, `sync_parse_maildir`, `sync_run_fake_imap`, `search_fts`, `who_identity`, `setup_read_rebuild`, `attachments_extract`, `send_drafts`, `mcp_stdio`, `ask_inbox_guards`) covering config/DB through MCP, IMAP-shaped sync, and ask-shaped flows.
 
 **Checkpoint (in-repo):** Area-named integration tests under **`rust/tests/`** (plus `#[cfg(test)]` unit tests in `rust/src/`) run via **`cargo test`** — sync/index/search/who/attachments/send-drafts/MCP/ask-shaped coverage against temp dirs; not a substitute for production bakeoffs on real mailboxes.
 
@@ -573,7 +573,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 | Area | Status / next steps |
 |------|---------------------|
 | **Distribution** | No crates.io/npm replacement yet; decide single binary vs dual publish, install script, version skew with `@cirne/zmail`. See [OPP-030](opportunities/OPP-030-rust-port-cutover.md). |
-| **Production validation** | Run Rust binary against real `ZMAIL_HOME` + IMAP; compare outputs to Node CLI for search/who/read/thread/MCP JSON shapes edge cases. |
+| **Production validation** | Run Rust binary against real `ZMAIL_HOME` + IMAP; compare outputs to Node CLI for **sync/refresh**, search/who/read/thread/MCP JSON shapes edge cases. |
 | **CI** | Add **`rust/`** job: `cargo clippy`, `cargo test` (stable Rust). |
 | **Docs & skill** | After cutover: update `skills/zmail/`, install.sh, and `AGENTS.md` primary install path; until then, Rust is **developer-only** (see [AGENTS.md](../AGENTS.md#rust-port-in-repo)). |
 | **BUG-025 / MCP parity** | Node MCP still tracks [BUG-025](bugs/BUG-025-mcp-cli-parity-alignment-skill.md); Rust MCP tests lock param keys — extend if CLI adds tools or renames params. |

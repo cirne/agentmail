@@ -239,6 +239,41 @@ pub fn contact_rank_map_for_addresses(
     Ok(out)
 }
 
+/// Sort rows by sender contact rank (desc), then date (desc). No-op if `owner_address` is empty.
+pub fn sort_rows_by_sender_contact_rank<T: Clone>(
+    conn: &Connection,
+    owner_address: Option<&str>,
+    rows: Vec<T>,
+    from_address: impl Fn(&T) -> &str,
+    date: impl Fn(&T) -> &str,
+) -> rusqlite::Result<Vec<T>> {
+    let Some(owner) = owner_address.map(str::trim).filter(|s| !s.is_empty()) else {
+        return Ok(rows);
+    };
+    if rows.is_empty() {
+        return Ok(rows);
+    }
+    let norms: std::collections::HashSet<String> =
+        rows.iter().map(|r| normalize_address(from_address(r))).collect();
+    let norms_vec: Vec<String> = norms.into_iter().collect();
+    let rank_map = contact_rank_map_for_addresses(conn, owner, &norms_vec)?;
+    let mut out: Vec<(T, f64, String)> = rows
+        .into_iter()
+        .map(|r| {
+            let fa = normalize_address(from_address(&r));
+            let rank = *rank_map.get(&fa).unwrap_or(&0.0);
+            let d = date(&r).to_string();
+            (r, rank, d)
+        })
+        .collect();
+    out.sort_by(|a, b| {
+        b.1.partial_cmp(&a.1)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| b.2.cmp(&a.2))
+    });
+    Ok(out.into_iter().map(|(r, _, _)| r).collect())
+}
+
 #[derive(Debug, Clone)]
 pub struct RankedSearchRow {
     pub result: SearchResult,

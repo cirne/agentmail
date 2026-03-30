@@ -7,6 +7,7 @@ pub mod ask_stub;
 pub mod inbox_window;
 pub mod mail_read;
 pub mod mcp;
+pub mod refresh;
 pub mod rebuild_index;
 pub mod search;
 pub mod send;
@@ -29,12 +30,16 @@ pub use config::{
 pub use db::{
     apply_schema, journal_mode, list_user_tables, open_file, open_memory, DbError, SCHEMA_VERSION,
 };
-pub use db::message_persist::{fts_match_count, persist_message};
+pub use db::message_persist::{fts_match_count, persist_attachments_from_parsed, persist_message};
 pub use sync::{
-    acquire_lock, filter_uids_after, forward_uid_range, is_process_alive, is_sync_lock_held,
-    oldest_message_date_for_folder, parse_raw_message, parse_since_to_date, release_lock,
-    same_calendar_day, write_maildir_message, LockResult, MaildirWrite, ParsedAttachment,
-    ParsedMessage, SyncLockRow,
+    acquire_lock, connect_imap_session, filter_uids_after, forward_uid_range, is_process_alive,
+    is_sync_lock_held, oldest_message_date_for_folder, parse_raw_message, parse_since_to_date,
+    release_lock, resolve_sync_mailbox, resolve_sync_since_ymd, run_sync,
+    run_sync_with_parallel_imap_connect, same_calendar_day,
+    should_early_exit_forward, sync_log_path, write_maildir_message, FakeImapTransport,
+    FetchedMessage, ImapStatusData, LockResult, MaildirWrite, ParsedAttachment, ParsedMessage,
+    RealImapTransport, RunSyncError,
+    SyncDirection, SyncFileLogger, SyncImapTransport, SyncLockRow, SyncOptions, SyncResult,
 };
 pub use send::{
     extract_threading_headers, filter_recipients_send_test, list_drafts, plan_send, read_draft,
@@ -42,6 +47,7 @@ pub use send::{
 };
 pub use search::{
     canonical_first_name, contact_rank_simple, convert_to_or_query, escape_fts5_query,
+    sort_rows_by_sender_contact_rank,
     extract_signature_data, fuzzy_name_token_match, infer_name_from_address, is_noreply,
     name_matches_phonetically, normalize_address, parse_search_query, parse_signature_block,
     resolve_search_json_format, search_result_to_slim_json_row, search_with_meta, who,
@@ -50,6 +56,9 @@ pub use search::{
     WhoResult, SEARCH_AUTO_SLIM_THRESHOLD,
 };
 pub use mail_read::{read_message_bytes, resolve_raw_path};
+pub use refresh::{
+    build_refresh_json_value, load_refresh_new_mail, print_refresh_text, RefreshPreviewRow,
+};
 pub use mcp::{handle_request_line, tool_schemas_stable, JsonRpcRequest, TOOL_NAMES};
 pub use rebuild_index::{rebuild_from_maildir, rebuild_from_maildir_sequential};
 pub use setup::{

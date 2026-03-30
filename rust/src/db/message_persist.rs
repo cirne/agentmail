@@ -1,8 +1,11 @@
 //! Insert messages / threads / attachments (mirrors `src/db/message-persistence.ts`).
 
+use std::fs::{create_dir_all, write};
+use std::path::{Path, PathBuf};
+
 use rusqlite::{params, Connection};
 
-use crate::sync::ParsedMessage;
+use crate::sync::{ParsedAttachment, ParsedMessage};
 
 const SQL_INSERT_MESSAGE: &str = "INSERT INTO messages (
       message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name,
@@ -11,6 +14,58 @@ const SQL_INSERT_MESSAGE: &str = "INSERT INTO messages (
 
 const SQL_UPSERT_THREAD: &str = "INSERT OR REPLACE INTO threads (thread_id, subject, participant_count, message_count, last_message_at)
      VALUES (?1, ?2, 1, 1, ?3)";
+
+const SQL_INSERT_ATTACHMENT: &str =
+    "INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
+     VALUES (?1, ?2, ?3, ?4, ?5, NULL)";
+
+fn sanitize_filename(filename: &str) -> String {
+    filename
+        .chars()
+        .map(|c| {
+            if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\0'..='\x1f') {
+                '_'
+            } else {
+                c
+            }
+        })
+        .collect::<String>()
+        .replace("..", "_")
+}
+
+fn ensure_unique_filename(dir: &Path, base_filename: &str) -> String {
+    let sanitized = sanitize_filename(base_filename);
+    let mut candidate = sanitized.clone();
+    let mut counter = 1u32;
+    while dir.join(&candidate).exists() {
+        let (stem, ext) = if let Some(i) = candidate.rfind('.') {
+            (candidate[..i].to_string(), candidate[i..].to_string())
+        } else {
+            (candidate.clone(), String::new())
+        };
+        candidate = format!("{stem}_{counter}{ext}");
+        counter += 1;
+    }
+    candidate
+}
+
+fn mime_from_ext(ext: &str) -> &'static str {
+    match ext.to_lowercase().as_str() {
+        "pdf" => "application/pdf",
+        "doc" => "application/msword",
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xls" => "application/vnd.ms-excel",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "txt" => "text/plain",
+        "html" | "htm" => "text/html",
+        "csv" => "text/csv",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "zip" => "application/zip",
+        _ => "application/octet-stream",
+    }
+}
 
 fn label_noise(labels_json: &str) -> bool {
     let Ok(arr) = serde_json::from_str::<Vec<String>>(labels_json) else {
@@ -73,6 +128,51 @@ pub fn persist_message(
         params![parsed.message_id, parsed.subject, parsed.date],
     )?;
     Ok(true)
+}
+
+/// Write attachment bytes under `maildir_path/attachments/<message_id>/` and insert rows (sync path).
+pub fn persist_attachments_from_parsed(
+    conn: &Connection,
+    message_id: &str,
+    attachments: &[ParsedAttachment],
+    maildir_path: &Path,
+) -> rusqlite::Result<()> {
+    if attachments.is_empty() {
+        return Ok(());
+    }
+    let attachments_dir: PathBuf = maildir_path.join("attachments").join(message_id);
+    create_dir_all(&attachments_dir).map_err(|e| {
+        rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+    })?;
+
+    for att in attachments {
+        let unique = ensure_unique_filename(&attachments_dir, &att.filename);
+        let disk_path = attachments_dir.join(&unique);
+        write(&disk_path, &att.content).map_err(|e| {
+            rusqlite::Error::ToSqlConversionFailure(Box::new(e))
+        })?;
+        let stored_path = format!("attachments/{message_id}/{unique}");
+        let ext = unique
+            .rsplit_once('.')
+            .map(|(_, e)| e)
+            .unwrap_or("");
+        let mime = if !att.mime_type.is_empty() {
+            att.mime_type.as_str()
+        } else {
+            mime_from_ext(ext)
+        };
+        conn.execute(
+            SQL_INSERT_ATTACHMENT,
+            params![
+                message_id,
+                att.filename.as_str(),
+                mime,
+                att.size as i64,
+                stored_path,
+            ],
+        )?;
+    }
+    Ok(())
 }
 
 /// Simple FTS check: return count of rows matching FTS query.

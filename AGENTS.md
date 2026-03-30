@@ -31,8 +31,10 @@ A **Rust** implementation lives under **`rust/`** (same CLI/MCP contract and `~/
 
 ```bash
 cd rust
-cargo test                    # integration tests (`tests/*.rs`, e.g. config_schema_status, search_fts, mcp_stdio)
+cargo test                    # integration tests (`tests/*.rs`, e.g. config_schema_status, sync_run_fake_imap, search_fts, mcp_stdio)
 cargo run -- search "foo"     # dev binary; same subcommand style as Node zmail
+cargo run -- sync --foreground --since 7d   # backward IMAP sync (`sync` alone spawns a background child like Node)
+cargo run -- refresh          # forward IMAP sync + JSON/text new-mail preview
 cargo build --release && ./target/release/zmail status
 ```
 

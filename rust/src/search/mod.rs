@@ -16,7 +16,7 @@ mod signature;
 mod types;
 pub mod who;
 
-pub use contact_rank::contact_rank_simple;
+pub use contact_rank::{contact_rank_simple, sort_rows_by_sender_contact_rank};
 pub use engine::search_with_meta;
 pub use escape::{convert_to_or_query, escape_fts5_query};
 pub use infer_name::infer_name_from_address;
