@@ -24,6 +24,7 @@ use zmail::{
 #[derive(Parser)]
 #[command(name = "zmail")]
 #[command(about = "zmail: Agent-first email")]
+#[command(version)]
 #[command(
     help_template = "\
 {before-help}{about-with-newline}\
