@@ -4,10 +4,11 @@ use rusqlite::Connection;
 use serde::Deserialize;
 use serde_json::{json, Value};
 
+use crate::ask::tools::execute_get_message_tool;
 use crate::attachments::{list_attachments_for_message, read_attachment_text};
 use crate::collect_stats;
 use crate::config::{load_config, LoadConfigOptions};
-use crate::ids::{resolve_message_id, resolve_thread_id};
+use crate::ids::resolve_thread_id;
 use crate::search::who::{who, WhoOptions};
 use crate::search::{search_with_meta, SearchOptions};
 use crate::send::{list_drafts, read_draft, send_draft_by_id};
@@ -157,24 +158,8 @@ fn tool_call(
             .map_err(|e| e.to_string())
         }
         "get_message_by_id" => {
-            let mid_arg = args.get("messageId").and_then(|x| x.as_str()).unwrap_or("");
-            let row: Result<(String, String, String), rusqlite::Error> = match resolve_message_id(
-                conn, mid_arg,
-            ) {
-                Ok(Some(mid)) => conn.query_row(
-                    "SELECT message_id, subject, from_address FROM messages WHERE message_id = ?1",
-                    [&mid],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-                ),
-                Ok(None) => Err(rusqlite::Error::QueryReturnedNoRows),
-                Err(e) => Err(e),
-            };
-            Ok(row
-                .map(|(a, b, c)| {
-                    serde_json::json!({ "messageId": a, "subject": b, "fromAddress": c })
-                        .to_string()
-                })
-                .unwrap_or_else(|_| "{}".into()))
+            let map = args.as_object().cloned().unwrap_or_default();
+            execute_get_message_tool(conn, data_dir, &map).map_err(|e| e.to_string())
         }
         "get_thread" => {
             let tid_arg = args.get("threadId").and_then(|x| x.as_str()).unwrap_or("");

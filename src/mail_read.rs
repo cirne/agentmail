@@ -9,7 +9,15 @@ pub fn resolve_raw_path(raw_path: &str, data_dir: &Path) -> PathBuf {
     if p.is_absolute() {
         p.to_path_buf()
     } else {
-        data_dir.join(raw_path)
+        let direct = data_dir.join(raw_path);
+        if direct.exists() || raw_path.starts_with("maildir/") {
+            return direct;
+        }
+        let compat = data_dir.join("maildir").join(raw_path);
+        if compat.exists() {
+            return compat;
+        }
+        direct
     }
 }
 

@@ -1,6 +1,6 @@
 # BUG-023: Attachments Missing from Synced Email — Agent-Reported
 
-**Status:** Fixed (2026-03-09).
+**Status:** Fixed (verified 2026-03-31).
 
 **Design lens:** [Agent-first](../../VISION.md) — attachment extraction is a core workflow (search → find email → read attachments → summarize). When the email body says "attached are the draft documents" but no attachments are available, the agent promises something it can't deliver.
 
@@ -57,6 +57,8 @@ if (att.disposition === "inline" || (att.related && att.disposition !== "attachm
 This preserves the inline image filter while allowing attachments with explicit `disposition: "attachment"` to pass through, regardless of postal-mime's `related` flag.
 
 **Verification:** After schema bump and rebuild, all 14 previously-dropped attachments are now indexed.
+
+**User verification (2026-03-31):** Confirmed fixed during follow-up verification; bug closed out.
 
 ---
 

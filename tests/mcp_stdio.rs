@@ -1,9 +1,11 @@
 //! Integration tests: MCP stdio JSON-RPC handlers and tool schema stability.
 
+use std::fs;
+
 use serde_json::json;
 use tempfile::tempdir;
 use zmail::{
-    handle_request_line, open_memory, persist_message, tool_schemas_stable, ParsedMessage,
+    db, handle_request_line, open_memory, persist_message, tool_schemas_stable, ParsedMessage,
     TOOL_NAMES,
 };
 
@@ -49,13 +51,28 @@ fn mcp_search_mail_returns_json() {
 
 #[test]
 fn mcp_get_message_by_id() {
-    let conn = open_memory().unwrap();
-    conn.execute(
-        "INSERT INTO messages (message_id, thread_id, folder, uid, from_address, to_addresses, cc_addresses, subject, body_text, date, raw_path)
-         VALUES ('mid-mcp', 'mid-mcp', 'f', 1, 'a@b', '[]', '[]', 'S', 'b', 'd', 'p')",
-        [],
-    )
-    .unwrap();
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("data/cur")).unwrap();
+    let eml_path = dir.path().join("data/cur/mcp-msg.eml");
+    let raw = b"From: a@b.com\r\nSubject: S\r\nMessage-ID: <mid-mcp>\r\nDate: Mon, 1 Jan 2024 12:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nMCP body text.";
+    fs::write(&eml_path, raw).unwrap();
+
+    let db_path = dir.path().join("data/zmail.db");
+    let conn = db::open_file(&db_path).unwrap();
+    let p = ParsedMessage {
+        message_id: "<mid-mcp>".into(),
+        from_address: "a@b.com".into(),
+        from_name: None,
+        to_addresses: vec![],
+        cc_addresses: vec![],
+        subject: "S".into(),
+        date: "2024-01-01T12:00:00Z".into(),
+        body_text: "MCP body text.".into(),
+        body_html: None,
+        attachments: vec![],
+        is_noise: false,
+    };
+    persist_message(&conn, &p, MAILBOX, 1, "[]", "cur/mcp-msg.eml").unwrap();
     let line = serde_json::to_string(&json!({
         "jsonrpc": "2.0",
         "id": 2,
@@ -63,8 +80,9 @@ fn mcp_get_message_by_id() {
         "params": { "name": "get_message_by_id", "arguments": { "messageId": "mid-mcp" } }
     }))
     .unwrap();
-    let out = handle_request_line(&conn, &data_dir(), false, &line);
+    let out = handle_request_line(&conn, &dir.path().join("data"), false, &line);
     assert!(out.contains("mid-mcp"));
+    assert!(out.contains("MCP body text"), "{}", out);
 }
 
 #[test]
