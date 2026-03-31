@@ -48,6 +48,9 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `bug-inbox-text-utf8-panic.md` | 2026-03-30 | Created bug, fixed | [BUG-028 archived](bugs/archive/BUG-028-inbox-text-utf8-snippet-panic.md) — `inbox --text`: `wrap_line` uses `floor_char_boundary` |
 | `bug-read-bare-message-id-query-returned-no-rows.md` | 2026-03-31 | Created bug; fixed; verified | [BUG-029 archived](bugs/archive/BUG-029-read-bare-message-id-no-angle-brackets.md) — ID lookup tries `<id>` then bare `id`; closed after verification |
 | `bug-draft-view-and-send-hang-sigkill.md` | 2026-03-31 | Created bug; fixed & verified | [BUG-030 archived](bugs/archive/BUG-030-draft-commands-hang-after-edit.md) — lazy DB open; closed 2026-03-31 |
+| `bug-send-reply-draft-wrong-path.md` | 2026-03-31 | Created bug | [BUG-031](bugs/BUG-031-send-reply-draft-wrong-maildir-path.md) — reply send reconstructs source `.eml` path under `data/cur/` instead of `data/maildir/cur/` |
+| `ux-search-query-optional-when-filters-present.md` | 2026-03-31 | Created bug | [BUG-032](bugs/BUG-032-search-query-should-be-optional-with-filters.md) — CLI requires positional `<QUERY>` even when filters already define a valid search |
+| `ux-actionable-error-messages.md` | 2026-03-31 | Created bug | [BUG-033](bugs/BUG-033-actionable-file-not-found-errors.md) — missing local files still surface raw OS/path errors instead of actionable zmail-specific recovery messages |
 
 ---
 
