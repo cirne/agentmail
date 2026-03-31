@@ -33,6 +33,7 @@ pub use smtp_send::{send_simple_message, verify_smtp_credentials, SendResult, Se
 pub use threading::extract_threading_headers;
 
 use crate::config::Config;
+use crate::db;
 use crate::mail_read::resolve_raw_path;
 use crate::sync::parse_raw_message;
 use rusqlite::Connection;
@@ -58,8 +59,11 @@ pub fn plan_send(plan: &SendPlan) -> Result<(), String> {
 }
 
 /// Send a draft by id from `{data_dir}/drafts/{id}.md` (`.md` optional in id).
+///
+/// Opens the SQLite index only when the draft is a **reply** and needs In-Reply-To / References
+/// from the source message. **Forward** and **new** drafts do not touch the DB, so `zmail send
+/// <id>` stays responsive when another process holds the DB (e.g. background sync).
 pub fn send_draft_by_id(
-    conn: &Connection,
     cfg: &Config,
     data_dir: &Path,
     draft_id: &str,
@@ -89,7 +93,8 @@ pub fn send_draft_by_id(
             .is_some_and(|s| !s.trim().is_empty())
     {
         let sid = draft.meta.source_message_id.as_ref().unwrap().trim();
-        match load_threading_from_source_message(conn, data_dir, sid) {
+        let conn = db::open_file(cfg.db_path()).map_err(|e| e.to_string())?;
+        match load_threading_from_source_message(&conn, data_dir, sid) {
             Ok((irt, refs)) => {
                 in_reply_to = Some(irt);
                 references = Some(refs);
@@ -143,18 +148,7 @@ fn ensure_brackets(id: &str) -> String {
     }
 }
 
-/// Normalize stored message id for SQL lookup (angle brackets).
-pub fn normalize_message_id(id: &str) -> String {
-    let t = id.trim();
-    if t.is_empty() {
-        return id.to_string();
-    }
-    if t.starts_with('<') && t.ends_with('>') {
-        t.to_string()
-    } else {
-        format!("<{t}>")
-    }
-}
+pub use crate::ids::normalize_message_id;
 
 /// Load In-Reply-To / References from the source message raw `.eml` (reply threading).
 pub fn load_threading_from_source_message(
@@ -162,18 +156,14 @@ pub fn load_threading_from_source_message(
     data_dir: &Path,
     source_message_id: &str,
 ) -> Result<(String, String), String> {
-    let mid = normalize_message_id(source_message_id);
-    let raw_path: String = conn
-        .query_row(
-            "SELECT raw_path FROM messages WHERE message_id = ?1",
-            [&mid],
-            |r| r.get(0),
-        )
-        .map_err(|_| {
-            format!(
-                "Cannot build reply threading: source message {source_message_id} is not in the local index. Run zmail sync or zmail refresh, then try again."
-            )
-        })?;
+    let Some((_mid, raw_path)) =
+        crate::ids::resolve_message_id_and_raw_path(conn, source_message_id)
+            .map_err(|e| e.to_string())?
+    else {
+        return Err(format!(
+            "Cannot build reply threading: source message {source_message_id} is not in the local index. Run zmail sync or zmail refresh, then try again."
+        ));
+    };
     let path = resolve_raw_path(&raw_path, data_dir);
     let buf = std::fs::read(&path).map_err(|e| {
         format!(

@@ -6,22 +6,10 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::{json, Value};
 
+use crate::ids::{resolve_message_id, resolve_thread_id};
 use crate::search::{search_with_meta, SearchOptions, SearchResult};
 use crate::sync::parse_since_to_date;
 use crate::thread_view::list_thread_messages;
-
-/// Normalize message/thread id to angle-bracket form (see Node `normalizeMessageId`).
-pub fn normalize_message_id(id: &str) -> String {
-    let trimmed = id.trim();
-    if trimmed.is_empty() {
-        return id.to_string();
-    }
-    if trimmed.starts_with('<') && trimmed.ends_with('>') {
-        trimmed.to_string()
-    } else {
-        format!("<{trimmed}>")
-    }
-}
 
 fn parse_date_param(date_str: Option<&str>) -> Option<String> {
     let s = date_str?.trim();
@@ -252,7 +240,9 @@ pub fn execute_get_thread_headers_tool(
     args: &serde_json::Map<String, Value>,
 ) -> rusqlite::Result<String> {
     let thread_id = args.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
-    let normalized = normalize_message_id(thread_id);
+    let Some(normalized) = resolve_thread_id(conn, thread_id)? else {
+        return Ok(json!({ "error": "Thread not found", "threadId": thread_id }).to_string());
+    };
     let rows = list_thread_messages(conn, &normalized)?;
     if rows.is_empty() {
         return Ok(json!({ "error": "Thread not found", "threadId": normalized }).to_string());
@@ -294,8 +284,10 @@ pub fn execute_get_message_tool(
     data_dir: &std::path::Path,
     args: &serde_json::Map<String, Value>,
 ) -> rusqlite::Result<String> {
-    let message_id =
-        normalize_message_id(args.get("messageId").and_then(|v| v.as_str()).unwrap_or(""));
+    let arg = args.get("messageId").and_then(|v| v.as_str()).unwrap_or("");
+    let Some(message_id) = resolve_message_id(conn, arg)? else {
+        return Ok(json!({ "error": format!("Message {arg} not found") }).to_string());
+    };
     let detail = args
         .get("detail")
         .and_then(|v| v.as_str())
@@ -407,6 +399,7 @@ pub fn execute_nano_tool(
 mod tests {
     use super::*;
     use crate::db::apply_schema;
+    use crate::ids::normalize_message_id;
     use rusqlite::Connection;
 
     fn empty_db() -> Connection {

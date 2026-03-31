@@ -5,6 +5,7 @@ use std::collections::HashSet;
 use std::path::Path;
 
 use crate::attachments::{extract_and_cache, read_stored_file};
+use crate::ids::resolve_message_id;
 
 const DEFAULT_MAX_MESSAGES: usize = 50;
 const DEFAULT_MAX_BODY_CHARS: usize = 2000;
@@ -123,10 +124,13 @@ fn assemble_context_inner(
         !specific_attachment_ids.is_empty() || should_include_attachments(question);
 
     for mid in ids {
+        let Some(canonical) = resolve_message_id(conn, mid)? else {
+            continue;
+        };
         let row: Option<(String, String, String, Option<String>, String, String, String)> = conn
             .query_row(
                 "SELECT message_id, thread_id, from_address, from_name, subject, date, body_text FROM messages WHERE message_id = ?1",
-                [mid],
+                [&canonical],
                 |r| {
                     Ok((
                         r.get(0)?,

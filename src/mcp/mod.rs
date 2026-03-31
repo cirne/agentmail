@@ -7,6 +7,7 @@ use serde_json::{json, Value};
 use crate::attachments::{list_attachments_for_message, read_attachment_text};
 use crate::collect_stats;
 use crate::config::{load_config, LoadConfigOptions};
+use crate::ids::{resolve_message_id, resolve_thread_id};
 use crate::search::who::{who, WhoOptions};
 use crate::search::{search_with_meta, SearchOptions};
 use crate::send::{list_drafts, read_draft, send_draft_by_id};
@@ -156,12 +157,18 @@ fn tool_call(
             .map_err(|e| e.to_string())
         }
         "get_message_by_id" => {
-            let mid = args.get("messageId").and_then(|x| x.as_str()).unwrap_or("");
-            let row: Result<(String, String, String), rusqlite::Error> = conn.query_row(
-                "SELECT message_id, subject, from_address FROM messages WHERE message_id = ?1",
-                [mid],
-                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
-            );
+            let mid_arg = args.get("messageId").and_then(|x| x.as_str()).unwrap_or("");
+            let row: Result<(String, String, String), rusqlite::Error> = match resolve_message_id(
+                conn, mid_arg,
+            ) {
+                Ok(Some(mid)) => conn.query_row(
+                    "SELECT message_id, subject, from_address FROM messages WHERE message_id = ?1",
+                    [&mid],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                ),
+                Ok(None) => Err(rusqlite::Error::QueryReturnedNoRows),
+                Err(e) => Err(e),
+            };
             Ok(row
                 .map(|(a, b, c)| {
                     serde_json::json!({ "messageId": a, "subject": b, "fromAddress": c })
@@ -170,10 +177,14 @@ fn tool_call(
                 .unwrap_or_else(|_| "{}".into()))
         }
         "get_thread" => {
-            let tid = args.get("threadId").and_then(|x| x.as_str()).unwrap_or("");
-            list_thread_messages(conn, tid)
-                .map(|rows| serde_json::to_string(&rows).unwrap_or_default())
-                .map_err(|e| e.to_string())
+            let tid_arg = args.get("threadId").and_then(|x| x.as_str()).unwrap_or("");
+            match resolve_thread_id(conn, tid_arg) {
+                Ok(Some(t)) => list_thread_messages(conn, &t)
+                    .map(|rows| serde_json::to_string(&rows).unwrap_or_default())
+                    .map_err(|e| e.to_string()),
+                Ok(None) => Ok("[]".into()),
+                Err(e) => Err(e.to_string()),
+            }
         }
         "who_contacts" => {
             let q = args.get("query").and_then(|x| x.as_str()).unwrap_or("");
@@ -195,8 +206,8 @@ fn tool_call(
             .map(|s| serde_json::to_string(&s).unwrap_or_default())
             .map_err(|e| e.to_string()),
         "list_attachments" => {
-            let mid = args.get("messageId").and_then(|x| x.as_str()).unwrap_or("");
-            list_attachments_for_message(conn, mid)
+            let mid_arg = args.get("messageId").and_then(|x| x.as_str()).unwrap_or("");
+            list_attachments_for_message(conn, mid_arg)
                 .map(|rows| serde_json::to_string(&rows).unwrap_or_default())
                 .map_err(|e| e.to_string())
         }
@@ -230,7 +241,7 @@ fn tool_call(
                         .map(std::path::PathBuf::from),
                     env: None,
                 });
-                send_draft_by_id(conn, &cfg, data_dir, draft_id, dry).and_then(|result| {
+                send_draft_by_id(&cfg, data_dir, draft_id, dry).and_then(|result| {
                     serde_json::to_string_pretty(&result).map_err(|e| e.to_string())
                 })
             }

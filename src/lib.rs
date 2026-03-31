@@ -6,6 +6,7 @@ pub mod attachments;
 pub mod config;
 pub mod db;
 pub mod draft;
+pub mod ids;
 pub mod inbox;
 pub mod inbox_window;
 pub mod mail_read;
@@ -36,6 +37,10 @@ pub use db::message_persist::{fts_match_count, persist_attachments_from_parsed, 
 pub use db::{
     apply_schema, journal_mode, list_user_tables, open_file, open_memory, DbError, SCHEMA_VERSION,
 };
+pub use ids::{
+    message_id_lookup_keys, normalize_message_id, resolve_message_id,
+    resolve_message_id_and_raw_path, resolve_thread_id,
+};
 pub use inbox::{
     inbox_candidate_prefetch_limit, run_inbox_scan, InboxBatchClassifier, InboxCandidate,
     InboxNotablePick, MockInboxClassifier, OpenAiInboxClassifier, RunInboxScanError,
@@ -60,10 +65,9 @@ pub use search::{
 };
 pub use send::{
     extract_threading_headers, filter_recipients_send_test, list_drafts,
-    load_threading_from_source_message, normalize_message_id, plan_send, read_draft,
-    resolve_smtp_for_imap_host, send_draft_by_id, send_simple_message, split_address_list,
-    verify_smtp_credentials, write_draft, DraftFile, DraftMeta, SendPlan, SendResult,
-    SendSimpleFields, SendTestMode,
+    load_threading_from_source_message, plan_send, read_draft, resolve_smtp_for_imap_host,
+    send_draft_by_id, send_simple_message, split_address_list, verify_smtp_credentials,
+    write_draft, DraftFile, DraftMeta, SendPlan, SendResult, SendSimpleFields, SendTestMode,
 };
 pub use setup::{
     clean_zmail_home, collect_stats, derive_imap_settings, load_existing_env_secrets,

@@ -11,13 +11,14 @@ use rusqlite::Connection;
 use std::path::PathBuf;
 
 use crate::config::{resolve_openai_api_key, Config, LoadConfigOptions};
+use crate::ids::resolve_message_id;
 use crate::search::SearchResultFormatPreference;
 use crate::send::split_address_list;
 use crate::send::{
     build_draft_list_json_payload, compose_forward_draft_body, compose_new_draft_from_instruction,
     create_draft_id, draft_file_to_json, format_draft_view_text, list_draft_rows,
-    load_forward_source_excerpt, normalize_message_id, read_draft_in_data_dir,
-    rewrite_draft_with_instruction, write_draft, DraftMeta,
+    load_forward_source_excerpt, read_draft_in_data_dir, rewrite_draft_with_instruction,
+    write_draft, DraftMeta,
 };
 
 #[derive(Subcommand)]
@@ -127,7 +128,7 @@ fn parse_result_format(s: Option<&str>) -> SearchResultFormatPreference {
 pub fn run_draft(
     cmd: DraftCmd,
     cfg: &Config,
-    conn: &Connection,
+    conn: Option<&Connection>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let data_dir = &cfg.data_dir;
     let drafts_dir = data_dir.join("drafts");
@@ -271,7 +272,14 @@ pub fn run_draft(
             with_body,
             text,
         } => {
-            let mid = normalize_message_id(&message_id);
+            let Some(conn) = conn else {
+                return Err(
+                    "internal error: draft reply requires the local database connection".into(),
+                );
+            };
+            let Some(mid) = resolve_message_id(conn, &message_id)? else {
+                return Err(format!("Message not found: {message_id}").into());
+            };
             let row: Option<(String, String, String, String)> = conn
                 .query_row(
                     "SELECT message_id, from_address, subject, thread_id FROM messages WHERE message_id = ?1",
@@ -326,7 +334,14 @@ pub fn run_draft(
             with_body,
             text,
         } => {
-            let mid = normalize_message_id(&message_id);
+            let Some(conn) = conn else {
+                return Err(
+                    "internal error: draft forward requires the local database connection".into(),
+                );
+            };
+            let Some(mid) = resolve_message_id(conn, &message_id)? else {
+                return Err(format!("Message not found: {message_id}").into());
+            };
             let row: Option<(String, String, String)> = conn
                 .query_row(
                     "SELECT message_id, subject, thread_id FROM messages WHERE message_id = ?1",

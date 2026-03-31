@@ -576,6 +576,26 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ---
 
+### ADR-026: SQLite Concurrency — Reads vs Writes, Lazy Open, Avoiding Lock Contention
+
+**Context:** zmail uses **one** file-backed database (`data/zmail.db`) with **WAL** (`journal_mode=WAL`) and a **busy timeout** (Rust: `busy_timeout` in [`src/db/mod.rs`](../src/db/mod.rs)). Multiple **processes** (CLI subprocesses, background sync, MCP) may open the DB at the same time. A recurring bug pattern is **opening SQLite when the code path does not need the index** — e.g. purely local draft file work — so the subprocess blocks on `open` / first pragma / schema touch while another process holds a **write** lock (long sync transaction). That surfaces as “hang with no output until killed” ([BUG-030 archived](bugs/archive/BUG-030-draft-commands-hang-after-edit.md)).
+
+**Decision — how to think about concurrency:**
+
+1. **Readers (many, across processes):** Under WAL, **multiple concurrent readers** are normal and expected. Search, read, status, and other **read-mostly** paths may open a connection and run queries without coordinating with each other. Prefer **short** transactions and avoid holding a connection open across unrelated I/O (network, LLM).
+
+2. **Writers (few, serialized):** SQLite allows **one writer at a time** for a given database file. **Sync** and **indexing** are the heavy writers. Treat writes as **critical sections**: keep transactions bounded; do not interleave long IMAP waits inside a write transaction where avoidable. **Sync** additionally uses a **PID-based advisory lock** in `sync_summary` ([ADR-020](#adr-020-sync-and-indexing--concurrent-single-threaded-resilient)) so only one sync run “owns” the pipeline — that does not remove SQLite’s writer mutex, but it prevents duplicate sync processes from hammering the DB.
+
+3. **Lazy open (agent-first CLI):** **Do not** call `open_file` / equivalent at the top of a command unless **every** branch of that command needs the index. Open the DB **inside** the subcommand or branch that runs SQL. Examples: `zmail draft list|view|edit` only touch `data/drafts/`; **`zmail send <draft-id>`** for a **forward** draft does not need threading from SQLite — open only when loading reply threading from the index. This reduces **unnecessary** `busy` waits and makes local-only workflows reliable while sync runs.
+
+4. **When in doubt:** If a new feature **could** work from maildir or draft files alone, **don’t** add a DB dependency until there is a clear query need. If it **must** write, reuse existing lock/transaction patterns and document any new long-running writer.
+
+**Not a separate pool:** SQLite is not Postgres — there are no distinct “read replicas.” “Many read connections” here means **many processes or short-lived connections issuing read transactions** against the same WAL-backed file, which is the supported pattern. **Write** paths remain **single-writer-at-a-time**; coordination beyond that is **application-level** (sync PID lock, short transactions).
+
+**See also:** [ADR-020](#adr-020-sync-and-indexing--concurrent-single-threaded-resilient), [ADR-023](#adr-023-sqlite-access--file-backed-native--async-facade--abi-recovery), [ADR-024](#adr-024-outbound-email--smtp-send-as-user--local-drafts) (drafts vs index).
+
+---
+
 ## Open Questions
 
 - **Rust cutover packaging:** How end users install the Rust binary (and whether npm remains a thin wrapper or is retired) — tracked in [ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover), [RUST_PORT.md](RUST_PORT.md), and [OPP-030](opportunities/OPP-030-rust-port-cutover.md).

@@ -154,10 +154,13 @@ pub fn list_attachments_for_message(
     conn: &Connection,
     message_id: &str,
 ) -> rusqlite::Result<Vec<AttachmentListRow>> {
+    let Some(mid) = crate::ids::resolve_message_id(conn, message_id)? else {
+        return Ok(Vec::new());
+    };
     let mut stmt = conn.prepare(
         "SELECT id, filename, mime_type, size, extracted_text, stored_path FROM attachments WHERE message_id = ?1 ORDER BY id",
     )?;
-    let rows = stmt.query_map([message_id], |row| {
+    let rows = stmt.query_map([&mid], |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,

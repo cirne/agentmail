@@ -4,10 +4,9 @@ use std::path::Path;
 
 use rusqlite::Connection;
 
+use crate::ids::resolve_message_id_and_raw_path;
 use crate::mail_read::resolve_raw_path;
 use crate::sync::parse_raw_message;
-
-use super::normalize_message_id;
 
 pub struct ForwardSourceExcerpt {
     pub from_line: String,
@@ -46,14 +45,11 @@ pub fn load_forward_source_excerpt(
     data_dir: &Path,
     source_message_id: &str,
 ) -> Result<ForwardSourceExcerpt, String> {
-    let mid = normalize_message_id(source_message_id);
-    let raw_path: String = conn
-        .query_row(
-            "SELECT raw_path FROM messages WHERE message_id = ?1",
-            [&mid],
-            |r| r.get(0),
-        )
-        .map_err(|_| format!("Message not found in index: {source_message_id}"))?;
+    let Some((_mid, raw_path)) =
+        resolve_message_id_and_raw_path(conn, source_message_id).map_err(|e| e.to_string())?
+    else {
+        return Err(format!("Message not found in index: {source_message_id}"));
+    };
     let path = resolve_raw_path(&raw_path, data_dir);
     let buf = std::fs::read(&path)
         .map_err(|e| format!("Cannot read message at {} ({e})", path.display()))?;

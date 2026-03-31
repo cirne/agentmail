@@ -46,6 +46,8 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `feature-search-slim-results.md` | 2026-03-24 | Fixed in place | CLI + MCP search: auto slim JSON when more than 50 results; `format` + hint; `--result-format` / `resultFormat` — `src/search/search-json-format.ts` |
 | `feature-attachment-metadata-in-search.md` | 2026-03-24 | Fixed in place | Full JSON search: `attachments` array with `id`, `filename`, `mimeType`, `size`, `extracted`, `index`; slim rows: count + `attachmentTypes` — `src/cli/index.ts`, `src/search/search-json-format.ts`, `src/attachments/list-for-message.ts`, `src/lib/types.ts` |
 | `bug-inbox-text-utf8-panic.md` | 2026-03-30 | Created bug, fixed | [BUG-028 archived](bugs/archive/BUG-028-inbox-text-utf8-snippet-panic.md) — `inbox --text`: `wrap_line` uses `floor_char_boundary` |
+| `bug-read-bare-message-id-query-returned-no-rows.md` | 2026-03-31 | Created bug; fixed; verified | [BUG-029 archived](bugs/archive/BUG-029-read-bare-message-id-no-angle-brackets.md) — ID lookup tries `<id>` then bare `id`; closed after verification |
+| `bug-draft-view-and-send-hang-sigkill.md` | 2026-03-31 | Created bug; fixed & verified | [BUG-030 archived](bugs/archive/BUG-030-draft-commands-hang-after-edit.md) — lazy DB open; closed 2026-03-31 |
 
 ---
 

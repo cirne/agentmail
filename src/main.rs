@@ -23,14 +23,15 @@ use zmail::{
     handle_request_line, list_attachments_for_message, list_thread_messages, load_config,
     load_refresh_new_mail, parse_inbox_window_to_iso_cutoff, print_inbox_style_text,
     print_refresh_text, print_status_text, read_attachment_text, read_message_bytes,
-    read_stored_file, rebuild_from_maildir, resolve_openai_api_key, resolve_search_json_format,
-    resolve_setup_email, resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd,
-    run_ask, run_inbox_scan, run_wizard, search_result_to_slim_json_row, search_with_meta,
-    send_draft_by_id, send_simple_message, spawn_sync_background_detached, split_address_list,
-    status, validate_imap_credentials, validate_openai_key, verify_smtp_credentials, who,
-    write_setup, LoadConfigOptions, OpenAiInboxClassifier, RunAskOptions, RunInboxScanOptions,
-    SearchOptions, SearchResultFormatPreference, SendSimpleFields, SetupArgs, SyncDirection,
-    SyncFileLogger, SyncOptions, WhoOptions, WizardOptions,
+    read_stored_file, rebuild_from_maildir, resolve_message_id, resolve_openai_api_key,
+    resolve_search_json_format, resolve_setup_email, resolve_setup_password, resolve_sync_mailbox,
+    resolve_sync_since_ymd, run_ask, run_inbox_scan, run_wizard, search_result_to_slim_json_row,
+    search_with_meta, send_draft_by_id, send_simple_message, spawn_sync_background_detached,
+    split_address_list, status, validate_imap_credentials, validate_openai_key,
+    verify_smtp_credentials, who, write_setup, LoadConfigOptions, OpenAiInboxClassifier,
+    RunAskOptions, RunInboxScanOptions, SearchOptions, SearchResultFormatPreference,
+    SendSimpleFields, SetupArgs, SyncDirection, SyncFileLogger, SyncOptions, WhoOptions,
+    WizardOptions,
 };
 
 #[derive(Parser)]
@@ -505,7 +506,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("IMAP user/password required. Run `zmail setup`.");
                 std::process::exit(1);
             }
-            let conn = db::open_file(cfg.db_path())?;
             let use_json = !text;
             if let (Some(to_s), Some(subj)) = (to.as_ref(), subject.as_ref()) {
                 let body_text = body.clone().unwrap_or_default();
@@ -538,7 +538,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
             } else if let Some(id) = draft_id.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
-                let result = send_draft_by_id(&conn, &cfg, &cfg.data_dir, id, dry_run)?;
+                let result = send_draft_by_id(&cfg, &cfg.data_dir, id, dry_run)?;
                 if use_json {
                     println!("{}", serde_json::to_string_pretty(&result)?);
                 } else {
@@ -568,8 +568,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 eprintln!("IMAP user/password required. Run `zmail setup`.");
                 std::process::exit(1);
             }
-            let conn = db::open_file(cfg.db_path())?;
-            zmail::draft::run_draft(sub, &cfg, &conn)?;
+            let needs_db = matches!(
+                &sub,
+                zmail::draft::DraftCmd::Reply { .. } | zmail::draft::DraftCmd::Forward { .. }
+            );
+            let conn_owned = if needs_db {
+                Some(db::open_file(cfg.db_path())?)
+            } else {
+                None
+            };
+            zmail::draft::run_draft(sub, &cfg, conn_owned.as_ref())?;
         }
         Commands::Inbox {
             window,
@@ -690,13 +698,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let cache = cfg.attachments_cache_extracted_text;
             match sub {
                 AttachmentCmd::List { message_id, text } => {
-                    let exists = conn
-                        .query_row(
-                            "SELECT 1 FROM messages WHERE message_id = ?1",
-                            [&message_id],
-                            |_| Ok(1),
-                        )
-                        .is_ok();
+                    let exists = resolve_message_id(&conn, &message_id)?.is_some();
                     if !exists {
                         if text {
                             println!("No attachments found.");
