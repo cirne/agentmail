@@ -258,7 +258,7 @@ Send a plain-text email via SMTP (same credentials as IMAP). **Optional dev/test
 - `subject` (string, required)
 - `body` (string, required): Plain-text body
 - `cc`, `bcc` (optional): Additional recipients
-- `dryRun` (boolean, optional): Validate only; do not send
+- `dryRun` (boolean, optional): Validate only; do not send. When true, IMAP/SMTP credentials are not required (same idea as CLI `zmail send --dry-run`).
 
 **Returns:** JSON: `ok`, `messageId`, `smtpResponse` (when sent), `dryRun` (when applicable).
 
@@ -274,7 +274,7 @@ Create a draft file under `data/drafts/` (Markdown + YAML frontmatter). The retu
 
 Send a draft by **`draftId`** (same pipeline as CLI `zmail send <draft-id>`). On success, moves the draft file to `data/sent/`.
 
-**Parameters:** `draftId` (required): the draft filename (**`.md` optional** — same stem as **`create_draft`** / **`list_drafts`** `id`). `dryRun` (optional).
+**Parameters:** `draftId` (required): the draft filename (**`.md` optional** — same stem as **`create_draft`** / **`list_drafts`** `id`). `dryRun` (optional): same semantics as **`send_email`** `dryRun` (no credentials needed when validating only).
 
 ### `list_drafts`
 

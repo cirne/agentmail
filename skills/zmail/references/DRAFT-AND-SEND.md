@@ -131,7 +131,7 @@ zmail draft rewrite <id> 'Full new body text...' [--subject 'New subject'] [--to
 ### CLI
 
 ```bash
-zmail send <id> --dry-run    # validate recipients + SMTP config; no send
+zmail send <id> --dry-run    # validate recipients; no send (IMAP/SMTP not required until real send)
 zmail send <id>              # send; on success draft moves to data/sent/
 ```
 

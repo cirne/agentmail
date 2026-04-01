@@ -71,14 +71,6 @@ pub fn send_simple_message(
     fields: &SendSimpleFields,
     dry_run: bool,
 ) -> Result<SendResult, String> {
-    let user = cfg.imap_user.trim();
-    if user.is_empty() {
-        return Err("Missing imap.user in config".into());
-    }
-    if cfg.imap_password.is_empty() {
-        return Err("Missing ZMAIL_IMAP_PASSWORD / imap.password".into());
-    }
-
     let mut all_recipients: Vec<String> = Vec::new();
     all_recipients.extend(fields.to.clone());
     if let Some(cc) = &fields.cc {
@@ -89,9 +81,14 @@ pub fn send_simple_message(
     }
     assert_send_recipients_allowed(&all_recipients)?;
 
-    let outbound_id = generate_outbound_message_id(user);
-
+    let user = cfg.imap_user.trim();
     if dry_run {
+        let from_for_id = if user.is_empty() {
+            "dry-run@localhost"
+        } else {
+            user
+        };
+        let outbound_id = generate_outbound_message_id(from_for_id);
         return Ok(SendResult {
             ok: true,
             message_id: outbound_id,
@@ -99,6 +96,15 @@ pub fn send_simple_message(
             dry_run: Some(true),
         });
     }
+
+    if user.is_empty() {
+        return Err("Missing imap.user in config".into());
+    }
+    if cfg.imap_password.is_empty() {
+        return Err("Missing ZMAIL_IMAP_PASSWORD / imap.password".into());
+    }
+
+    let outbound_id = generate_outbound_message_id(user);
 
     let from_mb = parse_mailbox(user)?;
     let mut builder = Message::builder()
