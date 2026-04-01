@@ -71,14 +71,13 @@ Modern email systems are human-first — designed around inbox browsing and manu
 ```bash
 zmail sync [--since <spec>]     # Initial sync: fill gaps going backward
 zmail refresh                    # Refresh: fetch new messages since last sync
-zmail search <query> [--mode auto|fts|semantic|hybrid]
-                  [--detail headers|snippet|body]
-                  [--fields <csv>] [--ids-only] [--timings]
-                  [--limit <n>] [--json]
-zmail status
+zmail search <query> [--limit <n>] [--from <addr>] [--after <date>] [--before <date>]
+                  [--include-noise] [--result-format auto|full|slim] [--timings]
+                  [--json|--text]
+zmail status [--json] [--imap]
 zmail stats
 zmail read <id> [--raw]         # or zmail message <id>
-zmail thread <id> [--raw]
+zmail thread <id> [--json|--text]
 zmail mcp                        # Start MCP server (stdio)
 ```
 
@@ -94,7 +93,7 @@ Query can use inline operators: `from:`, `to:`, `subject:`, `after:`, `before:` 
 ```bash
 # 1) Fast shortlist
 zmail search "from:no_reply@email.apple.com receipt after:30d" \
-  --detail headers --fields messageId,date,subject --ids-only --json
+  --limit 10 --result-format slim --json
 
 # 2) Hydrate selected IDs
 zmail read "<message-id>"

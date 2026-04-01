@@ -1,6 +1,6 @@
 # Test Coverage Analysis for `zmail ask`
 
-**Status:** ❌ **Zero test coverage** - No tests exist for the `ask` module.
+**Status:** Partial Rust coverage exists. Core `ask` guardrails and tool behavior now have Rust-owned tests, but the higher-level answer synthesis path still needs deeper acceptance coverage.
 
 **Date:** 2026-03-08  
 **Note:** This document serves as a reference for future test implementation work.
@@ -13,9 +13,13 @@
 - `agent.ts` - Main pipeline orchestrator (Nano → Context assembler → Mini)
 - `tools.ts` - Tool execution and definitions
 
-### Test Files:
-- ❌ `src/ask/agent.test.ts` - **Does not exist**
-- ❌ `src/ask/tools.test.ts` - **Does not exist**
+### Rust coverage today:
+- `tests/ask_inbox_guards.rs` - date guardrails and compose-adjacent LLM smoke tests
+- `src/ask/tools.rs` unit tests - search tool basics, ID normalization, and thread inclusion payloads
+
+### Remaining gaps:
+- End-to-end `run_ask` orchestration coverage is still limited
+- There is still no Rust-native LLM-as-judge eval suite equivalent to the old Node harness
 
 ---
 
@@ -248,10 +252,9 @@ vi.mock("openai", () => {
 
 ## Next Steps
 
-1. **Create `src/ask/tools.test.ts`** - Start with unit tests for tool execution
-2. **Create `src/ask/agent.test.ts`** - Add integration tests with mocked OpenAI
-3. **Add to CI** - Ensure tests run on every commit
-4. **Document test patterns** - Help future contributors write tests
+1. Add more Rust integration coverage for `run_ask` orchestration and result collection.
+2. Decide whether to port a minimal eval harness into Rust or replace it with deterministic fixture-based acceptance tests.
+3. Keep `cargo test` as the source of truth for supported `ask` behavior before removing the Node reference suite.
 
 ---
 

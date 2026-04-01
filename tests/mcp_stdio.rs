@@ -231,4 +231,36 @@ fn mcp_initialize_lists_tools() {
     let list = r#"{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}"#;
     let r2 = handle_request_line(&conn, &data_dir(), false, list);
     assert!(r2.contains("search_mail"));
+    assert!(r2.contains("inputSchema"));
+    assert!(r2.contains("create_draft"));
+}
+
+#[test]
+fn mcp_create_draft_returns_real_draft_json() {
+    let conn = open_memory().unwrap();
+    let d = data_dir();
+    std::fs::create_dir_all(d.join("drafts")).unwrap();
+    let line = serde_json::to_string(&json!({
+        "jsonrpc": "2.0",
+        "id": 9,
+        "method": "tools/call",
+        "params": {
+            "name": "create_draft",
+            "arguments": {
+                "kind": "new",
+                "to": "friend@example.com",
+                "subject": "Hello",
+                "body": "Draft body",
+                "withBody": true
+            }
+        }
+    }))
+    .unwrap();
+    let out = handle_request_line(&conn, &d, false, &line);
+    let outer: serde_json::Value = serde_json::from_str(&out).unwrap();
+    let text = outer["result"]["content"][0]["text"].as_str().unwrap();
+    let draft: serde_json::Value = serde_json::from_str(text).unwrap();
+    assert_eq!(draft["kind"], "new");
+    assert_eq!(draft["body"], "Draft body");
+    assert_eq!(draft["to"][0], "friend@example.com");
 }

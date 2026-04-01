@@ -6,8 +6,8 @@ description: >-
   without leaving chat or terminal. Built for Claude Code, OpenClaw, Cursor, and any host with shell or MCP.
   Local-first primitives keep mail on-device; OpenAI powers `zmail ask`, `zmail inbox`, setup/wizard, and `draft edit`.
   Requires `zmail` on PATH (install via install.sh from GitHub Releases — no Node), IMAP credentials, and an API key
-  for LLM paths. OTP/login codes: optional `refresh`, then `search` + `read` (skill § Login / OTP). Optional `who --enrich`
-  may call third-party APIs. Source: github.com/cirne/zmail.
+  for LLM paths. OTP/login codes: optional `refresh`, then `search` + `read` (skill § Login / OTP).
+  Source: github.com/cirne/zmail.
 license: "Refer to https://github.com/cirne/zmail for project license and terms."
 compatibility: >-
   `zmail` binary on PATH (from install.sh or cargo build). Network: IMAP, OpenAI (ask/inbox/setup),
@@ -43,8 +43,8 @@ Use this block to keep **ClawHub / OpenClaw registry fields** aligned with the s
 | **Provenance** | Source and issues: **[github.com/cirne/zmail](https://github.com/cirne/zmail)** |
 | **Install** | **`curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh \| bash`** (prebuilt Rust binary from GitHub Releases). Prerelease: add **`--nightly`**. See repo **`AGENTS.md`**. Legacy npm **`@cirne/zmail`** exists for reference only. |
 | **On PATH** | Default install: **`~/.local/bin/zmail`** — ensure **`~/.local/bin`** is on **`PATH`**, or set **`INSTALL_PREFIX`**. |
-| **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and optional **`zmail who --enrich`**. |
-| **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, **`zmail draft edit`** (LLM revision), and **`who --enrich`** can send **email-derived or draft content** to **OpenAI** or other APIs—only use if the **mailbox owner** accepts that. Primitives **`search` / `read` / `thread` / `attachment`** (without enrich) and **`zmail draft rewrite`** (literal body replace, no LLM) are local only once mail is synced. |
+| **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and **`zmail draft edit`**. |
+| **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, and **`zmail draft edit`** (LLM revision) can send **email-derived or draft content** to **OpenAI**. Only use them if the **mailbox owner** accepts that tradeoff. Primitives **`search` / `read` / `thread` / `attachment`** and **`zmail draft rewrite`** (literal body replace, no LLM) are local only once mail is synced. |
 | **Credentials on disk** | Secrets live under **`ZMAIL_HOME/.env`** (and non-secret settings in **`config.json`**). They are used only to talk to **your** IMAP host and (when configured) **OpenAI**—not to third-party analytics or the zmail project. Treat **`.env`** like any password file (permissions, backups, don’t paste into chats). |
 | **IMAP / send posture** | **SMTP send-as-user** via **`zmail send`** (including **`zmail send <draft-id>`**) and **`zmail draft …`** (and MCP `send_email` / `create_draft` / `send_draft` / `list_drafts`). Optional **`ZMAIL_SEND_TEST=1`** restricts recipients to **`lewiscirne+zmail@gmail.com`** for dev/test sends. Sync remains a **local cache** of server mail—deleting local data does not remove server-side mail. |
 | **MCP (optional)** | **`zmail mcp`** uses **stdio** JSON-RPC only (stdin/stdout)—**no** in-process HTTP server or listening TCP port for MCP. |

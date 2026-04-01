@@ -79,7 +79,10 @@ pub use setup::{
     write_zmail_config_and_env, DerivedImap, ExistingEnvSecrets, ExistingWizardConfig, SetupArgs,
     StatsJson, WriteZmailParams,
 };
-pub use status::{format_time_ago, get_status, print_status_text, StatusData};
+pub use status::{
+    format_time_ago, get_imap_server_status, get_status, print_status_text, ImapServerComparison,
+    StatusData,
+};
 pub use sync::{
     acquire_lock, connect_imap_session, filter_uids_after, forward_uid_range, is_process_alive,
     is_sync_lock_held, oldest_message_date_for_folder, parse_raw_message, parse_read_full,

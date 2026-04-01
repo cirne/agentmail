@@ -9,6 +9,7 @@ use super::error::RunSyncError;
 /// STATUS / EXAMINE fields we care about for early-exit and checkpointing.
 #[derive(Debug, Clone, Default)]
 pub struct ImapStatusData {
+    pub messages: Option<u32>,
     pub uid_next: Option<u32>,
     pub uid_validity: Option<u32>,
 }
@@ -35,6 +36,7 @@ pub trait SyncImapTransport {
 
 fn mailbox_to_status(m: &Mailbox) -> ImapStatusData {
     ImapStatusData {
+        messages: Some(m.exists),
         uid_next: m.uid_next,
         uid_validity: m.uid_validity,
     }

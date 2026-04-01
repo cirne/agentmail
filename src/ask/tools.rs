@@ -162,8 +162,7 @@ fn check_search_broadness(
     }
 }
 
-/// `search` tool — metadata-only results + hints (aligned with Node `executeSearchTool`).
-/// `includeThreads` is accepted but ignored until Rust `search_with_meta` supports thread payloads (see RUST_PORT.md).
+/// `search` tool — metadata-only results + optional thread payloads + hints.
 pub fn execute_search_tool(
     conn: &Connection,
     owner_address: Option<&str>,
@@ -201,6 +200,10 @@ pub fn execute_search_tool(
         .get("includeNoise")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let include_threads = args
+        .get("includeThreads")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
 
     let opts = SearchOptions {
         query: Some(query),
@@ -224,6 +227,32 @@ pub fn execute_search_tool(
         serde_json::to_value(&metadata).unwrap_or(json!([])),
     );
     response.insert("totalMatched".into(), json!(set.total_matched));
+    if include_threads {
+        let mut thread_ids = std::collections::HashSet::new();
+        let mut threads = Vec::new();
+        for row in &set.results {
+            if thread_ids.insert(row.thread_id.clone()) {
+                let rows = list_thread_messages(conn, &row.thread_id)?;
+                let messages: Vec<Value> = rows
+                    .iter()
+                    .map(|thread_row| {
+                        json!({
+                            "messageId": thread_row.message_id,
+                            "fromAddress": thread_row.from_address,
+                            "fromName": thread_row.from_name,
+                            "subject": thread_row.subject,
+                            "date": thread_row.date,
+                        })
+                    })
+                    .collect();
+                threads.push(json!({
+                    "threadId": row.thread_id,
+                    "messages": messages,
+                }));
+            }
+        }
+        response.insert("threads".into(), json!(threads));
+    }
 
     let result_count = metadata.len();
     add_search_hints(&mut response, set.total_matched, result_count, limit);
@@ -441,5 +470,34 @@ mod tests {
         let s = execute_search_tool(&conn, None, &args).unwrap();
         let v: Value = serde_json::from_str(&s).unwrap();
         assert_eq!(v["results"], json!([]));
+    }
+
+    #[test]
+    fn search_include_threads_returns_thread_payloads() {
+        let conn = empty_db();
+        conn.execute(
+            "INSERT INTO messages (message_id, thread_id, folder, uid, from_address, to_addresses, cc_addresses, subject, body_text, date, raw_path)
+             VALUES ('<m1@test>', '<t1>', 'INBOX', 1, 'a@b.com', '[]', '[]', 'hello', 'needle body', '2024-01-01T00:00:00Z', 'maildir/cur/m1.eml')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO messages (message_id, thread_id, folder, uid, from_address, to_addresses, cc_addresses, subject, body_text, date, raw_path)
+             VALUES ('<m2@test>', '<t1>', 'INBOX', 2, 'b@c.com', '[]', '[]', 're: hello', 'needle reply', '2024-01-02T00:00:00Z', 'maildir/cur/m2.eml')",
+            [],
+        )
+        .unwrap();
+
+        let args = serde_json::json!({
+            "query": "needle",
+            "includeThreads": true
+        })
+        .as_object()
+        .unwrap()
+        .clone();
+        let s = execute_search_tool(&conn, None, &args).unwrap();
+        let v: Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(v["threads"].as_array().unwrap().len(), 1);
+        assert_eq!(v["threads"][0]["messages"].as_array().unwrap().len(), 2);
     }
 }

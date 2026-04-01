@@ -6,7 +6,7 @@ zmail exposes an MCP (Model Context Protocol) server for agent access to your em
 
 The MCP server provides programmatic access to zmail's search, message retrieval, attachment extraction, and (when configured) **outbound SMTP** (`send_email`, `create_draft`, `send_draft`, `list_drafts`). It shares the same underlying SQLite index as the CLI, so all data synced via `zmail sync` or `zmail refresh` is immediately available through MCP tools.
 
-**Draft + send (core agent loop):** create or update drafts with **`create_draft`**, list with **`list_drafts`**, send with **`send_draft`** (mirrors **`zmail draft …`** and **`zmail send <draft-id>`**). Draft files are **`{id}.md`** under `data/drafts/` (`id` is a subject slug plus an 8-character suffix). **`send_draft`** accepts that id with or without **`.md`**. For kind **`new`**, omit **`subject`** and pass **`instruction`** to have the LLM generate subject and body (requires OpenAI key). Natural-language revision of an existing draft is **CLI-only** today (`zmail draft edit <id> "…"`); in MCP, have the outer agent edit the `body` field and call **`create_draft`** again or shell out to the CLI.
+**Draft + send (core agent loop):** create or update drafts with **`create_draft`**, list with **`list_drafts`**, send with **`send_draft`** (mirrors **`zmail draft …`** and **`zmail send <draft-id>`**). Draft files are **`{id}.md`** under `data/drafts/` (`id` is a subject slug plus an 8-character suffix). **`send_draft`** accepts that id with or without **`.md`**. For kind **`new`**, omit **`subject`** and pass **`instruction`** to have the LLM generate subject and body (requires OpenAI key). Natural-language revision of an existing draft is still **CLI-only** (`zmail draft edit <id> "…"`); in MCP, revise the body in the outer agent and call **`create_draft`** again.
 
 ## Architecture
 
@@ -23,7 +23,7 @@ zmail mcp
 
 Or from the repo:
 ```bash
-npm run zmail -- mcp
+cargo run -- mcp
 ```
 
 The server runs on stdio and communicates via JSON-RPC over stdin/stdout. It will run until terminated (Ctrl+C) or until stdin closes.
@@ -387,9 +387,9 @@ Both interfaces share the same underlying index and data. A message synced via `
 
 ### CLI arguments (quick reference)
 
-- **search:** `zmail search <query> [--limit n] [--detail headers|snippet|body] [--result-format auto|full|slim] [--fields csv] [--threads] [--ids-only] [--timings] [--text] [--from addr] [--after date] [--before date] [--include-noise]`
+- **search:** `zmail search <query> [--limit n] [--result-format auto|full|slim] [--timings] [--text] [--from addr] [--after date] [--before date] [--include-noise]`
 - **draft list:** `zmail draft list [--text] [--result-format auto|full|slim]` — JSON slim/full + `bodyPreview` when full (same threshold and flag semantics as search)
-- **who:** `zmail who [query] [--limit n] [--min-sent n] [--min-received n] [--all] [--enrich] [--text]` (omit query for top contacts)
+- **who:** `zmail who [query] [--limit n] [--text]` (omit query for top contacts)
 - **status:** `zmail status [--json] [--imap]` — `--imap` compares local DB with IMAP server (CLI-only).
 - **stats:** `zmail stats [--json]`
 - **read:** `zmail read <message_id> [--raw]` (alias: `zmail message`)

@@ -20,18 +20,18 @@ const CLI_LONG_VERSION: &str = concat!(
 
 use zmail::{
     build_inbox_style_json, build_refresh_json_value, collect_stats, connect_imap_session, db,
-    format_read_message_text, handle_request_line, list_attachments_for_message,
-    list_thread_messages, load_config, load_refresh_new_mail, parse_inbox_window_to_iso_cutoff,
-    parse_read_full, print_inbox_style_text, print_refresh_text, print_status_text,
-    read_attachment_text, read_message_bytes_with_thread, read_stored_file, rebuild_from_maildir,
-    resolve_message_id, resolve_openai_api_key, resolve_search_json_format, resolve_setup_email,
-    resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd, run_ask, run_inbox_scan,
-    run_wizard, search_result_to_slim_json_row, search_with_meta, send_draft_by_id,
-    send_simple_message, spawn_sync_background_detached, split_address_list, status,
-    validate_imap_credentials, validate_openai_key, verify_smtp_credentials, who, write_setup,
-    LoadConfigOptions, OpenAiInboxClassifier, ReadMessageJson, RunAskOptions, RunInboxScanOptions,
-    SearchOptions, SearchResultFormatPreference, SendSimpleFields, SetupArgs, SyncDirection,
-    SyncFileLogger, SyncOptions, WhoOptions, WizardOptions,
+    format_read_message_text, get_imap_server_status, handle_request_line,
+    list_attachments_for_message, list_thread_messages, load_config, load_refresh_new_mail,
+    parse_inbox_window_to_iso_cutoff, parse_read_full, print_inbox_style_text, print_refresh_text,
+    print_status_text, read_attachment_text, read_message_bytes_with_thread, read_stored_file,
+    rebuild_from_maildir, resolve_message_id, resolve_openai_api_key, resolve_search_json_format,
+    resolve_setup_email, resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd,
+    run_ask, run_inbox_scan, run_wizard, search_result_to_slim_json_row, search_with_meta,
+    send_draft_by_id, send_simple_message, spawn_sync_background_detached, split_address_list,
+    status, validate_imap_credentials, validate_openai_key, verify_smtp_credentials, who,
+    write_setup, LoadConfigOptions, OpenAiInboxClassifier, ReadMessageJson, RunAskOptions,
+    RunInboxScanOptions, SearchOptions, SearchResultFormatPreference, SendSimpleFields, SetupArgs,
+    SyncDirection, SyncFileLogger, SyncOptions, WhoOptions, WizardOptions,
 };
 
 #[derive(Parser)]
@@ -100,6 +100,9 @@ enum Commands {
         /// JSON output
         #[arg(long)]
         json: bool,
+        /// Compare local status with the IMAP server (slower; may take 10+ seconds)
+        #[arg(long, alias = "server")]
+        imap: bool,
     },
     // --- Search & read ---
     /// Full-text search (JSON by default)
@@ -1026,7 +1029,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 println!("{}", serde_json::to_string_pretty(&v)?);
             }
         }
-        Commands::Status { json } => {
+        Commands::Status { json, imap } => {
             let cfg = load_config(LoadConfigOptions {
                 home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
                 env: None,
@@ -1041,7 +1044,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 } else {
                     status::format_time_ago(s.sync.last_sync_at.as_deref())
                 };
-                let out = serde_json::json!({
+                let mut out = serde_json::json!({
                     "sync": {
                         "isRunning": s.sync.is_running,
                         "lastSyncAt": s.sync.last_sync_at,
@@ -1067,11 +1070,97 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         })),
                     },
                 });
+                if imap {
+                    if let Some(imap_status) = get_imap_server_status(&conn, &cfg)? {
+                        out["imap"] = serde_json::json!({
+                            "server": {
+                                "messages": imap_status.server.messages,
+                                "uidNext": imap_status.server.uid_next,
+                                "uidValidity": imap_status.server.uid_validity,
+                            },
+                            "local": {
+                                "messages": imap_status.local.messages,
+                                "lastUid": imap_status.local.uid_next,
+                                "uidValidity": imap_status.local.uid_validity,
+                            },
+                            "missing": imap_status.missing,
+                            "missingUidRange": imap_status.missing_uid_range.as_ref().map(|(start, end)| serde_json::json!({
+                                "start": start,
+                                "end": end,
+                            })),
+                            "uidValidityMismatch": imap_status.uid_validity_mismatch,
+                            "coverage": imap_status.coverage.as_ref().map(|coverage| serde_json::json!({
+                                "daysAgo": coverage.days_ago,
+                                "yearsAgo": coverage.years_ago,
+                                "earliestDate": coverage.earliest_date,
+                            })),
+                        });
+                    }
+                }
                 println!("{}", serde_json::to_string_pretty(&out)?);
             } else {
                 print_status_text(&conn)?;
-                println!();
-                println!("Hint: Add --imap flag to show IMAP server status (may take 10+ seconds longer)");
+                if imap {
+                    if let Some(imap_status) = get_imap_server_status(&conn, &cfg)? {
+                        println!();
+                        println!("Server comparison:");
+                        println!(
+                            "  Server:   {} messages, UIDNEXT={}, UIDVALIDITY={}",
+                            imap_status.server.messages,
+                            imap_status
+                                .server
+                                .uid_next
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "unknown".into()),
+                            imap_status
+                                .server
+                                .uid_validity
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "unknown".into())
+                        );
+                        println!(
+                            "  Local:    {} messages, last_uid={}, UIDVALIDITY={}",
+                            imap_status.local.messages,
+                            imap_status
+                                .local
+                                .uid_next
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "none".into()),
+                            imap_status
+                                .local
+                                .uid_validity
+                                .map(|v| v.to_string())
+                                .unwrap_or_else(|| "none".into())
+                        );
+                        if let (Some(missing), Some((start, end))) =
+                            (imap_status.missing, imap_status.missing_uid_range)
+                        {
+                            if missing > 0 {
+                                println!(
+                                    "  Missing:  {missing} new message(s) (UIDs {start}..{end})"
+                                );
+                            }
+                        } else if imap_status.missing == Some(0) {
+                            println!("  Status:   Up to date (no new messages)");
+                        }
+                        if imap_status.uid_validity_mismatch {
+                            println!(
+                                "  Warning:  UIDVALIDITY mismatch - mailbox may have been reset"
+                            );
+                        }
+                        if let Some(coverage) = imap_status.coverage {
+                            println!(
+                                "  Coverage: Goes back {} days ({} years) to {}",
+                                coverage.days_ago, coverage.years_ago, coverage.earliest_date
+                            );
+                        }
+                    }
+                } else {
+                    println!();
+                    println!(
+                        "Hint: Add --imap flag to show IMAP server status (may take 10+ seconds longer)"
+                    );
+                }
             }
         }
     }

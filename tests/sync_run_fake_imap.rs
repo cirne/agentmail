@@ -37,6 +37,7 @@ fn early_exit_forward_skips_examine_and_returns_flag() {
     let maildir = home.join("data").join("maildir");
     let mut fake = FakeImapTransport {
         status: ImapStatusData {
+            messages: Some(9),
             uid_next: Some(10),
             uid_validity: Some(42),
         },
@@ -70,6 +71,7 @@ fn forward_checkpoint_fetches_and_persists() {
     let raw = b"From: a@b.com\r\nSubject: t\r\nDate: Mon, 1 Jan 2024 12:00:00 +0000\r\nMessage-ID: <u1@test>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nHi";
     let mut fake = FakeImapTransport {
         status: ImapStatusData {
+            messages: Some(99),
             uid_next: Some(100),
             uid_validity: Some(1),
         },
@@ -177,12 +179,14 @@ fn backward_batch_skips_duplicate_message_id() {
 fn should_early_exit_forward_predicate() {
     let st = Some((1u32, 9u32));
     let status = ImapStatusData {
+        messages: Some(9),
         uid_next: Some(10),
         uid_validity: Some(1),
     };
     assert!(should_early_exit_forward(false, st, &status));
     assert!(!should_early_exit_forward(true, st, &status));
     let status2 = ImapStatusData {
+        messages: Some(10),
         uid_next: Some(11),
         uid_validity: Some(1),
     };

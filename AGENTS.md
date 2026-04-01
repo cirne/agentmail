@@ -147,18 +147,18 @@ npm run eval         # run eval suite (LLM-based evaluation tests, requires ZMAI
 
 ### CLI Commands
 
-zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--json] [--text] [--result-format auto|full|slim] [--ids-only]
-zmail who [query] [--limit n] [--enrich] [--text]  (omit query for top contacts)
+zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--json] [--text] [--result-format auto|full|slim]
+zmail who [query] [--limit n] [--text]  (omit query for top contacts)
 zmail read <message_id> [--raw] [--json] [--text]
 zmail thread <thread_id> [--json] [--text]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
 zmail inbox [<window>] [--since <window>] [--refresh] [--force] [--include-noise] [--text]  # LLM notable-mail scan; default JSON is scan-only unless --refresh (then sync metrics + scan extras; requires OpenAI key)
-zmail status [--json]
+zmail status [--json] [--imap]
 zmail stats [--json]
 zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)
 zmail attachment list <message_id> [--text]
 zmail attachment read <message_id> <index>|<filename> [--raw] [--no-cache]
-zmail send [--to addr --subject s] [--raw] [<draft-id>]   # SMTP; saved draft under data/drafts/ (.md optional); optional ZMAIL_SEND_TEST=1 for dev/test allowlist
+zmail send [--to addr --subject s] [<draft-id>]   # SMTP; saved draft under data/drafts/ (.md optional); optional ZMAIL_SEND_TEST=1 for dev/test allowlist
 zmail draft new|reply|forward|list|view|edit|rewrite [--help]   # Local drafts (data/drafts/); list JSON: slim/full like search (--result-format); bodyPreview when full; edit = LLM instruction, rewrite = replace body
 zmail mcp  # Start MCP server (stdio)
 ```
