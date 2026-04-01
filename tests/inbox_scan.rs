@@ -1,9 +1,13 @@
 //! Integration tests: `run_inbox_scan` with mock classifier (mirrors `src/inbox/scan.test.ts`).
 
 use chrono::{Duration, Utc};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 use zmail::{
-    inbox_candidate_prefetch_limit, open_memory, persist_message, run_inbox_scan, InboxNotablePick,
-    MockInboxClassifier, ParsedMessage, RunInboxScanOptions,
+    dismiss_message, inbox_candidate_prefetch_limit, open_memory, persist_message, run_inbox_scan,
+    InboxNotablePick, InboxSurfaceMode, MockInboxClassifier, ParsedMessage, RunInboxScanOptions,
 };
 
 const MAILBOX: &str = "[Gmail]/All Mail";
@@ -17,7 +21,7 @@ fn insert_msg(
     body: &str,
     date: &str,
     uid: i64,
-    is_noise: bool,
+    category: Option<&str>,
     to_json: &str,
 ) {
     let p = ParsedMessage {
@@ -31,7 +35,7 @@ fn insert_msg(
         body_text: body.into(),
         body_html: None,
         attachments: vec![],
-        is_noise,
+        category: category.map(str::to_string),
     };
     persist_message(conn, &p, MAILBOX, uid, "[]", "x.eml").unwrap();
 }
@@ -48,10 +52,10 @@ async fn returns_rows_picked_by_classifier() {
     let old = (Utc::now() - Duration::days(10)).to_rfc3339();
     let recent = (Utc::now() - Duration::hours(2)).to_rfc3339();
     insert_msg(
-        &conn, "<old@x>", "a@b.com", "Old", "body", &old, 1, false, "[]",
+        &conn, "<old@x>", "a@b.com", "Old", "body", &old, 1, None, "[]",
     );
     insert_msg(
-        &conn, "<new@x>", "a@b.com", "New", "body", &recent, 2, false, "[]",
+        &conn, "<new@x>", "a@b.com", "New", "body", &recent, 2, None, "[]",
     );
     let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339();
     let mut mock = MockInboxClassifier::new(|batch| {
@@ -60,23 +64,33 @@ async fn returns_rows_picked_by_classifier() {
             .filter(|m| m.message_id == "<new@x>")
             .map(|m| InboxNotablePick {
                 message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec![],
                 note: Some("needs reply".into()),
+                decision_source: Some("model".into()),
             })
             .collect()
     });
     let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Check,
         cutoff_iso: cutoff,
-        include_noise: true,
+        include_all: true,
+        replay: false,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some("fp1".into()),
         owner_address: None,
+        owner_aliases: vec![],
         candidate_cap: None,
         notable_cap: None,
         batch_size: None,
     };
     let r = run_inbox_scan(&conn, &opts, &mut mock).await.unwrap();
     assert_eq!(r.candidates_scanned, 1);
-    assert_eq!(r.new_mail.len(), 1);
-    assert_eq!(r.new_mail[0].message_id, "<new@x>");
-    assert_eq!(r.new_mail[0].note.as_deref(), Some("needs reply"));
+    assert_eq!(r.surfaced.len(), 1);
+    assert_eq!(r.surfaced[0].message_id, "<new@x>");
+    assert_eq!(r.surfaced[0].note.as_deref(), Some("needs reply"));
+    assert_eq!(r.counts.notify, 1);
 }
 
 #[tokio::test]
@@ -84,7 +98,7 @@ async fn includes_attachment_metadata_on_notable_rows() {
     let conn = open_memory().unwrap();
     let recent = (Utc::now() - Duration::hours(2)).to_rfc3339();
     insert_msg(
-        &conn, "<att@x>", "a@b.com", "Paper", "body", &recent, 1, false, "[]",
+        &conn, "<att@x>", "a@b.com", "Paper", "body", &recent, 1, None, "[]",
     );
     conn.execute(
         "INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text) VALUES (?1, ?2, ?3, ?4, ?5, NULL)",
@@ -98,21 +112,30 @@ async fn includes_attachment_metadata_on_notable_rows() {
             .filter(|m| m.message_id == "<att@x>")
             .map(|m| InboxNotablePick {
                 message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec![],
                 note: None,
+                decision_source: Some("model".into()),
             })
             .collect()
     });
     let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Check,
         cutoff_iso: cutoff,
-        include_noise: true,
+        include_all: true,
+        replay: false,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some("fp1".into()),
         owner_address: None,
+        owner_aliases: vec![],
         candidate_cap: None,
         notable_cap: None,
         batch_size: None,
     };
     let r = run_inbox_scan(&conn, &opts, &mut mock).await.unwrap();
-    assert_eq!(r.new_mail.len(), 1);
-    let atts = r.new_mail[0].attachments.as_ref().unwrap();
+    assert_eq!(r.surfaced.len(), 1);
+    let atts = r.surfaced[0].attachments.as_ref().unwrap();
     assert_eq!(atts.len(), 1);
     assert_eq!(atts[0].filename, "report.pdf");
     assert_eq!(atts[0].mime_type, "application/pdf");
@@ -136,7 +159,7 @@ async fn orders_llm_batches_by_sender_contact_rank() {
             "body",
             &old,
             100 + i,
-            false,
+            None,
             &format!("[\"{friend}\"]"),
         );
     }
@@ -148,7 +171,7 @@ async fn orders_llm_batches_by_sender_contact_rank() {
         "body",
         &old,
         200,
-        false,
+        None,
         &format!("[\"{owner}\"]"),
     );
     for i in 0..25 {
@@ -160,7 +183,7 @@ async fn orders_llm_batches_by_sender_contact_rank() {
             "body",
             &recent,
             300 + i,
-            false,
+            None,
             &format!("[\"{owner}\"]"),
         );
     }
@@ -172,7 +195,7 @@ async fn orders_llm_batches_by_sender_contact_rank() {
         "body",
         &recent,
         400,
-        false,
+        None,
         &format!("[\"{owner}\"]"),
     );
     let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339();
@@ -184,9 +207,15 @@ async fn orders_llm_batches_by_sender_contact_rank() {
         vec![]
     });
     let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Check,
         cutoff_iso: cutoff,
-        include_noise: true,
+        include_all: true,
+        replay: false,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some("fp1".into()),
         owner_address: Some(owner.into()),
+        owner_aliases: vec![],
         candidate_cap: None,
         notable_cap: None,
         batch_size: Some(20),
@@ -196,7 +225,7 @@ async fn orders_llm_batches_by_sender_contact_rank() {
 }
 
 #[tokio::test]
-async fn excludes_noise_when_include_noise_false() {
+async fn excludes_default_categories_when_include_all_false() {
     let conn = open_memory().unwrap();
     let d1 = (Utc::now() - Duration::minutes(30)).to_rfc3339();
     let d2 = (Utc::now() - Duration::minutes(20)).to_rfc3339();
@@ -208,17 +237,12 @@ async fn excludes_noise_when_include_noise_false() {
         "body",
         &d1,
         1,
-        false,
+        Some("promotional"),
         "[]",
     );
     insert_msg(
-        &conn, "<real@x>", "a@b.com", "Real", "body", &d2, 2, false, "[]",
+        &conn, "<real@x>", "a@b.com", "Real", "body", &d2, 2, None, "[]",
     );
-    conn.execute(
-        "UPDATE messages SET is_noise = 1 WHERE message_id = '<noise@x>'",
-        [],
-    )
-    .unwrap();
     let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
     let mut mock = MockInboxClassifier::new(|batch| {
         assert_eq!(
@@ -230,18 +254,458 @@ async fn excludes_noise_when_include_noise_false() {
         );
         vec![InboxNotablePick {
             message_id: "<real@x>".into(),
+            action: Some("notify".into()),
+            matched_rule_ids: vec![],
             note: None,
+            decision_source: Some("model".into()),
         }]
     });
     let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Check,
         cutoff_iso: cutoff,
-        include_noise: false,
+        include_all: false,
+        replay: false,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some("fp1".into()),
         owner_address: None,
+        owner_aliases: vec![],
         candidate_cap: None,
         notable_cap: None,
         batch_size: None,
     };
     let r = run_inbox_scan(&conn, &opts, &mut mock).await.unwrap();
-    assert_eq!(r.new_mail.len(), 1);
-    assert_eq!(r.new_mail[0].message_id, "<real@x>");
+    assert_eq!(r.surfaced.len(), 1);
+    assert_eq!(r.surfaced[0].message_id, "<real@x>");
+}
+
+#[tokio::test]
+async fn second_scan_dedups_unless_replay_is_enabled() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::minutes(20)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<dup@x>",
+        "a@b.com",
+        "Need reply",
+        "body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
+    let mut first = MockInboxClassifier::new(|batch| {
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec![],
+                note: None,
+                decision_source: Some("model".into()),
+            })
+            .collect()
+    });
+    let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Check,
+        cutoff_iso: cutoff.clone(),
+        include_all: true,
+        replay: false,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some("fp1".into()),
+        owner_address: None,
+        owner_aliases: vec![],
+        candidate_cap: None,
+        notable_cap: None,
+        batch_size: None,
+    };
+    let first_run = run_inbox_scan(&conn, &opts, &mut first).await.unwrap();
+    assert_eq!(first_run.surfaced.len(), 1);
+
+    let mut second = MockInboxClassifier::new(|batch| {
+        assert!(batch.is_empty());
+        vec![]
+    });
+    let second_run = run_inbox_scan(&conn, &opts, &mut second).await.unwrap();
+    assert!(second_run.surfaced.is_empty());
+
+    let mut replay = MockInboxClassifier::new(|batch| {
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec![],
+                note: None,
+                decision_source: Some("model".into()),
+            })
+            .collect()
+    });
+    let replay_run = run_inbox_scan(
+        &conn,
+        &RunInboxScanOptions {
+            replay: true,
+            reapply_llm: false,
+            diagnostics: false,
+            ..opts
+        },
+        &mut replay,
+    )
+    .await
+    .unwrap();
+    assert_eq!(replay_run.surfaced.len(), 1);
+}
+
+#[tokio::test]
+async fn suppress_decisions_are_cached_and_skip_second_llm_call() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::minutes(10)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<suppress@x>",
+        "bulk@x.com",
+        "Promo",
+        "body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_first = Arc::clone(&calls);
+    let mut first = MockInboxClassifier::new(move |batch| {
+        calls_first.fetch_add(1, Ordering::SeqCst);
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("suppress".into()),
+                matched_rule_ids: vec!["promo".into()],
+                note: Some("routine promo".into()),
+                decision_source: Some("rule".into()),
+            })
+            .collect()
+    });
+    let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Check,
+        cutoff_iso: cutoff.clone(),
+        include_all: true,
+        replay: true,
+        reapply_llm: false,
+        diagnostics: true,
+        rules_fingerprint: Some("fp1".into()),
+        owner_address: None,
+        owner_aliases: vec![],
+        candidate_cap: None,
+        notable_cap: None,
+        batch_size: None,
+    };
+    let first_run = run_inbox_scan(&conn, &opts, &mut first).await.unwrap();
+    assert!(first_run.surfaced.is_empty());
+    assert_eq!(first_run.processed.len(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let calls_second = Arc::clone(&calls);
+    let mut second = MockInboxClassifier::new(move |_batch| {
+        calls_second.fetch_add(1, Ordering::SeqCst);
+        vec![]
+    });
+    let second_run = run_inbox_scan(&conn, &opts, &mut second).await.unwrap();
+    assert!(second_run.surfaced.is_empty());
+    assert_eq!(second_run.processed.len(), 1);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+}
+
+#[tokio::test]
+async fn changed_rules_fingerprint_recomputes_decision() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::minutes(10)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<rules@x>",
+        "bulk@x.com",
+        "Promo",
+        "body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_first = Arc::clone(&calls);
+    let mut first = MockInboxClassifier::new(move |batch| {
+        calls_first.fetch_add(1, Ordering::SeqCst);
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("suppress".into()),
+                matched_rule_ids: vec![],
+                note: Some("first".into()),
+                decision_source: Some("model".into()),
+            })
+            .collect()
+    });
+    run_inbox_scan(
+        &conn,
+        &RunInboxScanOptions {
+            surface_mode: InboxSurfaceMode::Check,
+            cutoff_iso: cutoff.clone(),
+            include_all: true,
+            replay: true,
+            reapply_llm: false,
+            diagnostics: false,
+            rules_fingerprint: Some("fp1".into()),
+            owner_address: None,
+            owner_aliases: vec![],
+            candidate_cap: None,
+            notable_cap: None,
+            batch_size: None,
+        },
+        &mut first,
+    )
+    .await
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let calls_second = Arc::clone(&calls);
+    let mut second = MockInboxClassifier::new(move |batch| {
+        calls_second.fetch_add(1, Ordering::SeqCst);
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec!["new".into()],
+                note: Some("second".into()),
+                decision_source: Some("rule".into()),
+            })
+            .collect()
+    });
+    let rerun = run_inbox_scan(
+        &conn,
+        &RunInboxScanOptions {
+            surface_mode: InboxSurfaceMode::Check,
+            cutoff_iso: cutoff,
+            include_all: true,
+            replay: true,
+            reapply_llm: false,
+            diagnostics: true,
+            rules_fingerprint: Some("fp2".into()),
+            owner_address: None,
+            owner_aliases: vec![],
+            candidate_cap: None,
+            notable_cap: None,
+            batch_size: None,
+        },
+        &mut second,
+    )
+    .await
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(rerun.surfaced.len(), 1);
+    assert_eq!(rerun.surfaced[0].note.as_deref(), Some("second"));
+}
+
+#[tokio::test]
+async fn reapply_llm_bypasses_cache_even_when_fingerprint_matches() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::minutes(10)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<force@x>",
+        "bulk@x.com",
+        "Promo",
+        "body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_first = Arc::clone(&calls);
+    let mut first = MockInboxClassifier::new(move |batch| {
+        calls_first.fetch_add(1, Ordering::SeqCst);
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec![],
+                note: Some("first".into()),
+                decision_source: Some("model".into()),
+            })
+            .collect()
+    });
+    let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Check,
+        cutoff_iso: cutoff.clone(),
+        include_all: true,
+        replay: true,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some("fp1".into()),
+        owner_address: None,
+        owner_aliases: vec![],
+        candidate_cap: None,
+        notable_cap: None,
+        batch_size: None,
+    };
+    run_inbox_scan(&conn, &opts, &mut first).await.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    let calls_second = Arc::clone(&calls);
+    let mut second = MockInboxClassifier::new(move |batch| {
+        calls_second.fetch_add(1, Ordering::SeqCst);
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec![],
+                note: Some("second".into()),
+                decision_source: Some("model".into()),
+            })
+            .collect()
+    });
+    let rerun = run_inbox_scan(
+        &conn,
+        &RunInboxScanOptions {
+            reapply_llm: true,
+            diagnostics: true,
+            ..opts
+        },
+        &mut second,
+    )
+    .await
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert_eq!(rerun.surfaced[0].note.as_deref(), Some("second"));
+}
+
+#[test]
+fn dismiss_archives_or_only_marks_surfaced() {
+    let conn = open_memory().unwrap();
+    insert_msg(
+        &conn,
+        "<dismiss@x>",
+        "a@b.com",
+        "dismiss me",
+        "body",
+        "2026-01-01T00:00:00Z",
+        1,
+        None,
+        "[]",
+    );
+    let ok = dismiss_message(&conn, "<dismiss@x>", true).unwrap();
+    assert!(ok);
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<dismiss@x>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 1);
+
+    insert_msg(
+        &conn,
+        "<dismiss-no-archive@x>",
+        "a@b.com",
+        "dismiss me too",
+        "body",
+        "2026-01-01T00:00:00Z",
+        2,
+        None,
+        "[]",
+    );
+    let ok = dismiss_message(&conn, "<dismiss-no-archive@x>", false).unwrap();
+    assert!(ok);
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<dismiss-no-archive@x>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 0);
+
+    let surfaced: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM inbox_handled WHERE message_id IN ('<dismiss@x>', '<dismiss-no-archive@x>')",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(surfaced, 2);
+}
+
+#[tokio::test]
+async fn diagnostics_include_processed_rows_and_apply_archive_side_effects() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::minutes(20)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<archive@x>",
+        "ship@example.com",
+        "Tracking update",
+        "body",
+        &recent,
+        1,
+        Some("promotional"),
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
+    let mut mock = MockInboxClassifier::new(|batch| {
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("archive".into()),
+                matched_rule_ids: vec!["ship1".into()],
+                note: Some("Routine shipping update".into()),
+                decision_source: Some("rule".into()),
+            })
+            .collect()
+    });
+    let run = run_inbox_scan(
+        &conn,
+        &RunInboxScanOptions {
+            surface_mode: InboxSurfaceMode::Check,
+            cutoff_iso: cutoff,
+            include_all: true,
+            replay: false,
+            reapply_llm: false,
+            diagnostics: true,
+            rules_fingerprint: Some("fp1".into()),
+            owner_address: None,
+            owner_aliases: vec![],
+            candidate_cap: None,
+            notable_cap: None,
+            batch_size: None,
+        },
+        &mut mock,
+    )
+    .await
+    .unwrap();
+    assert!(run.surfaced.is_empty());
+    assert_eq!(run.processed.len(), 1);
+    assert!(run
+        .processed
+        .iter()
+        .any(|row| row.message_id == "<archive@x>"));
+
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<archive@x>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 1);
 }

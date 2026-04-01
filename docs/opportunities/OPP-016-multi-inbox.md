@@ -8,7 +8,7 @@ zmail today is single-inbox: one IMAP identity, one config, one password. Users 
 
 ## Design principles
 
-- **Dead simple agent interface** — User does not worry about managing or syncing multiple mailboxes. Sync/refresh by default operate on **all** mailboxes; optional flags can narrow scope for sync operations (e.g. `zmail sync --mailbox work` for debugging or one-off backfill).
+- **Dead simple agent interface** — User does not worry about managing or syncing multiple mailboxes. `update` should operate on **all** mailboxes by default; optional flags can narrow scope for sync operations for debugging or one-off backfill.
 - **One unified SQLite DB** — One index for all mail. Search, who, thread, read, and MCP tools hit a single database with a mailbox/account identifier on each row. No “which DB” or aggregating across DBs; one `zmail search` sees everything. This drives schema (e.g. `messages.mailbox_id`, `sync_state` keyed by mailbox + folder) and data layout (one `data/` tree).
 - **Config vs secrets** — Config (non-secret) lives in one place; secrets live in .env files. No secrets in config.json.
 
@@ -60,8 +60,8 @@ This keeps “one place for all durable data” and “mailbox dirs = config + s
 
 ### Sync / refresh
 
-- **Default:** `zmail sync` and `zmail refresh` run against **all** mailboxes in config (iterate mailboxes, connect with that mailbox’s config + that mailbox dir’s .env, write into the single DB and maildir with that mailbox_id).
-- **Optional narrow scope:** e.g. `zmail sync --mailbox me@company.com` or `--mailbox me_company_com` to sync only that mailbox (useful for debugging or one-off backfill). Same for `zmail refresh`.
+- **Default:** `zmail update` runs against **all** mailboxes in config (iterate mailboxes, connect with that mailbox’s config + that mailbox dir’s .env, write into the single DB and maildir with that mailbox_id).
+- **Optional narrow scope:** e.g. `zmail update --mailbox me@company.com` or `--mailbox me_company_com` to sync only that mailbox (useful for debugging or one-off backfill), if/when mailbox-scoped update lands.
 
 ### Query language
 

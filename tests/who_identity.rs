@@ -28,7 +28,7 @@ fn insert(
         body_text: "b".into(),
         body_html: None,
         attachments: vec![],
-        is_noise: false,
+        category: None,
     };
     persist_message(conn, &p, MAILBOX, uid, "[]", "x.eml").unwrap();
 }

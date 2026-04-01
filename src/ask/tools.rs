@@ -7,6 +7,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use crate::ids::{resolve_message_id, resolve_thread_id};
+use crate::mail_category::parse_category_list;
 use crate::search::{search_with_meta, SearchOptions, SearchResult};
 use crate::sync::{parse_read_full, parse_since_to_date};
 use crate::thread_view::list_thread_messages;
@@ -196,10 +197,15 @@ pub fn execute_search_tool(
         .get("filterOr")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    let include_noise = args
-        .get("includeNoise")
+    let include_all = args
+        .get("includeAll")
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
+    let categories = args
+        .get("category")
+        .and_then(|v| v.as_str())
+        .map(parse_category_list)
+        .unwrap_or_default();
     let include_threads = args
         .get("includeThreads")
         .and_then(|v| v.as_bool())
@@ -215,7 +221,8 @@ pub fn execute_search_tool(
         after_date,
         before_date,
         filter_or,
-        include_noise,
+        include_all,
+        categories,
         owner_address: owner_address.map(String::from),
     };
 

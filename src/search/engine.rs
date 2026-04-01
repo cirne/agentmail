@@ -100,7 +100,8 @@ fn filter_only_search(
     };
 
     let count_sql = format!("SELECT COUNT(*) FROM messages m {where_clause}");
-    let count_vals: Vec<Value> = fc.params.iter().cloned().map(Value::Text).collect();
+    let mut count_vals: Vec<Value> = fc.params.iter().cloned().map(Value::Text).collect();
+    count_vals.extend(fc.always_and_params.iter().cloned().map(Value::Text));
     let total: i64 = if count_vals.is_empty() {
         conn.query_row(&count_sql, [], |r| r.get(0))?
     } else {
@@ -124,6 +125,7 @@ fn filter_only_search(
     );
 
     let mut vals: Vec<Value> = fc.params.iter().cloned().map(Value::Text).collect();
+    vals.extend(fc.always_and_params.iter().cloned().map(Value::Text));
     vals.push(Value::Integer(sql_limit as i64));
 
     let mut stmt = conn.prepare(&sql)?;
@@ -179,6 +181,7 @@ fn fts_search(
 
     let mut count_vals: Vec<Value> = vec![Value::Text(escaped.clone())];
     count_vals.extend(fc.params.iter().cloned().map(Value::Text));
+    count_vals.extend(fc.always_and_params.iter().cloned().map(Value::Text));
 
     let count_sql = format!(
         "SELECT COUNT(*) FROM messages_fts JOIN messages m ON m.id = messages_fts.rowid {where_clause}"
@@ -218,6 +221,7 @@ fn fts_search(
 
     let mut vals: Vec<Value> = vec![Value::Text(escaped)];
     vals.extend(fc.params.iter().cloned().map(Value::Text));
+    vals.extend(fc.always_and_params.iter().cloned().map(Value::Text));
     vals.push(Value::Integer(sql_limit as i64));
 
     let mut stmt = conn.prepare(&sql)?;

@@ -10,6 +10,7 @@ use crate::collect_stats;
 use crate::config::{load_config, resolve_openai_api_key, LoadConfigOptions};
 use crate::draft::DRAFT_NEW_PLACEHOLDER_BODY;
 use crate::ids::{resolve_message_id, resolve_thread_id};
+use crate::mail_category::parse_category_list;
 use crate::search::who::{who, WhoOptions};
 use crate::search::{search_with_meta, SearchOptions};
 use crate::send::{
@@ -114,7 +115,8 @@ fn tools_list_value() -> Value {
                 "afterDate": { "type": "string" },
                 "beforeDate": { "type": "string" },
                 "includeThreads": { "type": "boolean" },
-                "includeNoise": { "type": "boolean" }
+                "includeAll": { "type": "boolean" },
+                "category": { "type": "string" }
             }), &[])
         }),
         json!({
@@ -332,10 +334,15 @@ fn tool_call(
                         .get("beforeDate")
                         .and_then(|x| x.as_str())
                         .map(|s| s.to_string()),
-                    include_noise: args
-                        .get("includeNoise")
+                    include_all: args
+                        .get("includeAll")
                         .and_then(|x| x.as_bool())
                         .unwrap_or(false),
+                    categories: args
+                        .get("category")
+                        .and_then(|x| x.as_str())
+                        .map(parse_category_list)
+                        .unwrap_or_default(),
                     ..Default::default()
                 },
             )

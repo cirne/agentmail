@@ -1,6 +1,6 @@
 //! SQL schema — mirrors `src/db/schema.ts` in the TypeScript tree.
 
-pub const SCHEMA_VERSION: i32 = 11;
+pub const SCHEMA_VERSION: i32 = 15;
 
 pub const SCHEMA: &str = r#"
   CREATE TABLE IF NOT EXISTS messages (
@@ -10,7 +10,7 @@ pub const SCHEMA: &str = r#"
     folder       TEXT NOT NULL,
     uid          INTEGER NOT NULL,
     labels       TEXT NOT NULL DEFAULT '[]',
-    is_noise INTEGER NOT NULL DEFAULT 0,
+    category     TEXT,
     from_address TEXT NOT NULL,
     from_name    TEXT,
     to_addresses TEXT NOT NULL DEFAULT '[]',
@@ -19,6 +19,7 @@ pub const SCHEMA: &str = r#"
     date         TEXT NOT NULL,
     body_text    TEXT NOT NULL DEFAULT '',
     raw_path     TEXT NOT NULL,
+    is_archived  INTEGER NOT NULL DEFAULT 0,
     synced_at    TEXT NOT NULL DEFAULT (datetime('now'))
   );
 
@@ -90,6 +91,46 @@ pub const SCHEMA: &str = r#"
     sync_lock_started_at TEXT
   );
 
+  CREATE TABLE IF NOT EXISTS inbox_scans (
+    scan_id            TEXT PRIMARY KEY,
+    mode               TEXT NOT NULL,
+    cutoff_iso         TEXT NOT NULL,
+    scanned_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    notable_count      INTEGER NOT NULL DEFAULT 0,
+    candidates_scanned INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS inbox_alerts (
+    message_id   TEXT NOT NULL REFERENCES messages(message_id),
+    surfaced_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    scan_id      TEXT NOT NULL REFERENCES inbox_scans(scan_id),
+    PRIMARY KEY (message_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS inbox_reviews (
+    message_id   TEXT NOT NULL REFERENCES messages(message_id),
+    surfaced_at  TEXT NOT NULL DEFAULT (datetime('now')),
+    scan_id      TEXT NOT NULL REFERENCES inbox_scans(scan_id),
+    PRIMARY KEY (message_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS inbox_handled (
+    message_id   TEXT NOT NULL PRIMARY KEY REFERENCES messages(message_id),
+    handled_at   TEXT NOT NULL DEFAULT (datetime('now')),
+    archived     INTEGER NOT NULL DEFAULT 0
+  );
+
+  CREATE TABLE IF NOT EXISTS inbox_decisions (
+    message_id         TEXT NOT NULL REFERENCES messages(message_id),
+    rules_fingerprint  TEXT NOT NULL,
+    action             TEXT NOT NULL CHECK(action IN ('notify', 'inform', 'archive', 'suppress')),
+    matched_rule_ids   TEXT NOT NULL DEFAULT '[]',
+    note               TEXT,
+    decision_source    TEXT NOT NULL,
+    decided_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    PRIMARY KEY (message_id, rules_fingerprint)
+  );
+
   CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
     message_id UNINDEXED,
     subject,
@@ -123,8 +164,13 @@ pub const SCHEMA: &str = r#"
   CREATE INDEX IF NOT EXISTS idx_messages_thread  ON messages(thread_id);
   CREATE INDEX IF NOT EXISTS idx_messages_date    ON messages(date DESC);
   CREATE INDEX IF NOT EXISTS idx_messages_folder  ON messages(folder, uid);
+  CREATE INDEX IF NOT EXISTS idx_messages_archived ON messages(is_archived) WHERE is_archived = 1;
+  CREATE INDEX IF NOT EXISTS idx_messages_category ON messages(category) WHERE category IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_attachments_msg  ON attachments(message_id);
-  CREATE INDEX IF NOT EXISTS idx_messages_noise ON messages(is_noise) WHERE is_noise = 1;
+  CREATE INDEX IF NOT EXISTS idx_inbox_alerts_message ON inbox_alerts(message_id);
+  CREATE INDEX IF NOT EXISTS idx_inbox_reviews_message ON inbox_reviews(message_id);
+  CREATE INDEX IF NOT EXISTS idx_inbox_handled_message ON inbox_handled(message_id);
+  CREATE INDEX IF NOT EXISTS idx_inbox_decisions_message ON inbox_decisions(message_id);
 "#;
 
 #[cfg(test)]

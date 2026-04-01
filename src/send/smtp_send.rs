@@ -174,6 +174,7 @@ mod tests {
             imap_host: "imap.gmail.com".into(),
             imap_port: 993,
             imap_user: "a@b.com".into(),
+            imap_aliases: vec![],
             imap_password: "secret".into(),
             smtp,
             sync_default_since: "1y".into(),

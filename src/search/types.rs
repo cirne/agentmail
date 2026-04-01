@@ -13,7 +13,8 @@ pub struct SearchOptions {
     pub after_date: Option<String>,
     pub before_date: Option<String>,
     pub filter_or: bool,
-    pub include_noise: bool,
+    pub include_all: bool,
+    pub categories: Vec<String>,
     pub owner_address: Option<String>,
 }
 

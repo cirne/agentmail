@@ -5,6 +5,7 @@ use tempfile::tempdir;
 use zmail::{
     acquire_lock, apply_schema, db, release_lock, run_sync, should_early_exit_forward,
     FakeImapTransport, FetchedMessage, ImapStatusData, SyncDirection, SyncFileLogger, SyncOptions,
+    SCHEMA_VERSION,
 };
 
 fn open_temp_db(dir: &std::path::Path) -> Connection {
@@ -107,6 +108,99 @@ fn forward_checkpoint_fetches_and_persists() {
 }
 
 #[test]
+fn stale_db_rebuild_preserves_checkpoint_and_skips_cached_mail() {
+    let dir = tempdir().unwrap();
+    let home = dir.path();
+    let data_dir = home.join("data");
+    let maildir = data_dir.join("maildir");
+    let maildir_cur = maildir.join("cur");
+    std::fs::create_dir_all(&maildir_cur).unwrap();
+
+    let raw = b"From: a@b.com\r\nSubject: rebuilt\r\nDate: Mon, 1 Jan 2024 12:00:00 +0000\r\nMessage-ID: <rebuilt-sync@test>\r\nMIME-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nHi";
+    std::fs::write(maildir_cur.join("cached.eml"), raw).unwrap();
+
+    let db_path = data_dir.join("zmail.db");
+    let stale = Connection::open(&db_path).unwrap();
+    apply_schema(&stale).unwrap();
+    stale
+        .execute(
+            "INSERT INTO messages (message_id, thread_id, folder, uid, labels, category, from_address, from_name, to_addresses, cc_addresses, subject, date, body_text, raw_path)
+             VALUES ('<rebuilt-sync@test>', '<rebuilt-sync@test>', 'INBOX', 5, '[]', NULL, 'a@b.com', NULL, '[]', '[]', 'rebuilt', '2024-01-01T12:00:00Z', 'Hi', 'maildir/cur/cached.eml')",
+            [],
+        )
+        .unwrap();
+    stale
+        .execute(
+            "INSERT OR REPLACE INTO sync_state (folder, uidvalidity, last_uid) VALUES ('INBOX', 7, 5)",
+            [],
+        )
+        .unwrap();
+    stale
+        .pragma_update(None, "user_version", SCHEMA_VERSION - 1)
+        .unwrap();
+    drop(stale);
+
+    let mut conn = db::open_file(&db_path).unwrap();
+    let rebuilt_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM messages", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(rebuilt_count, 1);
+    let rebuilt_state: (i64, i64) = conn
+        .query_row(
+            "SELECT uidvalidity, last_uid FROM sync_state WHERE folder = 'INBOX'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(rebuilt_state, (7, 5));
+
+    let mut fake = FakeImapTransport {
+        status: ImapStatusData {
+            messages: Some(5),
+            uid_next: Some(6),
+            uid_validity: Some(7),
+        },
+        uid_validity_on_examine: 7,
+        search_uids: vec![2, 3, 4, 5],
+        fetch_batches: [vec![
+            FetchedMessage {
+                uid: 2,
+                raw: raw.to_vec(),
+                labels: vec![],
+            },
+            FetchedMessage {
+                uid: 3,
+                raw: raw.to_vec(),
+                labels: vec![],
+            },
+            FetchedMessage {
+                uid: 4,
+                raw: raw.to_vec(),
+                labels: vec![],
+            },
+            FetchedMessage {
+                uid: 5,
+                raw: raw.to_vec(),
+                labels: vec![],
+            },
+        ]]
+        .into_iter()
+        .collect(),
+    };
+    let logger = SyncFileLogger::open(home).unwrap();
+    let opts = SyncOptions {
+        direction: SyncDirection::Forward,
+        since_ymd: "2025-01-01".into(),
+        force: false,
+        progress_stderr: false,
+    };
+    let result = run_sync(&mut fake, &mut conn, &logger, "INBOX", &maildir, &[], &opts).unwrap();
+    assert_eq!(result.synced, 0);
+    assert_eq!(result.messages_fetched, 0);
+    assert_eq!(result.early_exit, Some(true));
+}
+
+#[test]
 fn pre_lock_held_returns_empty_without_imap() {
     let dir = tempdir().unwrap();
     let home = dir.path();
@@ -140,8 +234,8 @@ fn backward_batch_skips_duplicate_message_id() {
     )
     .unwrap();
     conn.execute(
-        "INSERT INTO messages (message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name, to_addresses, cc_addresses, subject, date, body_text, raw_path)
-         VALUES ('<dup@test>', '<dup@test>', 'INBOX', 2, '[]', 0, 'x@y.com', NULL, '[]', '[]', 's', '2024-01-01T00:00:00Z', 'b', 'maildir/cur/x.eml')",
+        "INSERT INTO messages (message_id, thread_id, folder, uid, labels, category, from_address, from_name, to_addresses, cc_addresses, subject, date, body_text, raw_path)
+         VALUES ('<dup@test>', '<dup@test>', 'INBOX', 2, '[]', NULL, 'x@y.com', NULL, '[]', '[]', 's', '2024-01-01T00:00:00Z', 'b', 'maildir/cur/x.eml')",
         [],
     )
     .unwrap();

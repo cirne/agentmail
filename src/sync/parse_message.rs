@@ -3,6 +3,21 @@
 use mail_parser::{Address, Message, MessageParser, MimeHeaders, PartType};
 use serde::Serialize;
 
+use crate::mail_category::{CATEGORY_AUTOMATED, CATEGORY_BULK, CATEGORY_LIST, CATEGORY_SPAM};
+
+#[derive(Debug, Clone, Copy)]
+pub struct ParseMessageOptions {
+    pub include_attachments: bool,
+}
+
+impl Default for ParseMessageOptions {
+    fn default() -> Self {
+        Self {
+            include_attachments: true,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct ParsedAttachment {
     pub filename: String,
@@ -23,7 +38,7 @@ pub struct ParsedMessage {
     pub body_text: String,
     pub body_html: Option<String>,
     pub attachments: Vec<ParsedAttachment>,
-    pub is_noise: bool,
+    pub category: Option<String>,
 }
 
 /// One mailbox for JSON / text read output (`name` + `address`).
@@ -142,10 +157,9 @@ fn collect_address_emails(addr: Option<&Address<'_>>) -> Vec<String> {
     }
 }
 
-fn classify_noise(msg: &Message<'_>) -> bool {
+fn classify_category(msg: &Message<'_>) -> Option<String> {
     let mut has_list_unsubscribe = false;
     let mut has_list_id = false;
-    let mut is_noise = false;
     for (name, value) in msg.headers_raw() {
         let name = name.to_lowercase();
         let value = value.trim();
@@ -158,23 +172,31 @@ fn classify_noise(msg: &Message<'_>) -> bool {
         }
         if name == "list-id" {
             has_list_id = true;
-            is_noise = true;
-            break;
+            continue;
         }
         if name == "precedence" {
             let v = value.to_lowercase();
-            if matches!(v.as_str(), "bulk" | "list" | "junk" | "auto") {
-                return true;
+            if matches!(v.as_str(), "junk") {
+                return Some(CATEGORY_SPAM.to_string());
+            }
+            if matches!(v.as_str(), "auto") {
+                return Some(CATEGORY_AUTOMATED.to_string());
+            }
+            if matches!(v.as_str(), "bulk") {
+                return Some(CATEGORY_BULK.to_string());
+            }
+            if matches!(v.as_str(), "list") {
+                return Some(CATEGORY_LIST.to_string());
             }
         }
         if name == "x-auto-response-suppress" {
-            return true;
+            return Some(CATEGORY_AUTOMATED.to_string());
         }
     }
-    if !is_noise && has_list_unsubscribe && has_list_id {
-        is_noise = true;
+    if has_list_id || has_list_unsubscribe {
+        return Some(CATEGORY_LIST.to_string());
     }
-    is_noise
+    None
 }
 
 fn collect_attachments(msg: &Message<'_>) -> Vec<ParsedAttachment> {
@@ -222,6 +244,11 @@ fn collect_attachments(msg: &Message<'_>) -> Vec<ParsedAttachment> {
 
 /// Parse raw RFC822 bytes.
 pub fn parse_raw_message(raw: &[u8]) -> ParsedMessage {
+    parse_raw_message_with_options(raw, ParseMessageOptions::default())
+}
+
+/// Parse raw RFC822 bytes with optional heavyweight extraction controls.
+pub fn parse_raw_message_with_options(raw: &[u8], options: ParseMessageOptions) -> ParsedMessage {
     let Some(msg) = MessageParser::default()
         .with_mime_headers()
         .with_date_headers()
@@ -239,7 +266,7 @@ pub fn parse_raw_message(raw: &[u8]) -> ParsedMessage {
             body_text: String::from_utf8_lossy(raw).into_owned(),
             body_html: None,
             attachments: Vec::new(),
-            is_noise: false,
+            category: None,
         };
     };
 
@@ -295,7 +322,7 @@ pub fn parse_raw_message(raw: &[u8]) -> ParsedMessage {
         })
         .and_then(|addr| addr.name.as_ref().map(|s| s.to_string()));
 
-    let is_noise = classify_noise(&msg);
+    let category = classify_category(&msg);
 
     ParsedMessage {
         message_id,
@@ -307,9 +334,23 @@ pub fn parse_raw_message(raw: &[u8]) -> ParsedMessage {
         date,
         body_text,
         body_html,
-        attachments: collect_attachments(&msg),
-        is_noise,
+        attachments: if options.include_attachments {
+            collect_attachments(&msg)
+        } else {
+            Vec::new()
+        },
+        category,
     }
+}
+
+/// Parse only the fields needed for rebuild/search indexing.
+pub fn parse_index_message(raw: &[u8]) -> ParsedMessage {
+    parse_raw_message_with_options(
+        raw,
+        ParseMessageOptions {
+            include_attachments: false,
+        },
+    )
 }
 
 fn extract_threading_from_raw_bytes(raw: &[u8]) -> (Option<String>, Vec<String>) {

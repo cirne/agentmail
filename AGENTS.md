@@ -152,7 +152,10 @@ zmail who [query] [--limit n] [--text]  (omit query for top contacts)
 zmail read <message_id> [--raw] [--json] [--text]
 zmail thread <thread_id> [--json] [--text]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
-zmail inbox [<window>] [--since <window>] [--refresh] [--force] [--include-noise] [--text]  # LLM notable-mail scan; default JSON is scan-only unless --refresh (then sync metrics + scan extras; requires OpenAI key)
+zmail update [--since <window>] [--foreground] [--force] [--text]  # sync local mail; use --foreground when backfilling older mail
+zmail check [--no-update] [--replay] [--reclassify] [--text] [--verbose]  # update first by default, then surface urgent mail
+zmail review [<window>] [--since <window>] [--replay] [--reclassify] [--text]  # review notable recent mail without urgent-only filtering
+zmail review dismiss <message_id> [--no-archive]  # mark a surfaced message handled; archives locally by default
 zmail status [--json] [--imap]
 zmail stats [--json]
 zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)
@@ -171,7 +174,7 @@ See [`docs/ASK.md`](docs/ASK.md) for **`zmail ask`** vs primitives and for the *
 
 ```bash
 # Run sync in background
-zmail sync --since 1y &
+zmail update --since 1y &
 
 # Check sync status
 zmail status
@@ -242,7 +245,7 @@ Search JSON includes attachment info: **full** rows list per-file metadata (`id`
 
 zmail stores configuration in `~/.zmail/` (or `$ZMAIL_HOME` if set):
 
-- `~/.zmail/config.json` — non-secret settings (IMAP host/port/user, sync settings, optional `attachments.cacheExtractedText`, optional `inbox.defaultWindow` for `zmail inbox` when no window is passed — default `24h`)
+- `~/.zmail/config.json` — non-secret settings (IMAP host/port/user, sync settings, optional `attachments.cacheExtractedText`, optional `inbox.defaultWindow` for `zmail review` when no window is passed — default `24h`)
 - `~/.zmail/.env` — secrets (ZMAIL_IMAP_PASSWORD, ZMAIL_OPENAI_API_KEY)
 
 Attachment extracted-text cache is **off by default** (each read re-extracts). To use cached extraction on repeat reads, set `"attachments": { "cacheExtractedText": true }` in config.json.

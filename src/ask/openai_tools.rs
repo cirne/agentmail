@@ -17,7 +17,8 @@ pub fn investigation_tool_definitions() -> Vec<ChatCompletionTool> {
             "beforeDate": { "type": "string", "description": "Filter messages before this date" },
             "includeThreads": { "type": "boolean", "description": "When true, also return full threads (headers only)" },
             "filterOr": { "type": "boolean", "description": "OR logic between filters" },
-            "includeNoise": { "type": "boolean", "description": "Include promotional/noise messages" }
+            "includeAll": { "type": "boolean", "description": "Include all categories, including promotional, social, and automated mail" },
+            "category": { "type": "string", "description": "Comma-separated categories to search within" }
         },
         "required": []
     });

@@ -12,6 +12,7 @@ Directories here are **[Agent Skills](https://agentskills.io/specification.md)-s
 |------|-----------|
 | [`zmail/`](zmail/) | Agents helping an **end user** run the **installed** CLI — not for editing this repo. |
 | [`zmail/references/CANONICAL-DOCS.md`](zmail/references/CANONICAL-DOCS.md) | **CLI-first discovery** (`zmail --help`, per-command `--help`), **hints** in JSON/text output, and links to repo docs — prefer the live CLI over memorizing this README. |
+| [`zmail/references/INBOX-CUSTOMIZATION.md`](zmail/references/INBOX-CUSTOMIZATION.md) | How to make **`zmail check`** and **`zmail review`** smarter over time with durable rules and user context for notify/inform/archive/suppress behavior. |
 
 ## OpenClaw (this machine)
 

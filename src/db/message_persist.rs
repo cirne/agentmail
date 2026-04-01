@@ -3,12 +3,13 @@
 use std::fs::{create_dir_all, write};
 use std::path::{Path, PathBuf};
 
-use rusqlite::{params, Connection};
+use rusqlite::{params, CachedStatement, Connection, Transaction};
 
+use crate::mail_category::label_to_category;
 use crate::sync::{ParsedAttachment, ParsedMessage};
 
 const SQL_INSERT_MESSAGE: &str = "INSERT INTO messages (
-      message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name,
+      message_id, thread_id, folder, uid, labels, category, from_address, from_name,
       to_addresses, cc_addresses, subject, date, body_text, raw_path
     ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)";
 
@@ -67,31 +68,67 @@ fn mime_from_ext(ext: &str) -> &'static str {
     }
 }
 
-fn label_noise(labels_json: &str) -> bool {
+fn label_category(labels_json: &str) -> Option<String> {
     let Ok(arr) = serde_json::from_str::<Vec<String>>(labels_json) else {
-        return false;
+        return None;
     };
-    arr.iter().any(|label| {
-        let lower = label.to_lowercase();
-        matches!(
-            lower.as_str(),
-            "promotions"
-                | "\\promotions"
-                | "social"
-                | "\\social"
-                | "forums"
-                | "\\forums"
-                | "spam"
-                | "\\spam"
-                | "junk"
-                | "\\junk"
-                | "bulk"
-                | "\\bulk"
-        ) || lower.starts_with("[superhuman]/ai/") && {
-            let cat = &lower["[superhuman]/ai/".len()..];
-            matches!(cat, "marketing" | "news" | "social" | "pitch")
+    arr.iter()
+        .find_map(|label| label_to_category(label).map(str::to_string))
+}
+
+fn message_insert_params(parsed: &ParsedMessage, labels: &str) -> (Option<String>, String, String) {
+    let category = label_category(labels).or_else(|| parsed.category.clone());
+    let to_json = serde_json::to_string(&parsed.to_addresses).unwrap_or_else(|_| "[]".into());
+    let cc_json = serde_json::to_string(&parsed.cc_addresses).unwrap_or_else(|_| "[]".into());
+    (category, to_json, cc_json)
+}
+
+pub struct RebuildWriter<'conn> {
+    insert_message: CachedStatement<'conn>,
+    upsert_thread: CachedStatement<'conn>,
+}
+
+impl<'conn> RebuildWriter<'conn> {
+    pub fn new(tx: &'conn Transaction<'conn>) -> rusqlite::Result<Self> {
+        Ok(Self {
+            insert_message: tx.prepare_cached(SQL_INSERT_MESSAGE)?,
+            upsert_thread: tx.prepare_cached(SQL_UPSERT_THREAD)?,
+        })
+    }
+
+    /// Insert message + thread row. Returns true if a new message row was inserted.
+    pub fn persist_message(
+        &mut self,
+        parsed: &ParsedMessage,
+        mailbox: &str,
+        uid: i64,
+        labels: &str,
+        raw_path: &str,
+    ) -> rusqlite::Result<bool> {
+        let (category, to_json, cc_json) = message_insert_params(parsed, labels);
+        let n = self.insert_message.execute(params![
+            parsed.message_id,
+            parsed.message_id,
+            mailbox,
+            uid,
+            labels,
+            category,
+            parsed.from_address,
+            parsed.from_name,
+            to_json,
+            cc_json,
+            parsed.subject,
+            parsed.date,
+            parsed.body_text,
+            raw_path,
+        ])?;
+        if n == 0 {
+            return Ok(false);
         }
-    })
+        self.upsert_thread
+            .execute(params![parsed.message_id, parsed.subject, parsed.date])?;
+        Ok(true)
+    }
 }
 
 /// Insert message + thread row. Returns true if a new message row was inserted.
@@ -103,13 +140,7 @@ pub fn persist_message(
     labels: &str,
     raw_path: &str,
 ) -> rusqlite::Result<bool> {
-    let is_noise = if parsed.is_noise || label_noise(labels) {
-        1
-    } else {
-        0
-    };
-    let to_json = serde_json::to_string(&parsed.to_addresses).unwrap_or_else(|_| "[]".into());
-    let cc_json = serde_json::to_string(&parsed.cc_addresses).unwrap_or_else(|_| "[]".into());
+    let (category, to_json, cc_json) = message_insert_params(parsed, labels);
 
     let n = conn.execute(
         SQL_INSERT_MESSAGE,
@@ -119,7 +150,7 @@ pub fn persist_message(
             mailbox,
             uid,
             labels,
-            is_noise,
+            category,
             parsed.from_address,
             parsed.from_name,
             to_json,
@@ -193,10 +224,13 @@ mod tests {
     use crate::sync::ParsedMessage;
 
     #[test]
-    fn label_noise_promotions() {
-        assert!(label_noise(r#"["Promotions"]"#));
-        assert!(label_noise(r#"["\\Spam"]"#));
-        assert!(!label_noise(r#"["Inbox"]"#));
+    fn label_category_maps_known_labels() {
+        assert_eq!(
+            label_category(r#"["Promotions"]"#),
+            Some("promotional".into())
+        );
+        assert_eq!(label_category(r#"["\\Spam"]"#), Some("spam".into()));
+        assert_eq!(label_category(r#"["Inbox"]"#), None);
     }
 
     #[test]
@@ -213,7 +247,7 @@ mod tests {
             body_text: "body content here".into(),
             body_html: None,
             attachments: vec![],
-            is_noise: false,
+            category: None,
         };
         assert!(persist_message(&conn, &p, "INBOX", 1, "[]", "/tmp/x").unwrap());
         let n: i64 = conn

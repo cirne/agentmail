@@ -91,8 +91,8 @@ fn reply_threading_accepts_legacy_cur_raw_path_when_file_is_under_maildir() {
 
     let conn = db::open_file(&dir.path().join("data/zmail.db")).unwrap();
     conn.execute(
-        "INSERT INTO messages (message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name, to_addresses, cc_addresses, subject, date, body_text, raw_path)
-         VALUES (?1, ?1, 'INBOX', 1, '[]', 0, 'a@b', NULL, '[]', '[]', 'Re: hi', '2024-01-01T00:00:00Z', 'Body', 'cur/msg1.eml')",
+        "INSERT INTO messages (message_id, thread_id, folder, uid, labels, category, from_address, from_name, to_addresses, cc_addresses, subject, date, body_text, raw_path)
+         VALUES (?1, ?1, 'INBOX', 1, '[]', NULL, 'a@b', NULL, '[]', '[]', 'Re: hi', '2024-01-01T00:00:00Z', 'Body', 'cur/msg1.eml')",
         ["<orig@test>"],
     )
     .unwrap();
@@ -121,6 +121,7 @@ fn send_reply_draft_dry_run_reads_legacy_cur_raw_path_from_maildir() {
         imap_host: "imap.gmail.com".into(),
         imap_port: 993,
         imap_user: "agent@test".into(),
+        imap_aliases: vec![],
         imap_password: "secret".into(),
         smtp: resolve_smtp_for_imap_host("imap.gmail.com", None).unwrap(),
         sync_default_since: "1y".into(),
@@ -134,8 +135,8 @@ fn send_reply_draft_dry_run_reads_legacy_cur_raw_path_from_maildir() {
     };
     let conn = db::open_file(&cfg.db_path).unwrap();
     conn.execute(
-        "INSERT INTO messages (message_id, thread_id, folder, uid, labels, is_noise, from_address, from_name, to_addresses, cc_addresses, subject, date, body_text, raw_path)
-         VALUES (?1, ?1, 'INBOX', 1, '[]', 0, 'a@b', NULL, '[]', '[]', 'Re: hi', '2024-01-01T00:00:00Z', 'Body', 'cur/msg1.eml')",
+        "INSERT INTO messages (message_id, thread_id, folder, uid, labels, category, from_address, from_name, to_addresses, cc_addresses, subject, date, body_text, raw_path)
+         VALUES (?1, ?1, 'INBOX', 1, '[]', NULL, 'a@b', NULL, '[]', '[]', 'Re: hi', '2024-01-01T00:00:00Z', 'Body', 'cur/msg1.eml')",
         ["<orig@test>"],
     )
     .unwrap();

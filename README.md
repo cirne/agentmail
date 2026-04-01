@@ -39,22 +39,22 @@ Modern email systems are human-first — designed around inbox browsing and manu
    ```
    This creates `~/.zmail/config.json` and `~/.zmail/.env` with your IMAP credentials and OpenAI API key. The setup command validates credentials and guides you through the process.
 
-3. **Initial sync (example: last 7 days)**
+3. **Bring the local index up to date**
    ```bash
-   zmail sync --since 7d
+   zmail update --since 7d --foreground
    ```
    Or from the repo (Node):
    ```bash
-   cd node && npm run zmail -- sync --since 7d
+   cd node && npm run zmail -- update --since 7d --foreground
    ```
    
-   **Refresh (fetch new messages):**
+   **Fetch new mail and surface urgent items:**
    ```bash
-   zmail refresh
+   zmail check
    ```
    Or from the repo (Node):
    ```bash
-   cd node && npm run zmail -- refresh
+   cd node && npm run zmail -- check
    ```
 
 4. **Search (header-first default)**
@@ -69,11 +69,13 @@ Modern email systems are human-first — designed around inbox browsing and manu
 ## CLI
 
 ```bash
-zmail sync [--since <spec>]     # Initial sync: fill gaps going backward
-zmail refresh                    # Refresh: fetch new messages since last sync
+zmail update [--since <spec>] [--foreground] [--force] [--text]
 zmail search <query> [--limit <n>] [--from <addr>] [--after <date>] [--before <date>]
                   [--include-noise] [--result-format auto|full|slim] [--timings]
                   [--json|--text]
+zmail check [--no-update] [--replay] [--reclassify] [--text] [--verbose]
+zmail review [<window>] [--since <window>] [--replay] [--reclassify] [--text]
+zmail review dismiss <id> [--no-archive]
 zmail status [--json] [--imap]
 zmail stats
 zmail read <id> [--raw]         # or zmail message <id>
@@ -108,14 +110,14 @@ zmail intentionally does not run automatic migrations on existing local DBs. If 
 
 ```bash
 rm -rf ~/.zmail/data/
-zmail sync --since 7d
+zmail update --since 7d --foreground
 ```
 
 For a **maildir-only** SQLite reindex without deleting raw email (same steps as a schema bump), use `zmail rebuild-index` — see [AGENTS.md](AGENTS.md).
 
 ## Architecture
 
-**Primary implementation:** Rust at the workspace root — IMAP sync, SQLite + FTS5, CLI, MCP (stdio), attachments, SMTP/drafts, and LLM-shaped commands (`zmail ask`, `zmail inbox`, etc.). Uses the same **`ZMAIL_HOME`** / **`~/.zmail`** layout as the TypeScript reference under **`node/`**. **Reference / npm:** Node.js 20+ under **`node/`** (published as `@cirne/zmail`). All data stays on your machine — no cloud sync service, no third-party access to your email.
+**Primary implementation:** Rust at the workspace root — IMAP sync, SQLite + FTS5, CLI, MCP (stdio), attachments, SMTP/drafts, and LLM-shaped commands (`zmail ask`, `zmail check`, `zmail review`). Uses the same **`ZMAIL_HOME`** / **`~/.zmail`** layout as the TypeScript reference under **`node/`**. **Reference / npm:** Node.js 20+ under **`node/`** (published as `@cirne/zmail`). All data stays on your machine — no cloud sync service, no third-party access to your email.
 
 **Documentation:**
 - [`AGENTS.md`](AGENTS.md) — installation, commands, and development
@@ -136,8 +138,8 @@ cargo run -- --help
 cargo build --release
 ./target/release/zmail status
 # IMAP sync (same ZMAIL_HOME / credentials as Node)
-cargo run -- sync --foreground --since 7d
-cargo run -- refresh
+cargo run -- update --foreground --since 7d
+cargo run -- check
 # Natural-language Q&A (OpenAI; same key as `zmail ask` via Node)
 cargo run -- ask "summarize invoices from last week" --verbose
 ```

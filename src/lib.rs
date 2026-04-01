@@ -9,10 +9,12 @@ pub mod draft;
 pub mod ids;
 pub mod inbox;
 pub mod inbox_window;
+pub mod mail_category;
 pub mod mail_read;
 pub mod mcp;
 pub mod rebuild_index;
 pub mod refresh;
+pub mod rules;
 pub mod search;
 pub mod send;
 pub mod setup;
@@ -42,11 +44,16 @@ pub use ids::{
     resolve_message_id_and_raw_path, resolve_message_id_thread_and_raw_path, resolve_thread_id,
 };
 pub use inbox::{
-    inbox_candidate_prefetch_limit, run_inbox_scan, InboxBatchClassifier, InboxCandidate,
-    InboxNotablePick, MockInboxClassifier, OpenAiInboxClassifier, RunInboxScanError,
-    RunInboxScanOptions, RunInboxScanResult,
+    dismiss_message, inbox_candidate_prefetch_limit, record_inbox_scan, run_inbox_scan,
+    InboxBatchClassifier, InboxCandidate, InboxNotablePick, InboxOwnerContext, InboxSurfaceMode,
+    MockInboxClassifier, OpenAiInboxClassifier, RunInboxScanError, RunInboxScanOptions,
+    RunInboxScanResult,
 };
 pub use inbox_window::parse_inbox_window_to_iso_cutoff;
+pub use mail_category::{
+    default_category_filter_sql, is_default_excluded_category, label_to_category,
+    parse_category_list, DEFAULT_EXCLUDED_CATEGORIES,
+};
 pub use mail_read::{
     format_read_message_text, read_message_bytes, read_message_bytes_with_thread, resolve_raw_path,
     ReadMessageJson,
@@ -54,8 +61,15 @@ pub use mail_read::{
 pub use mcp::{handle_request_line, tool_schemas_stable, JsonRpcRequest, TOOL_NAMES};
 pub use rebuild_index::{rebuild_from_maildir, rebuild_from_maildir_sequential};
 pub use refresh::{
-    build_inbox_style_json, build_refresh_json_value, build_refresh_json_value_with_extras,
-    load_refresh_new_mail, print_inbox_style_text, print_refresh_text, RefreshPreviewRow,
+    build_check_json, build_refresh_json_value, build_refresh_json_value_with_extras,
+    build_review_json, load_refresh_new_mail, print_check_text, print_refresh_text,
+    print_review_text, InboxDispositionCounts, RefreshPreviewRow,
+};
+pub use rules::{
+    add_context, add_rule, build_inbox_rules_prompt, edit_rule, load_rules_file, parse_rule_action,
+    propose_rule_from_feedback, remove_context, remove_rule, rules_fingerprint, rules_path,
+    ContextEntry, ProposedRule, RuleActionKind, RuleFeedbackProposal, RulesError, RulesFile,
+    UserRule,
 };
 pub use search::{
     canonical_first_name, contact_rank_simple, convert_to_or_query, escape_fts5_query,
@@ -85,13 +99,14 @@ pub use status::{
 };
 pub use sync::{
     acquire_lock, connect_imap_session, filter_uids_after, forward_uid_range, is_process_alive,
-    is_sync_lock_held, oldest_message_date_for_folder, parse_raw_message, parse_read_full,
-    parse_since_to_date, release_lock, resolve_sync_mailbox, resolve_sync_since_ymd, run_sync,
-    run_sync_with_parallel_imap_connect, same_calendar_day, should_early_exit_forward,
-    spawn_sync_background_detached, sync_log_path, write_maildir_message, FakeImapTransport,
-    FetchedMessage, ImapStatusData, LockResult, MailboxEntry, MaildirWrite, ParsedAttachment,
-    ParsedMessage, ReadForCli, RealImapTransport, RunSyncError, SyncDirection, SyncFileLogger,
-    SyncImapTransport, SyncLockRow, SyncOptions, SyncResult,
+    is_sync_lock_held, oldest_message_date_for_folder, parse_index_message, parse_raw_message,
+    parse_raw_message_with_options, parse_read_full, parse_since_to_date, release_lock,
+    resolve_sync_mailbox, resolve_sync_since_ymd, run_sync, run_sync_with_parallel_imap_connect,
+    same_calendar_day, should_early_exit_forward, spawn_sync_background_detached, sync_log_path,
+    write_maildir_message, FakeImapTransport, FetchedMessage, ImapStatusData, LockResult,
+    MailboxEntry, MaildirWrite, ParseMessageOptions, ParsedAttachment, ParsedMessage, ReadForCli,
+    RealImapTransport, RunSyncError, SyncDirection, SyncFileLogger, SyncImapTransport, SyncLockRow,
+    SyncOptions, SyncResult,
 };
 pub use thread_view::{list_thread_messages, ThreadMessageRow};
 pub use wizard::{run_wizard, WizardOptions};

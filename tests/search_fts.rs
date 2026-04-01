@@ -19,7 +19,7 @@ fn insert_msg(
     body: &str,
     date: &str,
     uid: i64,
-    is_noise: bool,
+    category: Option<&str>,
     to_json: &str,
 ) {
     let p = ParsedMessage {
@@ -33,7 +33,7 @@ fn insert_msg(
         body_text: body.into(),
         body_html: None,
         attachments: vec![],
-        is_noise,
+        category: category.map(str::to_string),
     };
     persist_message(conn, &p, MAILBOX, uid, "[]", "x.eml").unwrap();
 }
@@ -49,7 +49,7 @@ fn fts_basic_keyword() {
         "please pay this invoice",
         "2025-01-10T12:00:00Z",
         1,
-        false,
+        None,
         "[]",
     );
     insert_msg(
@@ -60,7 +60,7 @@ fn fts_basic_keyword() {
         "no keywords",
         "2025-01-11T12:00:00Z",
         2,
-        false,
+        None,
         "[]",
     );
     insert_msg(
@@ -71,7 +71,7 @@ fn fts_basic_keyword() {
         "invoice number 9",
         "2025-01-12T12:00:00Z",
         3,
-        false,
+        None,
         "[]",
     );
     let set = search_with_meta(
@@ -100,7 +100,7 @@ fn fts_or_query() {
         "foo only",
         "2025-02-01T12:00:00Z",
         1,
-        false,
+        None,
         "[]",
     );
     insert_msg(
@@ -111,7 +111,7 @@ fn fts_or_query() {
         "bar only",
         "2025-02-02T12:00:00Z",
         2,
-        false,
+        None,
         "[]",
     );
     insert_msg(
@@ -122,7 +122,7 @@ fn fts_or_query() {
         "neither",
         "2025-02-03T12:00:00Z",
         3,
-        false,
+        None,
         "[]",
     );
     let set = search_with_meta(
@@ -151,7 +151,7 @@ fn fts_from_filter() {
         "secret word",
         "2025-03-01T12:00:00Z",
         1,
-        false,
+        None,
         "[]",
     );
     insert_msg(
@@ -162,7 +162,7 @@ fn fts_from_filter() {
         "secret word",
         "2025-03-02T12:00:00Z",
         2,
-        false,
+        None,
         "[]",
     );
     let set = search_with_meta(
@@ -189,7 +189,7 @@ fn fts_date_filter_after_before() {
         "meet",
         "2025-04-01T12:00:00Z",
         1,
-        false,
+        None,
         "[]",
     );
     insert_msg(
@@ -200,7 +200,7 @@ fn fts_date_filter_after_before() {
         "meet",
         "2025-06-15T12:00:00Z",
         2,
-        false,
+        None,
         "[]",
     );
     insert_msg(
@@ -211,7 +211,7 @@ fn fts_date_filter_after_before() {
         "meet",
         "2025-08-01T12:00:00Z",
         3,
-        false,
+        None,
         "[]",
     );
     let set = search_with_meta(
@@ -238,7 +238,7 @@ fn fts_empty_query_filter_only() {
         "body",
         "2025-05-10T12:00:00Z",
         1,
-        false,
+        None,
         "[]",
     );
     insert_msg(
@@ -249,7 +249,7 @@ fn fts_empty_query_filter_only() {
         "body",
         "2025-05-11T12:00:00Z",
         2,
-        false,
+        None,
         "[]",
     );
     let set = search_with_meta(
@@ -282,7 +282,7 @@ fn fts_contact_rank_rerank() {
             "x",
             "2024-01-01T12:00:00Z",
             100 + i,
-            false,
+            None,
             &format!("[\"{vip}\"]"),
         );
     }
@@ -295,7 +295,7 @@ fn fts_contact_rank_rerank() {
         "budget review",
         "2025-06-01T12:00:00Z",
         200,
-        false,
+        None,
         &format!("[\"{owner}\"]"),
     );
     insert_msg(
@@ -306,7 +306,7 @@ fn fts_contact_rank_rerank() {
         "budget review",
         "2025-06-01T12:00:00Z",
         201,
-        false,
+        None,
         &format!("[\"{owner}\"]"),
     );
     let set = search_with_meta(
@@ -332,7 +332,7 @@ fn fts_contact_rank_rerank() {
 }
 
 #[test]
-fn fts_include_noise_flag() {
+fn fts_include_all_flag() {
     let conn = open_memory().unwrap();
     insert_msg(
         &conn,
@@ -342,7 +342,7 @@ fn fts_include_noise_flag() {
         "sale discount",
         "2025-01-01T12:00:00Z",
         1,
-        true,
+        Some("promotional"),
         "[]",
     );
     insert_msg(
@@ -353,7 +353,7 @@ fn fts_include_noise_flag() {
         "sale discount",
         "2025-01-02T12:00:00Z",
         2,
-        false,
+        None,
         "[]",
     );
     let default_search = search_with_meta(
@@ -368,17 +368,17 @@ fn fts_include_noise_flag() {
     assert_eq!(default_search.results.len(), 1);
     assert_eq!(default_search.results[0].message_id, "n2@test");
 
-    let with_noise = search_with_meta(
+    let with_all = search_with_meta(
         &conn,
         &SearchOptions {
             query: Some("sale".into()),
             limit: Some(20),
-            include_noise: true,
+            include_all: true,
             ..Default::default()
         },
     )
     .unwrap();
-    assert_eq!(with_noise.results.len(), 2);
+    assert_eq!(with_all.results.len(), 2);
 }
 
 #[test]
@@ -462,7 +462,7 @@ fn search_result_total_matched() {
             "keywordalpha",
             "2025-01-01T12:00:00Z",
             i,
-            false,
+            None,
             "[]",
         );
     }

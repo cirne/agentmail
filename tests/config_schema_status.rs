@@ -1,11 +1,13 @@
 //! Integration tests: config loading, SQLite schema, FTS/WAL, `zmail status` CLI.
 
 use std::collections::HashMap;
+use std::fs;
 use std::process::Command;
 
 use tempfile::tempdir;
 use zmail::{
-    journal_mode, list_user_tables, load_config, open_file, open_memory, LoadConfigOptions,
+    journal_mode, list_user_tables, load_config, open_file, open_memory, persist_message,
+    LoadConfigOptions, ParsedMessage,
 };
 
 #[test]
@@ -14,6 +16,11 @@ fn schema_creates_all_tables() {
     let mut tables = list_user_tables(&conn).expect("list tables");
     tables.sort();
     assert!(tables.contains(&"attachments".to_string()));
+    assert!(tables.contains(&"inbox_alerts".to_string()));
+    assert!(tables.contains(&"inbox_scans".to_string()));
+    assert!(tables.contains(&"inbox_decisions".to_string()));
+    assert!(tables.contains(&"inbox_handled".to_string()));
+    assert!(tables.contains(&"inbox_reviews".to_string()));
     assert!(tables.contains(&"messages".to_string()));
     assert!(tables.contains(&"messages_fts".to_string()));
     assert!(tables.contains(&"people".to_string()));
@@ -80,4 +87,75 @@ fn status_exits_zero() {
         .status()
         .expect("spawn zmail");
     assert!(status.success(), "zmail status should exit 0");
+}
+
+#[test]
+fn check_help_mentions_verbose_flag() {
+    let bin = env!("CARGO_BIN_EXE_zmail");
+    let out = Command::new(bin)
+        .args(["check", "--help"])
+        .output()
+        .expect("spawn zmail check --help");
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("--verbose"));
+    assert!(stdout.contains("--watch"));
+}
+
+#[test]
+fn status_text_shows_earliest_and_latest_timestamps() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("data")).unwrap();
+    let db_path = dir.path().join("data/zmail.db");
+    let conn = open_file(&db_path).unwrap();
+    let first = ParsedMessage {
+        message_id: "<early@test>".into(),
+        from_address: "a@b.com".into(),
+        from_name: None,
+        to_addresses: vec![],
+        cc_addresses: vec![],
+        subject: "early".into(),
+        date: "2024-01-01T12:00:00Z".into(),
+        body_text: "body".into(),
+        body_html: None,
+        attachments: vec![],
+        category: None,
+    };
+    let last = ParsedMessage {
+        message_id: "<late@test>".into(),
+        from_address: "a@b.com".into(),
+        from_name: None,
+        to_addresses: vec![],
+        cc_addresses: vec![],
+        subject: "late".into(),
+        date: "2025-06-15T08:30:00Z".into(),
+        body_text: "body".into(),
+        body_html: None,
+        attachments: vec![],
+        category: None,
+    };
+    persist_message(&conn, &first, "[Gmail]/All Mail", 1, "[]", "cur/1.eml").unwrap();
+    persist_message(&conn, &last, "[Gmail]/All Mail", 2, "[]", "cur/2.eml").unwrap();
+    drop(conn);
+
+    let bin = env!("CARGO_BIN_EXE_zmail");
+    let out = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args(["status"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("Earliest:"));
+    assert!(stdout.contains("2024-01-01T12:00:00Z"));
+    assert!(stdout.contains("Latest:"));
+    assert!(stdout.contains("2025-06-15T08:30:00Z"));
 }

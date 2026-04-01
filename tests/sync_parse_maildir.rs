@@ -4,9 +4,10 @@ use std::fs;
 use tempfile::tempdir;
 use zmail::{
     acquire_lock, filter_uids_after, forward_uid_range, fts_match_count, is_process_alive,
-    is_sync_lock_held, oldest_message_date_for_folder, open_memory, parse_raw_message,
-    parse_since_to_date, persist_message, release_lock, same_calendar_day, write_maildir_message,
-    LockResult, ParsedMessage, SyncLockRow,
+    is_sync_lock_held, oldest_message_date_for_folder, open_memory, parse_index_message,
+    parse_raw_message, parse_raw_message_with_options, parse_since_to_date, persist_message,
+    release_lock, same_calendar_day, write_maildir_message, LockResult, ParseMessageOptions,
+    ParsedMessage, SyncLockRow,
 };
 
 const MAILBOX: &str = "[Gmail]/All Mail";
@@ -44,7 +45,7 @@ Content-Type: text/html; charset=utf-8\r\n\
 }
 
 #[test]
-fn parse_message_noise_list_id() {
+fn parse_message_category_list_id() {
     let raw = b"From: list@example.com\r\n\
 Subject: Newsletter\r\n\
 Date: Wed, 3 Jan 2024 10:00:00 +0000\r\n\
@@ -55,7 +56,7 @@ Content-Type: text/plain\r\n\
 \r\n\
 Body";
     let p = parse_raw_message(raw);
-    assert!(p.is_noise, "List-Id should classify as noise");
+    assert_eq!(p.category.as_deref(), Some("list"));
 }
 
 #[test]
@@ -85,6 +86,44 @@ fn parse_message_attachments() {
         "attachments: {:?}",
         p.attachments
     );
+}
+
+#[test]
+fn parse_index_message_skips_attachment_bytes() {
+    let raw = concat!(
+        "From: a@b.com\r\n",
+        "Subject: att\r\n",
+        "Date: Thu, 4 Jan 2024 10:00:00 +0000\r\n",
+        "Message-ID: <att-skip@test>\r\n",
+        "MIME-Version: 1.0\r\n",
+        "Content-Type: multipart/mixed; boundary=\"b\"\r\n",
+        "\r\n",
+        "--b\r\n",
+        "Content-Type: text/plain\r\n",
+        "\r\n",
+        "Hi there\r\n",
+        "--b\r\n",
+        "Content-Type: application/octet-stream; name=\"f.txt\"\r\n",
+        "Content-Disposition: attachment; filename=\"f.txt\"\r\n",
+        "\r\n",
+        "data\r\n",
+        "--b--\r\n",
+    );
+    let full = parse_raw_message(raw.as_bytes());
+    let indexed = parse_index_message(raw.as_bytes());
+    let explicit = parse_raw_message_with_options(
+        raw.as_bytes(),
+        ParseMessageOptions {
+            include_attachments: false,
+        },
+    );
+
+    assert_eq!(full.subject, indexed.subject);
+    assert_eq!(full.body_text, indexed.body_text);
+    assert!(full.attachments.iter().any(|a| a.filename == "f.txt"));
+    assert!(indexed.attachments.is_empty());
+    assert!(explicit.attachments.is_empty());
+    assert_eq!(indexed.subject, explicit.subject);
 }
 
 #[test]
@@ -137,7 +176,7 @@ fn message_persist_roundtrip() {
         body_text: "hello".into(),
         body_html: None,
         attachments: vec![],
-        is_noise: false,
+        category: None,
     };
     assert!(persist_message(&conn, &p, MAILBOX, 1, "[]", "maildir/x.eml").unwrap());
     let sub: String = conn
@@ -164,7 +203,7 @@ fn fts_trigger_fires_on_insert() {
         body_text: "invoice total".into(),
         body_html: None,
         attachments: vec![],
-        is_noise: false,
+        category: None,
     };
     persist_message(&conn, &p, MAILBOX, 2, "[]", "y.eml").unwrap();
     let n = fts_match_count(&conn, "invoice").unwrap();

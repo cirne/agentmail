@@ -3,8 +3,8 @@ Commands:
 Setup & sync
   zmail setup [--email <e>] [--password <p>] [--openai-key <k>] [--no-validate]
   zmail wizard [--no-validate] [--clean] [--yes]
-  zmail sync [--since <spec>] [--foreground]
-  zmail refresh [--force] [--text]
+  zmail update [--force] [--text]               # freshness-first: fetch only new mail since last sync
+  zmail update [--since <spec>] [--foreground]  # backfill older mail without re-fetching what is already local
   zmail status [--json]
   zmail stats [--json]
   zmail rebuild-index
@@ -19,7 +19,9 @@ Search & read
 
 Assistants
   zmail ask "<question>" [--verbose]
-  zmail inbox [<window>] [--since ...] [--refresh] [--text]
+  zmail check [--no-update] [--replay] [--reclassify] [--text] [--verbose]  # updates first by default
+  zmail review [<window>] [--since ...] [--replay] [--reclassify] [--text]
+  zmail review dismiss <message_id> [--no-archive]
 
 Send & integration
   zmail send [--to ... --subject ...] [<draft-id>]

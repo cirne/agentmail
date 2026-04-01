@@ -2,6 +2,7 @@
 
 use rusqlite::Connection;
 
+use crate::mail_category::is_default_excluded_category;
 use crate::search::sort_rows_by_sender_contact_rank;
 use crate::sync::SyncResult;
 
@@ -29,6 +30,26 @@ pub struct RefreshPreviewRow {
     pub note: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub attachments: Option<Vec<RefreshPreviewAttachment>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub category: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub action: Option<String>,
+    #[serde(
+        rename = "matchedRuleIds",
+        skip_serializing_if = "Vec::is_empty",
+        default
+    )]
+    pub matched_rule_ids: Vec<String>,
+    #[serde(rename = "decisionSource", skip_serializing_if = "Option::is_none")]
+    pub decision_source: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq)]
+pub struct InboxDispositionCounts {
+    pub notify: usize,
+    pub inform: usize,
+    pub archive: usize,
+    pub suppress: usize,
 }
 
 fn strip_html_tags(s: &str) -> String {
@@ -45,11 +66,11 @@ fn strip_html_tags(s: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Load up to 10 new-mail preview rows (noise filtered unless `include_noise`).
+/// Load up to 10 new-mail preview rows (default category filter unless `include_all`).
 pub fn load_refresh_new_mail(
     conn: &Connection,
     new_message_ids: &[String],
-    include_noise: bool,
+    include_all: bool,
     owner_address: Option<&str>,
 ) -> rusqlite::Result<Vec<RefreshPreviewRow>> {
     if new_message_ids.is_empty() {
@@ -64,7 +85,7 @@ pub fn load_refresh_new_mail(
         "SELECT message_id, from_address, from_name, subject, date,
          COALESCE(TRIM(SUBSTR(body_text, 1, 200)), '') ||
          CASE WHEN LENGTH(TRIM(body_text)) > 200 THEN '…' ELSE '' END AS snippet,
-         is_noise
+         category
          FROM messages WHERE message_id IN ({placeholders}) ORDER BY date DESC"
     );
     let mut stmt = conn.prepare(&sql)?;
@@ -77,13 +98,15 @@ pub fn load_refresh_new_mail(
                 row.get::<_, String>(3)?,
                 row.get::<_, String>(4)?,
                 row.get::<_, String>(5)?,
-                row.get::<_, i64>(6)?,
+                row.get::<_, Option<String>>(6)?,
             ))
         })?
         .filter_map(|r| r.ok())
-        .filter(|(_, _, _, _, _, _, noise)| include_noise || *noise == 0)
+        .filter(|(_, _, _, _, _, _, category)| {
+            include_all || !is_default_excluded_category(category.as_deref())
+        })
         .map(
-            |(mid, from_a, from_n, subj, date, snippet, _)| RefreshPreviewRow {
+            |(mid, from_a, from_n, subj, date, snippet, _category)| RefreshPreviewRow {
                 message_id: mid,
                 from_address: from_a,
                 from_name: from_n,
@@ -92,6 +115,10 @@ pub fn load_refresh_new_mail(
                 snippet: strip_html_tags(&snippet),
                 note: None,
                 attachments: None,
+                category: None,
+                action: None,
+                matched_rule_ids: vec![],
+                decision_source: None,
             },
         )
         .collect();
@@ -166,29 +193,59 @@ pub fn build_refresh_json_value_with_extras(
     v
 }
 
-/// Inbox / refresh-style JSON: full sync metrics, or scan-only (`newMail` + extras) when `omit_refresh_metrics`.
-pub fn build_inbox_style_json(
+pub fn build_check_json(
     sync: &SyncResult,
-    new_mail: &[RefreshPreviewRow],
+    surfaced: &[RefreshPreviewRow],
+    processed: Option<&[RefreshPreviewRow]>,
+    counts: &InboxDispositionCounts,
     candidates_scanned: usize,
     llm_duration_ms: u64,
     omit_refresh_metrics: bool,
 ) -> serde_json::Value {
     if omit_refresh_metrics {
-        return serde_json::json!({
-            "newMail": new_mail,
+        let mut value = serde_json::json!({
+            "notifications": surfaced,
+            "counts": counts,
             "candidatesScanned": candidates_scanned,
             "llmDurationMs": llm_duration_ms,
         });
+        if let Some(processed) = processed {
+            value["processed"] = serde_json::json!(processed);
+        }
+        return value;
     }
-    build_refresh_json_value_with_extras(
+    let mut value = build_refresh_json_value_with_extras(
         sync,
-        new_mail,
+        surfaced,
         Some(serde_json::json!({
+            "counts": counts,
             "candidatesScanned": candidates_scanned,
             "llmDurationMs": llm_duration_ms,
         })),
-    )
+    );
+    if let Some(processed) = processed {
+        value["processed"] = serde_json::json!(processed);
+    }
+    value
+}
+
+pub fn build_review_json(
+    surfaced: &[RefreshPreviewRow],
+    processed: Option<&[RefreshPreviewRow]>,
+    counts: &InboxDispositionCounts,
+    candidates_scanned: usize,
+    llm_duration_ms: u64,
+) -> serde_json::Value {
+    let mut value = serde_json::json!({
+        "items": surfaced,
+        "counts": counts,
+        "candidatesScanned": candidates_scanned,
+        "llmDurationMs": llm_duration_ms,
+    });
+    if let Some(processed) = processed {
+        value["processed"] = serde_json::json!(processed);
+    }
+    value
 }
 
 pub fn print_refresh_text(sync: &SyncResult, new_mail: &[RefreshPreviewRow]) {
@@ -271,10 +328,18 @@ fn print_indented_block(title: &str, body: &str) {
     }
 }
 
-/// Text output for `zmail inbox` / refresh-style (`src/cli/refresh-output.ts` `printRefreshStyleOutput`).
-pub fn print_inbox_style_text(
+fn print_counts(counts: &InboxDispositionCounts) {
+    println!("  notify:   {}", counts.notify);
+    println!("  inform:   {}", counts.inform);
+    println!("  archive:  {}", counts.archive);
+    println!("  suppress: {}", counts.suppress);
+}
+
+pub fn print_check_text(
     sync: &SyncResult,
-    new_mail: &[RefreshPreviewRow],
+    surfaced: &[RefreshPreviewRow],
+    processed: Option<&[RefreshPreviewRow]>,
+    counts: &InboxDispositionCounts,
     preview_title: &str,
     omit_refresh_metrics: bool,
 ) {
@@ -302,13 +367,16 @@ pub fn print_inbox_style_text(
         );
         println!("  duration:  {sec:.2}s");
     }
-    if omit_refresh_metrics && new_mail.is_empty() {
-        println!("No notable messages in this window.");
+    if omit_refresh_metrics && surfaced.is_empty() {
+        println!("No urgent messages right now.");
     }
-    if !new_mail.is_empty() {
+    println!();
+    println!("Summary:");
+    print_counts(counts);
+    if !surfaced.is_empty() {
         println!();
         println!("{preview_title}");
-        for m in new_mail {
+        for m in surfaced {
             println!();
             println!("{MESSAGE_SEPARATOR}");
             let from_line = match &m.from_name {
@@ -331,10 +399,95 @@ pub fn print_inbox_style_text(
                 let one: String = note.split_whitespace().collect::<Vec<_>>().join(" ");
                 println!("Note:    {one}");
             }
+            if let Some(ref action) = m.action {
+                println!("Action:  {action}");
+            }
+            if let Some(ref category) = m.category {
+                println!("Category:{category}");
+            }
+            if !m.matched_rule_ids.is_empty() {
+                println!("Rules:   {}", m.matched_rule_ids.join(", "));
+            }
             print_indented_block("Preview:", &m.snippet);
         }
         println!();
         println!("{MESSAGE_SEPARATOR}");
+    }
+    if let Some(processed) = processed {
+        if !processed.is_empty() {
+            println!();
+            println!("Processed:");
+            for row in processed {
+                let action = row.action.as_deref().unwrap_or("notify");
+                let category = row.category.as_deref().unwrap_or("uncategorized");
+                println!("  {action:>8}  {category:<12}  {}", row.message_id);
+                if let Some(note) = &row.note {
+                    println!("    {note}");
+                }
+            }
+        }
+    }
+}
+
+pub fn print_review_text(
+    surfaced: &[RefreshPreviewRow],
+    processed: Option<&[RefreshPreviewRow]>,
+    counts: &InboxDispositionCounts,
+) {
+    if surfaced.is_empty() {
+        println!("No inbox items to review in this window.");
+    } else {
+        println!("Inbox review:");
+        for m in surfaced {
+            println!();
+            println!("{MESSAGE_SEPARATOR}");
+            let from_line = match &m.from_name {
+                Some(n) if !n.is_empty() => format!("{n} <{}>", m.from_address),
+                _ => format!("<{}>", m.from_address),
+            };
+            println!("Date:    {}", m.date);
+            println!("From:    {from_line}");
+            println!("Subject: {}", m.subject);
+            println!("Id:      {}", m.message_id);
+            if let Some(ref action) = m.action {
+                println!("Action:  {action}");
+            }
+            if let Some(ref atts) = m.attachments {
+                if !atts.is_empty() {
+                    println!("Attachments:");
+                    for a in atts {
+                        println!("  {}. {} ({})", a.index, a.filename, a.mime_type);
+                    }
+                }
+            }
+            if let Some(ref note) = m.note {
+                let one: String = note.split_whitespace().collect::<Vec<_>>().join(" ");
+                println!("Note:    {one}");
+            }
+            if !m.matched_rule_ids.is_empty() {
+                println!("Rules:   {}", m.matched_rule_ids.join(", "));
+            }
+            print_indented_block("Preview:", &m.snippet);
+        }
+        println!();
+        println!("{MESSAGE_SEPARATOR}");
+    }
+    println!();
+    println!("Summary:");
+    print_counts(counts);
+    if let Some(processed) = processed {
+        if !processed.is_empty() {
+            println!();
+            println!("Processed:");
+            for row in processed {
+                let action = row.action.as_deref().unwrap_or("inform");
+                let category = row.category.as_deref().unwrap_or("uncategorized");
+                println!("  {action:>8}  {category:<12}  {}", row.message_id);
+                if let Some(note) = &row.note {
+                    println!("    {note}");
+                }
+            }
+        }
     }
 }
 

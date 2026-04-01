@@ -35,7 +35,7 @@ fn mcp_search_mail_returns_json() {
         body_text: "needle word".into(),
         body_html: None,
         attachments: vec![],
-        is_noise: false,
+        category: None,
     };
     persist_message(&conn, &p, MAILBOX, 1, "[]", "p").unwrap();
     let line = serde_json::to_string(&json!({
@@ -70,7 +70,7 @@ fn mcp_get_message_by_id() {
         body_text: "MCP body text.".into(),
         body_html: None,
         attachments: vec![],
-        is_noise: false,
+        category: None,
     };
     persist_message(&conn, &p, MAILBOX, 1, "[]", "cur/mcp-msg.eml").unwrap();
     let line = serde_json::to_string(&json!({

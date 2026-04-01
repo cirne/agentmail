@@ -20,6 +20,7 @@ pub struct ImapJson {
     pub host: Option<String>,
     pub port: Option<u16>,
     pub user: Option<String>,
+    pub aliases: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -141,6 +142,7 @@ pub struct Config {
     pub imap_host: String,
     pub imap_port: u16,
     pub imap_user: String,
+    pub imap_aliases: Vec<String>,
     pub imap_password: String,
     pub smtp: ResolvedSmtp,
     pub sync_default_since: String,
@@ -219,6 +221,11 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
 
     let imap_password =
         effective_env("ZMAIL_IMAP_PASSWORD", &env_file, &process_env).unwrap_or_default();
+    let imap_aliases = json
+        .imap
+        .as_ref()
+        .and_then(|i| i.aliases.clone())
+        .unwrap_or_default();
 
     let data_dir = home.join("data");
     let db_path = data_dir.join("zmail.db");
@@ -228,6 +235,7 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
         imap_host,
         imap_port: json.imap.as_ref().and_then(|i| i.port).unwrap_or(993),
         imap_user,
+        imap_aliases,
         imap_password,
         smtp,
         sync_default_since: json
@@ -306,9 +314,13 @@ mod tests {
 
     #[test]
     fn config_json_deserialize_nested() {
-        let raw = r#"{"imap":{"host":"imap.x","port":993,"user":"u@x.com"},"inbox":{"defaultWindow":"48h"}}"#;
+        let raw = r#"{"imap":{"host":"imap.x","port":993,"user":"u@x.com","aliases":["alias@x.com"]},"inbox":{"defaultWindow":"48h"}}"#;
         let j: ConfigJson = serde_json::from_str(raw).unwrap();
         assert_eq!(j.imap.as_ref().unwrap().host.as_deref(), Some("imap.x"));
+        assert_eq!(
+            j.imap.as_ref().unwrap().aliases.as_ref().unwrap(),
+            &vec!["alias@x.com".to_string()]
+        );
         assert_eq!(
             j.inbox.as_ref().unwrap().default_window.as_deref(),
             Some("48h")

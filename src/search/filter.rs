@@ -1,12 +1,14 @@
 //! WHERE builder (mirrors `src/search/filter-compiler.ts`).
 
 use super::types::SearchOptions;
+use crate::mail_category::default_category_filter_sql;
 
 pub struct FilterClause {
     pub conditions: Vec<String>,
     pub params: Vec<String>,
     pub use_or: bool,
     pub always_and: Vec<String>,
+    pub always_and_params: Vec<String>,
 }
 
 fn from_pattern(p: &str) -> String {
@@ -82,8 +84,20 @@ pub fn build_filter_clause(opts: &SearchOptions, include_fts: bool) -> FilterCla
     }
 
     let mut always_and = Vec::new();
-    if !opts.include_noise {
-        always_and.push("m.is_noise = 0".to_string());
+    let mut always_and_params = Vec::new();
+    if !opts.categories.is_empty() {
+        let placeholders = opts
+            .categories
+            .iter()
+            .map(|_| "?")
+            .collect::<Vec<_>>()
+            .join(", ");
+        always_and.push(format!(
+            "LOWER(COALESCE(m.category, '')) IN ({placeholders})"
+        ));
+        always_and_params.extend(opts.categories.iter().map(|c| c.to_ascii_lowercase()));
+    } else if !opts.include_all {
+        always_and.push(default_category_filter_sql("m.category"));
     }
 
     FilterClause {
@@ -91,6 +105,7 @@ pub fn build_filter_clause(opts: &SearchOptions, include_fts: bool) -> FilterCla
         params,
         use_or: opts.filter_or,
         always_and,
+        always_and_params,
     }
 }
 
@@ -154,6 +169,7 @@ mod tests {
             params: vec![],
             use_or: false,
             always_and: vec!["c = 3".into()],
+            always_and_params: vec![],
         };
         assert_eq!(build_where_sql(&clause), "a = 1 AND b = 2 AND c = 3");
         clause.use_or = true;
@@ -163,12 +179,23 @@ mod tests {
     }
 
     #[test]
-    fn include_noise_skips_noise_clause() {
+    fn include_all_skips_default_category_clause() {
         let opts = SearchOptions {
-            include_noise: true,
+            include_all: true,
             ..Default::default()
         };
         let c = build_filter_clause(&opts, false);
         assert!(c.always_and.is_empty());
+    }
+
+    #[test]
+    fn category_filter_adds_always_and_params() {
+        let opts = SearchOptions {
+            categories: vec!["social".into(), "promotional".into()],
+            ..Default::default()
+        };
+        let c = build_filter_clause(&opts, false);
+        assert_eq!(c.always_and_params.len(), 2);
+        assert!(c.always_and[0].contains("m.category"));
     }
 }

@@ -18,7 +18,8 @@ pub use background_spawn::spawn_sync_background_detached;
 pub use error::RunSyncError;
 pub use maildir::{write_maildir_message, MaildirWrite};
 pub use parse_message::{
-    parse_raw_message, parse_read_full, MailboxEntry, ParsedAttachment, ParsedMessage, ReadForCli,
+    parse_index_message, parse_raw_message, parse_raw_message_with_options, parse_read_full,
+    MailboxEntry, ParseMessageOptions, ParsedAttachment, ParsedMessage, ReadForCli,
 };
 pub use parse_since::parse_since_to_date;
 pub use process_lock::{

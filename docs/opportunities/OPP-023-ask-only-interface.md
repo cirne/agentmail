@@ -50,8 +50,7 @@
 | Command/Tool | Why |
 |-------------|-----|
 | `zmail ask` / MCP `ask_email` | The primary query interface |
-| `zmail sync` | Data ingestion — not a query |
-| `zmail refresh` | Data ingestion — not a query |
+| `zmail update` | Data ingestion — not a query |
 | `zmail status` / MCP `get_status` | Operational — not a query |
 | `zmail stats` / MCP `get_stats` | Operational — not a query |
 | `zmail setup` / `zmail wizard` | Onboarding — not a query |
@@ -143,7 +142,7 @@ Before removing anything, add `ask` as an MCP tool so MCP consumers have the rep
 
 ## What success looks like
 
-- **CLI surface:** `zmail ask`, `zmail sync`, `zmail refresh`, `zmail status`, `zmail stats`, `zmail setup`, `zmail wizard`, `zmail mcp`. That's it.
+- **CLI surface:** `zmail ask`, `zmail update`, `zmail check`, `zmail review`, `zmail status`, `zmail stats`, `zmail setup`, `zmail wizard`, `zmail mcp`. That's it.
 - **MCP surface:** `ask_email`, `get_status`, `get_stats`. Three tools.
 - **Agent experience:** One tool call answers any email question. No multi-step orchestration, no flag guessing, no ID format confusion.
 - **Maintenance:** ~50% less CLI code, ~70% fewer MCP tool definitions, proportionally fewer tests and docs.

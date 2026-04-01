@@ -111,7 +111,7 @@ fn read_message_text_output() {
         body_text: "ignored".into(),
         body_html: None,
         attachments: vec![],
-        is_noise: false,
+        category: None,
     };
     let rel = "cur/msg1.eml";
     persist_message(&conn, &p, MAILBOX, 1, "[]", rel).unwrap();
@@ -168,7 +168,7 @@ Hello.";
         body_text: "ignored".into(),
         body_html: None,
         attachments: vec![],
-        is_noise: false,
+        category: None,
     };
     let rel = "cur/msg2.eml";
     persist_message(&conn, &p, MAILBOX, 1, "[]", rel).unwrap();
@@ -228,7 +228,23 @@ fn parallel_rebuild_correct() {
     fs::create_dir_all(&maildir).unwrap();
     for i in 0..50 {
         let eml = format!(
-            "From: u{i}@t.com\r\nSubject: s\r\nMessage-ID: <m{i}@test>\r\nDate: Mon, 1 Jan 2024 12:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nx{i}"
+            "From: u{i}@t.com\r\n\
+Subject: parallel subject {i}\r\n\
+Message-ID: <m{i}@test>\r\n\
+Date: Mon, 1 Jan 2024 12:00:00 +0000\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: multipart/mixed; boundary=\"b{i}\"\r\n\
+\r\n\
+--b{i}\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+invoice body {i}\r\n\
+--b{i}\r\n\
+Content-Type: application/octet-stream; name=\"f{i}.txt\"\r\n\
+Content-Disposition: attachment; filename=\"f{i}.txt\"\r\n\
+\r\n\
+payload-{i}\r\n\
+--b{i}--\r\n"
         );
         fs::write(maildir.join(format!("{i}.eml")), eml.as_bytes()).unwrap();
     }
@@ -249,4 +265,43 @@ fn parallel_rebuild_correct() {
     let b = ids(&c2);
     assert_eq!(a, b);
     assert_eq!(a.len(), 50);
+
+    fn subjects(conn: &rusqlite::Connection) -> HashSet<String> {
+        let mut stmt = conn.prepare("SELECT subject FROM messages").unwrap();
+        stmt.query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|x| x.ok())
+            .collect()
+    }
+    assert_eq!(subjects(&c1), subjects(&c2));
+
+    let count1: i64 = c1
+        .query_row("SELECT COUNT(*) FROM attachments", [], |row| row.get(0))
+        .unwrap();
+    let count2: i64 = c2
+        .query_row("SELECT COUNT(*) FROM attachments", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count1, 0);
+    assert_eq!(count2, 0);
+
+    let fts1 = search_with_meta(
+        &c1,
+        &SearchOptions {
+            query: Some("invoice".into()),
+            limit: Some(100),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let fts2 = search_with_meta(
+        &c2,
+        &SearchOptions {
+            query: Some("invoice".into()),
+            limit: Some(100),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(fts1.results.len(), 50);
+    assert_eq!(fts2.results.len(), 50);
 }

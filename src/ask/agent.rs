@@ -472,12 +472,12 @@ pub async fn run_ask(
         vlog(
             v,
             &format!(
-                "[phase 1 retry] no candidates found, retrying {} searches with includeNoise=true",
+                "[phase 1 retry] no candidates found, retrying {} searches with includeAll=true",
                 search_history.len()
             ),
         );
         for mut args in search_history.clone() {
-            args.insert("includeNoise".into(), json!(true));
+            args.insert("includeAll".into(), json!(true));
             let result = execute_nano_tool(conn, data_dir, owner_opt, "search", &args)?;
             if let Ok(parsed) = serde_json::from_str::<Value>(&result) {
                 collect_candidates_from_parsed(

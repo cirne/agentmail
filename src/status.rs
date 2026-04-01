@@ -402,6 +402,8 @@ pub fn print_status_text(conn: &Connection) -> Result<(), rusqlite::Error> {
             &earliest[..earliest.len().min(10)],
             &latest[..latest.len().min(10)]
         );
+        println!("{}{}", pad("Earliest:"), earliest);
+        println!("{}{}", pad("Latest:"), latest);
     }
 
     if let Some(ago) = format_time_ago(status.date_range.as_ref().map(|(_, l)| l.as_str())) {
