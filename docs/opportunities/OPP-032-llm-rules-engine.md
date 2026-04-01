@@ -1,12 +1,14 @@
 # OPP-032: Stateful Inbox Foundation — Categories, Decisions, and Local Handling State
 
-**Status:** Open. **Created:** 2026-04-01. **Updated:** 2026-04-01. **Tags:** inbox, state, rules, llm, category, archive, diagnostics, dedup
+**Status:** Archived. **Created:** 2026-04-01. **Updated:** 2026-04-01. **Tags:** inbox, state, rules, llm, category, archive, diagnostics, dedup
 
 **Related:** [OPP-034](OPP-034-simplified-inbox-cli-check-review.md) (clean-slate user-facing CLI built on top of this foundation), [OPP-001](OPP-001-personalization.md) (user context and personalization), [OPP-021](OPP-021-ask-spam-promo-awareness.md) (promotional/newsletter awareness), [OPP-033](OPP-033-imap-write-operations-and-readonly-mode.md) (provider-side archive/write semantics), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox without daemon)
 
 ---
 
 ## Problem
+
+**Archived note:** The core stateful inbox substrate described here is now in the codebase: durable inbox decisions, a 4-way action model, local handled/archive state, separate alert vs review surfaced state, rules/context persistence, and diagnostics/provenance. Keep this document as historical design context. Follow-on work should be tracked in narrower opportunities such as personalization/context quality and provider-side mailbox writes.
 
 Even with a better user-facing CLI, zmail still needs a lower-level inbox foundation:
 

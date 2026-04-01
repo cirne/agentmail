@@ -280,6 +280,10 @@ pub(crate) enum RulesCmd {
         action: String,
         condition: String,
         #[arg(long)]
+        no_preview: bool,
+        #[arg(long)]
+        preview_window: Option<String>,
+        #[arg(long)]
         text: bool,
     },
     /// Edit an existing rule
@@ -289,6 +293,10 @@ pub(crate) enum RulesCmd {
         condition: Option<String>,
         #[arg(long)]
         action: Option<String>,
+        #[arg(long)]
+        no_preview: bool,
+        #[arg(long)]
+        preview_window: Option<String>,
         #[arg(long)]
         text: bool,
     },

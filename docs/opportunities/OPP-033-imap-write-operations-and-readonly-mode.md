@@ -1,12 +1,14 @@
 # OPP-033: IMAP Write Operations — Readonly by Default, Email Management When Enabled
 
-**Status:** Open. **Created:** 2026-04-01. **Tags:** imap, archive, write, safety, config, inbox
+**Status:** Open. **Created:** 2026-04-01. **Updated:** 2026-04-01. **Tags:** imap, archive, write, safety, config, inbox
 
 **Related:** [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox, local archive semantics), [ADR-005](../ARCHITECTURE.md#adr-005-dual-agent-interface--native-cli--mcp-server) (agent-first CLI + MCP), [ADR-011](../ARCHITECTURE.md#adr-011-email-provider--imap-first-gmail-as-priority-target) (IMAP-first architecture), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox decisions)
 
 ---
 
 ## Problem
+
+**Keep open:** This is still a focused future opportunity. zmail currently updates only local archive/handled state; provider-side IMAP mutation semantics, config gating, and mutation-result reporting are still unshipped.
 
 Today zmail is effectively read-only with respect to the provider mailbox. It syncs, indexes, searches, classifies, drafts, and sends outbound mail, but it does **not** mutate existing IMAP messages on the server.
 

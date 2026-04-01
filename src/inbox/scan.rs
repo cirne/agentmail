@@ -72,6 +72,13 @@ pub struct RunInboxScanResult {
     pub llm_duration_ms: u64,
 }
 
+#[derive(Debug, Clone)]
+pub struct RuleImpactPreview {
+    pub matched: Vec<RefreshPreviewRow>,
+    pub candidates_scanned: usize,
+    pub llm_duration_ms: u64,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct RunInboxScanOptions {
     pub surface_mode: InboxSurfaceMode,
@@ -504,25 +511,11 @@ fn to_preview_row(candidate: &InboxCandidate, pick: InboxNotablePick) -> Refresh
     }
 }
 
-fn apply_decision_side_effects(conn: &Connection, row: &RefreshPreviewRow) -> rusqlite::Result<()> {
-    if let Some("archive") = row.action.as_deref() {
-        conn.execute(
-            "UPDATE messages SET is_archived = 1 WHERE message_id = ?1",
-            [&row.message_id],
-        )?;
-    }
-    Ok(())
-}
-
-/// Run inbox notable scan (Node `runInboxScan`).
-pub async fn run_inbox_scan(
+fn load_inbox_candidates(
     conn: &Connection,
     options: &RunInboxScanOptions,
-    classifier: &mut dyn InboxBatchClassifier,
-) -> Result<RunInboxScanResult, RunInboxScanError> {
+) -> Result<Vec<InboxCandidate>, RunInboxScanError> {
     let candidate_cap = options.candidate_cap.unwrap_or(DEFAULT_CANDIDATE_CAP);
-    let notable_cap = options.notable_cap.unwrap_or(DEFAULT_NOTABLE_CAP);
-    let batch_size = options.batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
     let category_sql = if options.include_all {
         String::new()
     } else {
@@ -602,6 +595,91 @@ pub async fn run_inbox_scan(
         |c| &c.date,
     )?;
     candidates.truncate(candidate_cap);
+    Ok(candidates)
+}
+
+async fn classify_candidates(
+    candidates: &[InboxCandidate],
+    batch_size: usize,
+    classifier: &mut dyn InboxBatchClassifier,
+) -> Result<(Vec<RefreshPreviewRow>, u64), RunInboxScanError> {
+    let by_id: HashMap<String, InboxCandidate> = candidates
+        .iter()
+        .map(|c| (c.message_id.clone(), c.clone()))
+        .collect();
+    let mut llm_duration_ms: u64 = 0;
+    let mut merged: Vec<InboxNotablePick> = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    for chunk in candidates.chunks(batch_size) {
+        let batch: Vec<InboxCandidate> = chunk.to_vec();
+        let t0 = Instant::now();
+        let picks = classifier.classify_batch(batch).await?;
+        llm_duration_ms += t0.elapsed().as_millis() as u64;
+        for p in picks {
+            if seen.contains(&p.message_id) {
+                continue;
+            }
+            seen.insert(p.message_id.clone());
+            merged.push(p);
+        }
+    }
+
+    let mut rows = Vec::new();
+    for pick in merged {
+        let Some(candidate) = by_id.get(&pick.message_id) else {
+            continue;
+        };
+        rows.push(to_preview_row(candidate, pick));
+    }
+    Ok((rows, llm_duration_ms))
+}
+
+pub async fn preview_rule_impact(
+    conn: &Connection,
+    options: &RunInboxScanOptions,
+    classifier: &mut dyn InboxBatchClassifier,
+    rule_id: &str,
+) -> Result<RuleImpactPreview, RunInboxScanError> {
+    let batch_size = options.batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
+    let candidates = load_inbox_candidates(conn, options)?;
+    let (rows, llm_duration_ms) = classify_candidates(&candidates, batch_size, classifier).await?;
+    let matched = rows
+        .into_iter()
+        .filter(|row| {
+            row.matched_rule_ids
+                .iter()
+                .any(|matched| matched == rule_id)
+        })
+        .collect();
+    Ok(RuleImpactPreview {
+        matched,
+        candidates_scanned: candidates.len(),
+        llm_duration_ms,
+    })
+}
+
+fn apply_decision_side_effects(conn: &Connection, row: &RefreshPreviewRow) -> rusqlite::Result<()> {
+    if let Some("archive") = row.action.as_deref() {
+        conn.execute(
+            "UPDATE messages SET is_archived = 1 WHERE message_id = ?1",
+            [&row.message_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// Run inbox notable scan (Node `runInboxScan`).
+pub async fn run_inbox_scan(
+    conn: &Connection,
+    options: &RunInboxScanOptions,
+    classifier: &mut dyn InboxBatchClassifier,
+) -> Result<RunInboxScanResult, RunInboxScanError> {
+    let candidate_cap = options.candidate_cap.unwrap_or(DEFAULT_CANDIDATE_CAP);
+    let notable_cap = options.notable_cap.unwrap_or(DEFAULT_NOTABLE_CAP);
+    let batch_size = options.batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
+    let mut candidates = load_inbox_candidates(conn, options)?;
+    candidates.truncate(candidate_cap);
 
     let by_id: HashMap<String, InboxCandidate> = candidates
         .iter()
@@ -637,33 +715,12 @@ pub async fn run_inbox_scan(
         .cloned()
         .collect();
 
-    let mut llm_duration_ms: u64 = 0;
-    let mut merged: Vec<InboxNotablePick> = Vec::new();
-    let mut seen: HashSet<String> = HashSet::new();
-
-    for chunk in llm_candidates.chunks(batch_size) {
-        let batch: Vec<InboxCandidate> = chunk.to_vec();
-        let t0 = Instant::now();
-        let picks = classifier.classify_batch(batch).await?;
-        llm_duration_ms += t0.elapsed().as_millis() as u64;
-        for p in picks {
-            if seen.contains(&p.message_id) {
-                continue;
-            }
-            seen.insert(p.message_id.clone());
-            merged.push(p);
-        }
-    }
+    let (fresh_rows, llm_duration_ms) =
+        classify_candidates(&llm_candidates, batch_size, classifier).await?;
 
     let mut fresh_by_id: HashMap<String, RefreshPreviewRow> = HashMap::new();
-    let mut fresh_rows: Vec<RefreshPreviewRow> = Vec::new();
-    for p in merged.iter().cloned() {
-        let Some(c) = by_id.get(&p.message_id) else {
-            continue;
-        };
-        let row = to_preview_row(c, p);
+    for row in fresh_rows.iter().cloned() {
         fresh_by_id.insert(row.message_id.clone(), row.clone());
-        fresh_rows.push(row);
     }
     persist_inbox_decisions(conn, &rules_fingerprint, &fresh_rows)?;
 
@@ -725,6 +782,9 @@ pub async fn run_inbox_scan(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::open_memory;
+    use crate::persist_message;
+    use crate::sync::ParsedMessage;
 
     #[test]
     fn prefetch_limit_80_to_160() {
@@ -802,5 +862,102 @@ mod tests {
         }];
         let r = parse_notable_response("not json", &batch).unwrap();
         assert_eq!(r[0].action.as_deref(), Some("suppress"));
+    }
+
+    #[tokio::test]
+    async fn preview_rule_impact_filters_to_new_rule_without_side_effects() {
+        let conn = open_memory().unwrap();
+        let matching = ParsedMessage {
+            message_id: "m1".into(),
+            from_address: "alice@example.com".into(),
+            from_name: Some("Alice".into()),
+            to_addresses: vec!["me@example.com".into()],
+            cc_addresses: vec![],
+            subject: "Quarterly budget".into(),
+            date: "2026-03-31T09:00:00Z".into(),
+            body_text: "Budget discussion for Q2".into(),
+            body_html: None,
+            attachments: vec![],
+            category: None,
+        };
+        let other = ParsedMessage {
+            message_id: "m2".into(),
+            from_address: "bob@example.com".into(),
+            from_name: Some("Bob".into()),
+            to_addresses: vec!["me@example.com".into()],
+            cc_addresses: vec![],
+            subject: "Hello".into(),
+            date: "2026-03-31T08:00:00Z".into(),
+            body_text: "General update".into(),
+            body_html: None,
+            attachments: vec![],
+            category: None,
+        };
+        persist_message(&conn, &matching, "INBOX", 1, "[]", "m1.eml").unwrap();
+        persist_message(&conn, &other, "INBOX", 2, "[]", "m2.eml").unwrap();
+
+        let mut classifier = MockInboxClassifier::new(|batch| {
+            batch
+                .into_iter()
+                .map(|candidate| InboxNotablePick {
+                    message_id: candidate.message_id.clone(),
+                    action: Some(if candidate.message_id == "m1" {
+                        "archive".into()
+                    } else {
+                        "inform".into()
+                    }),
+                    matched_rule_ids: if candidate.message_id == "m1" {
+                        vec!["r123".into()]
+                    } else {
+                        vec![]
+                    },
+                    note: Some(format!("classified {}", candidate.message_id)),
+                    decision_source: Some(if candidate.message_id == "m1" {
+                        "rule".into()
+                    } else {
+                        "model".into()
+                    }),
+                })
+                .collect()
+        });
+        let preview = preview_rule_impact(
+            &conn,
+            &RunInboxScanOptions {
+                surface_mode: InboxSurfaceMode::Review,
+                cutoff_iso: "2026-03-01T00:00:00Z".into(),
+                include_all: true,
+                replay: true,
+                reapply_llm: true,
+                diagnostics: true,
+                rules_fingerprint: None,
+                owner_address: Some("me@example.com".into()),
+                owner_aliases: vec![],
+                candidate_cap: Some(10),
+                notable_cap: None,
+                batch_size: Some(10),
+            },
+            &mut classifier,
+            "r123",
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(preview.candidates_scanned, 2);
+        assert_eq!(preview.matched.len(), 1);
+        assert_eq!(preview.matched[0].message_id, "m1");
+        assert_eq!(preview.matched[0].action.as_deref(), Some("archive"));
+        assert_eq!(
+            preview.matched[0].matched_rule_ids,
+            vec!["r123".to_string()]
+        );
+
+        let is_archived: i64 = conn
+            .query_row(
+                "SELECT is_archived FROM messages WHERE message_id = 'm1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(is_archived, 0);
     }
 }

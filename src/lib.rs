@@ -44,10 +44,10 @@ pub use ids::{
     resolve_message_id_and_raw_path, resolve_message_id_thread_and_raw_path, resolve_thread_id,
 };
 pub use inbox::{
-    dismiss_message, inbox_candidate_prefetch_limit, record_inbox_scan, run_inbox_scan,
-    InboxBatchClassifier, InboxCandidate, InboxNotablePick, InboxOwnerContext, InboxSurfaceMode,
-    MockInboxClassifier, OpenAiInboxClassifier, RunInboxScanError, RunInboxScanOptions,
-    RunInboxScanResult,
+    dismiss_message, inbox_candidate_prefetch_limit, preview_rule_impact, record_inbox_scan,
+    run_inbox_scan, InboxBatchClassifier, InboxCandidate, InboxNotablePick, InboxOwnerContext,
+    InboxSurfaceMode, MockInboxClassifier, OpenAiInboxClassifier, RuleImpactPreview,
+    RunInboxScanError, RunInboxScanOptions, RunInboxScanResult,
 };
 pub use inbox_window::parse_inbox_window_to_iso_cutoff;
 pub use mail_category::{

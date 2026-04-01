@@ -28,6 +28,7 @@ fn rules_add_persists_file_and_show_reads_it() {
     );
     let added: serde_json::Value = serde_json::from_slice(&add.stdout).unwrap();
     let id = added["rule"]["id"].as_str().unwrap();
+    assert_eq!(added["preview"]["available"], false);
     let rules_path = dir.path().join("rules.json");
     let raw = fs::read_to_string(&rules_path).unwrap();
     assert!(raw.contains("linkedin digest emails"));
@@ -63,6 +64,46 @@ fn rules_feedback_returns_structured_proposal() {
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
     assert_eq!(v["proposed"]["action"], "archive");
     assert!(v["apply"].as_str().unwrap().contains("zmail rules add"));
+}
+
+#[test]
+fn rules_edit_returns_preview_payload() {
+    let dir = tempdir().unwrap();
+    let bin = env!("CARGO_BIN_EXE_zmail");
+    let add = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args([
+            "rules",
+            "add",
+            "--action",
+            "suppress",
+            "--no-preview",
+            "linkedin digest emails",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        add.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&add.stderr)
+    );
+    let added: serde_json::Value = serde_json::from_slice(&add.stdout).unwrap();
+    let id = added["rule"]["id"].as_str().unwrap();
+
+    let edit = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args(["rules", "edit", id, "--action", "archive", "--no-preview"])
+        .output()
+        .unwrap();
+    assert!(
+        edit.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&edit.stderr)
+    );
+    let edited: serde_json::Value = serde_json::from_slice(&edit.stdout).unwrap();
+    assert_eq!(edited["rule"]["id"], id);
+    assert_eq!(edited["rule"]["action"], "archive");
+    assert_eq!(edited["preview"]["available"], false);
 }
 
 #[test]
