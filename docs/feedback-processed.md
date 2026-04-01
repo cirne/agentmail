@@ -51,6 +51,7 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `bug-send-reply-draft-wrong-path.md` | 2026-03-31 | Created bug; fixed; verified | [BUG-031](bugs/archive/BUG-031-send-reply-draft-wrong-maildir-path.md) — reply send path resolution fixed; user verified closed |
 | `ux-search-query-optional-when-filters-present.md` | 2026-03-31 | Created bug | [BUG-032](bugs/BUG-032-search-query-should-be-optional-with-filters.md) — CLI requires positional `<QUERY>` even when filters already define a valid search |
 | `ux-actionable-error-messages.md` | 2026-03-31 | Created bug | [BUG-033](bugs/BUG-033-actionable-file-not-found-errors.md) — missing local files still surface raw OS/path errors instead of actionable zmail-specific recovery messages |
+| `ux-cli-agent-friction-and-read-missing-recipients.md` | 2026-04-01 | Created bugs | [BUG-034](bugs/archive/BUG-034-cli-json-text-flags-inconsistent-across-subcommands.md) (CLI `--json`/`--text` friction); [BUG-035](bugs/archive/BUG-035-read-omits-to-cc-bcc-and-threading-headers.md) (`read` omits To/CC/BCC / threading headers) |
 
 ---
 

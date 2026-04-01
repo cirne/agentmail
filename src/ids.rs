@@ -65,6 +65,26 @@ pub fn resolve_message_id_and_raw_path(
     Ok(None)
 }
 
+/// `message_id`, `thread_id`, and `raw_path` for `zmail read --json` / MCP.
+pub fn resolve_message_id_thread_and_raw_path(
+    conn: &Connection,
+    id: &str,
+) -> rusqlite::Result<Option<(String, String, String)>> {
+    for key in message_id_lookup_keys(id) {
+        let row: Option<(String, String, String)> = conn
+            .query_row(
+                "SELECT message_id, thread_id, raw_path FROM messages WHERE message_id = ?1 LIMIT 1",
+                [&key],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .optional()?;
+        if let Some(triple) = row {
+            return Ok(Some(triple));
+        }
+    }
+    Ok(None)
+}
+
 /// First `thread_id` value present on any message (tries bracketed then bare).
 pub fn resolve_thread_id(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
     for key in message_id_lookup_keys(id) {

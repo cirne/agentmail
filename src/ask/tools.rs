@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 
 use crate::ids::{resolve_message_id, resolve_thread_id};
 use crate::search::{search_with_meta, SearchOptions, SearchResult};
-use crate::sync::parse_since_to_date;
+use crate::sync::{parse_read_full, parse_since_to_date};
 use crate::thread_view::list_thread_messages;
 
 fn parse_date_param(date_str: Option<&str>) -> Option<String> {
@@ -335,17 +335,23 @@ pub fn execute_get_message_tool(
         })
         .collect();
 
-    if raw || detail == "raw" {
-        let bytes = match crate::read_message_bytes(conn, &mid, data_dir)? {
-            Ok(b) => b,
-            Err(e) => {
+    let bytes_opt = match crate::read_message_bytes(conn, &mid, data_dir)? {
+        Ok(b) => Some(b),
+        Err(e) => {
+            if raw || detail == "raw" {
                 return Ok(json!({
                     "error": format!("read raw: {e}"),
                     "messageId": mid,
                 })
                 .to_string());
             }
-        };
+            None
+        }
+    };
+    let parsed_opt = bytes_opt.as_ref().map(|b| parse_read_full(b));
+
+    if raw || detail == "raw" {
+        let bytes = bytes_opt.expect("raw implies bytes read ok");
         let b64 = Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
         return Ok(json!({
             "messageId": mid,
@@ -355,6 +361,13 @@ pub fn execute_get_message_tool(
             "subject": subject,
             "date": date,
             "rawBase64": b64,
+            "to": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.to)),
+            "cc": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.cc)),
+            "bcc": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.bcc)),
+            "replyTo": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.reply_to)),
+            "inReplyTo": parsed_opt.as_ref().and_then(|p| p.in_reply_to.as_ref()),
+            "references": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.references)),
+            "recipientsDisclosed": parsed_opt.as_ref().map(|p| p.recipients_disclosed).unwrap_or(false),
             "attachments": attachments,
         })
         .to_string());
@@ -373,6 +386,13 @@ pub fn execute_get_message_tool(
         "fromName": from_name,
         "subject": subject,
         "date": date,
+        "to": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.to)),
+        "cc": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.cc)),
+        "bcc": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.bcc)),
+        "replyTo": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.reply_to)),
+        "inReplyTo": parsed_opt.as_ref().and_then(|p| p.in_reply_to.as_ref()),
+        "references": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.references)),
+        "recipientsDisclosed": parsed_opt.as_ref().map(|p| p.recipients_disclosed).unwrap_or(false),
         "content": { "markdown": body_for_out },
         "attachments": attachments,
     })

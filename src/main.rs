@@ -20,18 +20,18 @@ const CLI_LONG_VERSION: &str = concat!(
 
 use zmail::{
     build_inbox_style_json, build_refresh_json_value, collect_stats, connect_imap_session, db,
-    handle_request_line, list_attachments_for_message, list_thread_messages, load_config,
-    load_refresh_new_mail, parse_inbox_window_to_iso_cutoff, print_inbox_style_text,
-    print_refresh_text, print_status_text, read_attachment_text, read_message_bytes,
-    read_stored_file, rebuild_from_maildir, resolve_message_id, resolve_openai_api_key,
-    resolve_search_json_format, resolve_setup_email, resolve_setup_password, resolve_sync_mailbox,
-    resolve_sync_since_ymd, run_ask, run_inbox_scan, run_wizard, search_result_to_slim_json_row,
-    search_with_meta, send_draft_by_id, send_simple_message, spawn_sync_background_detached,
-    split_address_list, status, validate_imap_credentials, validate_openai_key,
-    verify_smtp_credentials, who, write_setup, LoadConfigOptions, OpenAiInboxClassifier,
-    RunAskOptions, RunInboxScanOptions, SearchOptions, SearchResultFormatPreference,
-    SendSimpleFields, SetupArgs, SyncDirection, SyncFileLogger, SyncOptions, WhoOptions,
-    WizardOptions,
+    format_read_message_text, handle_request_line, list_attachments_for_message,
+    list_thread_messages, load_config, load_refresh_new_mail, parse_inbox_window_to_iso_cutoff,
+    parse_read_full, print_inbox_style_text, print_refresh_text, print_status_text,
+    read_attachment_text, read_message_bytes_with_thread, read_stored_file, rebuild_from_maildir,
+    resolve_message_id, resolve_openai_api_key, resolve_search_json_format, resolve_setup_email,
+    resolve_setup_password, resolve_sync_mailbox, resolve_sync_since_ymd, run_ask, run_inbox_scan,
+    run_wizard, search_result_to_slim_json_row, search_with_meta, send_draft_by_id,
+    send_simple_message, spawn_sync_background_detached, split_address_list, status,
+    validate_imap_credentials, validate_openai_key, verify_smtp_credentials, who, write_setup,
+    LoadConfigOptions, OpenAiInboxClassifier, ReadMessageJson, RunAskOptions, RunInboxScanOptions,
+    SearchOptions, SearchResultFormatPreference, SendSimpleFields, SetupArgs, SyncDirection,
+    SyncFileLogger, SyncOptions, WhoOptions, WizardOptions,
 };
 
 #[derive(Parser)]
@@ -117,8 +117,11 @@ enum Commands {
         #[arg(long)]
         include_noise: bool,
         /// Plain-text table output
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         text: bool,
+        /// Explicit JSON output (default unless `--text` is set; agents often pass this flag)
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
         #[arg(long, value_parser = ["auto", "full", "slim"])]
         result_format: Option<String>,
         #[arg(long)]
@@ -135,17 +138,26 @@ enum Commands {
         #[arg(long)]
         text: bool,
     },
-    /// Read one message (raw .eml or body text)
+    /// Read one message (raw .eml or headers + body)
     Read {
         message_id: String,
         #[arg(long)]
         raw: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
+        /// Plain-text headers + body (default unless `--json` or `--raw`)
+        #[arg(long, conflicts_with = "json")]
+        text: bool,
     },
     /// List messages in a thread
     Thread {
         thread_id: String,
-        #[arg(long)]
+        /// JSON array of thread messages
+        #[arg(long, conflicts_with = "text")]
         json: bool,
+        /// Plain-text table output (default unless `--json` is set)
+        #[arg(long, conflicts_with = "json")]
+        text: bool,
     },
     /// List or read message attachments (extracted text / CSV)
     #[command(name = "attachment")]
@@ -654,22 +666,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
         }
-        Commands::Read { message_id, raw } => {
+        Commands::Read {
+            message_id,
+            raw,
+            json,
+            text: _text,
+        } => {
             let cfg = load_config(LoadConfigOptions {
                 home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
                 env: None,
             });
             let conn = db::open_file(cfg.db_path())?;
-            let bytes = read_message_bytes(&conn, &message_id, &cfg.data_dir)??;
+            let (bytes, _mid, thread_id) =
+                read_message_bytes_with_thread(&conn, &message_id, &cfg.data_dir)??;
             if raw {
-                use std::io::Write;
                 std::io::stdout().write_all(&bytes)?;
             } else {
-                let p = zmail::parse_raw_message(&bytes);
-                print!("{}", p.body_text);
+                let parsed = parse_read_full(&bytes);
+                if json {
+                    let out = ReadMessageJson::from_parsed(&parsed, &thread_id);
+                    println!("{}", serde_json::to_string_pretty(&out)?);
+                } else {
+                    print!("{}", format_read_message_text(&parsed));
+                }
             }
         }
-        Commands::Thread { thread_id, json } => {
+        Commands::Thread {
+            thread_id,
+            json,
+            text: _text,
+        } => {
             let cfg = load_config(LoadConfigOptions {
                 home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
                 env: None,
@@ -883,6 +909,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             before,
             include_noise,
             text,
+            json: _json,
             result_format,
             timings,
         } => {

@@ -130,6 +130,71 @@ fn read_message_text_output() {
     );
     let s = String::from_utf8_lossy(&out.stdout);
     assert!(s.contains("Body line one"));
+    assert!(s.contains("From: a@b.com"));
+    assert!(s.contains("Subject: Hi"));
+}
+
+#[test]
+fn read_message_json_includes_recipients_and_threading() {
+    let dir = tempdir().unwrap();
+    fs::create_dir_all(dir.path().join("data/cur")).unwrap();
+    let eml_path = dir.path().join("data/cur/msg2.eml");
+    let raw = b"From: Alice <alice@a.com>\r\n\
+To: Bob <bob@b.com>\r\n\
+Cc: Carol <carol@c.com>\r\n\
+Bcc: Dave <dave@d.com>\r\n\
+Reply-To: replies@a.com\r\n\
+Subject: Meet\r\n\
+Message-ID: <mid-json@test>\r\n\
+In-Reply-To: <parent@x.com>\r\n\
+References: <a@b> <c@d>\r\n\
+Date: Mon, 1 Jan 2024 12:00:00 +0000\r\n\
+MIME-Version: 1.0\r\n\
+Content-Type: text/plain\r\n\
+\r\n\
+Hello.";
+    fs::write(&eml_path, raw).unwrap();
+
+    let db_path = dir.path().join("data/zmail.db");
+    let conn = db::open_file(&db_path).unwrap();
+    let p = ParsedMessage {
+        message_id: "<mid-json@test>".into(),
+        from_address: "alice@a.com".into(),
+        from_name: Some("Alice".into()),
+        to_addresses: vec!["bob@b.com".into()],
+        cc_addresses: vec!["carol@c.com".into()],
+        subject: "Meet".into(),
+        date: "2024-01-01T12:00:00Z".into(),
+        body_text: "ignored".into(),
+        body_html: None,
+        attachments: vec![],
+        is_noise: false,
+    };
+    let rel = "cur/msg2.eml";
+    persist_message(&conn, &p, MAILBOX, 1, "[]", rel).unwrap();
+    drop(conn);
+
+    let bin = env!("CARGO_BIN_EXE_zmail");
+    let out = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args(["read", "<mid-json@test>", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["messageId"], "<mid-json@test>");
+    assert!(v.get("threadId").is_some());
+    assert_eq!(v["bcc"].as_array().unwrap().len(), 1);
+    assert_eq!(v["bcc"][0]["address"], "dave@d.com");
+    assert_eq!(v["inReplyTo"], "parent@x.com");
+    let refs = v["references"].as_array().unwrap();
+    assert!(refs.iter().any(|x| x == "a@b"));
+    assert_eq!(v["recipientsDisclosed"], true);
+    assert_eq!(v["body"], "Hello.");
 }
 
 #[test]

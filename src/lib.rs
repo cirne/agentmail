@@ -39,7 +39,7 @@ pub use db::{
 };
 pub use ids::{
     message_id_lookup_keys, normalize_message_id, resolve_message_id,
-    resolve_message_id_and_raw_path, resolve_thread_id,
+    resolve_message_id_and_raw_path, resolve_message_id_thread_and_raw_path, resolve_thread_id,
 };
 pub use inbox::{
     inbox_candidate_prefetch_limit, run_inbox_scan, InboxBatchClassifier, InboxCandidate,
@@ -47,7 +47,10 @@ pub use inbox::{
     RunInboxScanOptions, RunInboxScanResult,
 };
 pub use inbox_window::parse_inbox_window_to_iso_cutoff;
-pub use mail_read::{read_message_bytes, resolve_raw_path};
+pub use mail_read::{
+    format_read_message_text, read_message_bytes, read_message_bytes_with_thread, resolve_raw_path,
+    ReadMessageJson,
+};
 pub use mcp::{handle_request_line, tool_schemas_stable, JsonRpcRequest, TOOL_NAMES};
 pub use rebuild_index::{rebuild_from_maildir, rebuild_from_maildir_sequential};
 pub use refresh::{
@@ -79,13 +82,13 @@ pub use setup::{
 pub use status::{format_time_ago, get_status, print_status_text, StatusData};
 pub use sync::{
     acquire_lock, connect_imap_session, filter_uids_after, forward_uid_range, is_process_alive,
-    is_sync_lock_held, oldest_message_date_for_folder, parse_raw_message, parse_since_to_date,
-    release_lock, resolve_sync_mailbox, resolve_sync_since_ymd, run_sync,
+    is_sync_lock_held, oldest_message_date_for_folder, parse_raw_message, parse_read_full,
+    parse_since_to_date, release_lock, resolve_sync_mailbox, resolve_sync_since_ymd, run_sync,
     run_sync_with_parallel_imap_connect, same_calendar_day, should_early_exit_forward,
     spawn_sync_background_detached, sync_log_path, write_maildir_message, FakeImapTransport,
-    FetchedMessage, ImapStatusData, LockResult, MaildirWrite, ParsedAttachment, ParsedMessage,
-    RealImapTransport, RunSyncError, SyncDirection, SyncFileLogger, SyncImapTransport, SyncLockRow,
-    SyncOptions, SyncResult,
+    FetchedMessage, ImapStatusData, LockResult, MailboxEntry, MaildirWrite, ParsedAttachment,
+    ParsedMessage, ReadForCli, RealImapTransport, RunSyncError, SyncDirection, SyncFileLogger,
+    SyncImapTransport, SyncLockRow, SyncOptions, SyncResult,
 };
 pub use thread_view::{list_thread_messages, ThreadMessageRow};
 pub use wizard::{run_wizard, WizardOptions};

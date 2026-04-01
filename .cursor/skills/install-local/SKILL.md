@@ -14,7 +14,9 @@ INSTALL_PREFIX="$HOME/.local/bin" cargo install-local
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Copy-only after **`cargo build --release`** (e.g. CI): **`cp target/release/zmail "$INSTALL_PREFIX/zmail"`** and **`chmod 755`**.
+This also installs the publishable **`skills/zmail`** skill into **`~/.claude/skills/zmail`** (symlink by default). Skip with **`ZMAIL_SKIP_CLAUDE_SKILL=1`**, copy instead of symlink: **`ZMAIL_CLAUDE_SKILL_MODE=copy`** — same env vars as **`npm run install-skill:claude`**.
+
+Copy-only after **`cargo build --release`** (e.g. CI): **`cp target/release/zmail "$INSTALL_PREFIX/zmail"`** and **`chmod 755`** (no skill step; run **`ln -sf "$(pwd)/skills/zmail" ~/.claude/skills/zmail`** yourself if needed).
 
 After **`cargo install --path .`**, `cargo-install-local` is on `PATH` (usually `~/.cargo/bin`); then **`cargo install-local`** works from any directory (it finds the workspace by walking up from the cwd, or use **`ZMAIL_ROOT`**).
 

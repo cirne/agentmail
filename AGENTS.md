@@ -13,7 +13,7 @@ curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh | bash
 
 **From source (dev / contributors):**
 ```bash
-cargo install-local   # build --release + install (set INSTALL_PREFIX; default ~/.local/bin)
+cargo install-local   # build --release + install binary + symlink skills/zmail → ~/.claude/skills/zmail (set INSTALL_PREFIX; skip skill: ZMAIL_SKIP_CLAUDE_SKILL=1; same as npm install-skill:claude)
 # Copy-only (e.g. CI artifact already at target/release/zmail): cp target/release/zmail "$INSTALL_PREFIX/zmail" && chmod 755 "$INSTALL_PREFIX/zmail"
 # After: cargo install --path .  # puts `zmail` and `cargo-install-local` in ~/.cargo/bin so `cargo install-local` works outside the repo
 ```
@@ -147,10 +147,10 @@ npm run eval         # run eval suite (LLM-based evaluation tests, requires ZMAI
 
 ### CLI Commands
 
-zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--text] [--result-format auto|full|slim] [--ids-only]
+zmail search <query> [--limit n] [--from addr] [--after date] [--before date] [--include-noise] [--json] [--text] [--result-format auto|full|slim] [--ids-only]
 zmail who [query] [--limit n] [--enrich] [--text]  (omit query for top contacts)
-zmail read <message_id> [--raw]
-zmail thread <thread_id> [--json] [--raw]
+zmail read <message_id> [--raw] [--json] [--text]
+zmail thread <thread_id> [--json] [--text]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
 zmail inbox [<window>] [--since <window>] [--refresh] [--force] [--include-noise] [--text]  # LLM notable-mail scan; default JSON is scan-only unless --refresh (then sync metrics + scan extras; requires OpenAI key)
 zmail status [--json]

@@ -17,7 +17,9 @@ pub mod windows;
 pub use background_spawn::spawn_sync_background_detached;
 pub use error::RunSyncError;
 pub use maildir::{write_maildir_message, MaildirWrite};
-pub use parse_message::{parse_raw_message, ParsedAttachment, ParsedMessage};
+pub use parse_message::{
+    parse_raw_message, parse_read_full, MailboxEntry, ParsedAttachment, ParsedMessage, ReadForCli,
+};
 pub use parse_since::parse_since_to_date;
 pub use process_lock::{
     acquire_lock, is_process_alive, is_sync_lock_held, release_lock, LockResult, SyncLockRow,

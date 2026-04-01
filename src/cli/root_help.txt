@@ -12,8 +12,8 @@ Setup & sync
 Search & read
   zmail search <query> [flags]
   zmail who [query] [flags]
-  zmail read <id> [--raw]
-  zmail thread <id> [--json]
+  zmail read <id> [--raw] [--json] [--text]
+  zmail thread <id> [--json] [--text]
   zmail attachment list <message_id>
   zmail attachment read <message_id> <index>|<filename>
 

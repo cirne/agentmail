@@ -497,3 +497,35 @@ fn search_exits_zero() {
         .unwrap();
     assert!(st.success());
 }
+
+/// BUG-034: `--json` is a no-op where JSON is already the default; agents still pass it.
+#[test]
+fn search_cli_accepts_json_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = env!("CARGO_BIN_EXE_zmail");
+    let out = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args(["search", "anything", "--json", "--limit", "3"])
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let s = String::from_utf8_lossy(&out.stdout);
+    assert!(s.contains("\"results\""), "stdout: {s}");
+}
+
+/// BUG-034: `thread` accepts `--text` like other subcommands (default is text).
+#[test]
+fn thread_cli_accepts_text_flag() {
+    let dir = tempfile::tempdir().unwrap();
+    let bin = env!("CARGO_BIN_EXE_zmail");
+    let st = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args(["thread", "<no-such-thread>", "--text"])
+        .status()
+        .unwrap();
+    assert!(st.success());
+}
