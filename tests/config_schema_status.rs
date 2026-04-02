@@ -19,7 +19,6 @@ fn schema_creates_all_tables() {
     assert!(tables.contains(&"inbox_alerts".to_string()));
     assert!(tables.contains(&"inbox_scans".to_string()));
     assert!(tables.contains(&"inbox_decisions".to_string()));
-    assert!(tables.contains(&"inbox_handled".to_string()));
     assert!(tables.contains(&"inbox_reviews".to_string()));
     assert!(tables.contains(&"messages".to_string()));
     assert!(tables.contains(&"messages_fts".to_string()));

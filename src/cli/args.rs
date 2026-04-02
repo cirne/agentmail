@@ -142,11 +142,18 @@ pub(crate) enum Commands {
     /// Fetch new mail and surface urgent messages right now
     Check(CheckArgs),
     /// Review notable recent mail without urgent-only filtering
-    Review {
-        #[command(subcommand)]
-        sub: Option<ReviewSubcommand>,
-        #[command(flatten)]
-        args: ReviewArgs,
+    Review(ReviewArgs),
+    /// Archive messages locally (`is_archived`); optional IMAP when mailboxManagement is enabled
+    Archive {
+        /// One or more RFC Message-IDs
+        #[arg(required = true)]
+        message_ids: Vec<String>,
+        #[arg(long)]
+        undo: bool,
+        #[arg(long, conflicts_with = "json")]
+        text: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
     },
     /// Send mail via SMTP (same IMAP credentials; optional `ZMAIL_SEND_TEST=1` guard)
     Send {
@@ -247,18 +254,6 @@ pub(crate) struct ReviewArgs {
     pub(crate) diagnostics: bool,
     #[arg(long)]
     pub(crate) text: bool,
-}
-
-#[derive(Subcommand, Debug, Clone)]
-pub(crate) enum ReviewSubcommand {
-    /// Mark a surfaced message handled; archives locally by default
-    Dismiss {
-        message_id: String,
-        #[arg(long)]
-        no_archive: bool,
-        #[arg(long)]
-        text: bool,
-    },
 }
 
 #[derive(Subcommand, Debug, Clone)]

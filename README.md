@@ -75,7 +75,7 @@ zmail search <query> [--limit <n>] [--from <addr>] [--after <date>] [--before <d
                   [--json|--text]
 zmail check [--no-update] [--replay] [--reclassify] [--text] [--verbose]
 zmail review [<window>] [--since <window>] [--replay] [--reclassify] [--text]
-zmail review dismiss <id> [--no-archive]
+zmail archive <id>... [--undo] [--json] [--text]
 zmail status [--json] [--imap]
 zmail stats
 zmail read <id> [--raw]         # or zmail message <id>

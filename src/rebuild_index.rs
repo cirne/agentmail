@@ -105,7 +105,15 @@ pub fn rebuild_from_maildir(conn: &mut Connection, maildir_root: &Path) -> rusql
         });
 
         let tx = conn.transaction()?;
-        tx.execute_batch("DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;")?;
+        tx.execute_batch(
+            "DELETE FROM inbox_alerts;
+             DELETE FROM inbox_reviews;
+             DELETE FROM inbox_decisions;
+             DELETE FROM inbox_scans;
+             DELETE FROM attachments;
+             DELETE FROM messages;
+             DELETE FROM threads;",
+        )?;
         let mut writer = RebuildWriter::new(&tx)?;
         let mut pending = BTreeMap::new();
         let mut next_expected = 0usize;
@@ -147,7 +155,15 @@ pub fn rebuild_from_maildir_sequential(
 ) -> rusqlite::Result<usize> {
     let paths = collect_eml_paths(maildir_root);
     let tx = conn.transaction()?;
-    tx.execute_batch("DELETE FROM attachments; DELETE FROM messages; DELETE FROM threads;")?;
+    tx.execute_batch(
+        "DELETE FROM inbox_alerts;
+         DELETE FROM inbox_reviews;
+         DELETE FROM inbox_decisions;
+         DELETE FROM inbox_scans;
+         DELETE FROM attachments;
+         DELETE FROM messages;
+         DELETE FROM threads;",
+    )?;
     let mut writer = RebuildWriter::new(&tx)?;
     let mut n = 0usize;
     let mut next_uid = 1i64;

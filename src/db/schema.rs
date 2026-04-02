@@ -1,6 +1,6 @@
 //! SQL schema — mirrors `src/db/schema.ts` in the TypeScript tree.
 
-pub const SCHEMA_VERSION: i32 = 15;
+pub const SCHEMA_VERSION: i32 = 16;
 
 pub const SCHEMA: &str = r#"
   CREATE TABLE IF NOT EXISTS messages (
@@ -114,16 +114,10 @@ pub const SCHEMA: &str = r#"
     PRIMARY KEY (message_id)
   );
 
-  CREATE TABLE IF NOT EXISTS inbox_handled (
-    message_id   TEXT NOT NULL PRIMARY KEY REFERENCES messages(message_id),
-    handled_at   TEXT NOT NULL DEFAULT (datetime('now')),
-    archived     INTEGER NOT NULL DEFAULT 0
-  );
-
   CREATE TABLE IF NOT EXISTS inbox_decisions (
     message_id         TEXT NOT NULL REFERENCES messages(message_id),
     rules_fingerprint  TEXT NOT NULL,
-    action             TEXT NOT NULL CHECK(action IN ('notify', 'inform', 'archive', 'suppress')),
+    action             TEXT NOT NULL CHECK(action IN ('notify', 'inform', 'ignore')),
     matched_rule_ids   TEXT NOT NULL DEFAULT '[]',
     note               TEXT,
     decision_source    TEXT NOT NULL,
@@ -169,7 +163,6 @@ pub const SCHEMA: &str = r#"
   CREATE INDEX IF NOT EXISTS idx_attachments_msg  ON attachments(message_id);
   CREATE INDEX IF NOT EXISTS idx_inbox_alerts_message ON inbox_alerts(message_id);
   CREATE INDEX IF NOT EXISTS idx_inbox_reviews_message ON inbox_reviews(message_id);
-  CREATE INDEX IF NOT EXISTS idx_inbox_handled_message ON inbox_handled(message_id);
   CREATE INDEX IF NOT EXISTS idx_inbox_decisions_message ON inbox_decisions(message_id);
 "#;
 

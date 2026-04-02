@@ -34,7 +34,7 @@ metadata:
 
 **Why:** **Local-first** primitives (`search`, `read`, `thread`, …) stay on your machine; LLM-backed features (`ask`, `check`, `review`, `draft edit`, setup) call **OpenAI**—use when the mailbox owner accepts that tradeoff.
 
-**Personalization:** To make **`zmail check`** and **`zmail review`** smarter over time, keep durable inbox rules and user context in **`~/.zmail/rules.json`** and prefer **`zmail rules ...`** when the installed version exposes it. That gives the agent a stable memory for what to **notify**, **inform**, **archive**, and **suppress** instead of relearning preferences every turn. Workflow, examples, and maintenance guidance: [references/INBOX-CUSTOMIZATION.md](references/INBOX-CUSTOMIZATION.md).
+**Personalization:** To make **`zmail check`** and **`zmail review`** smarter over time, keep durable inbox rules and user context in **`~/.zmail/rules.json`** and prefer **`zmail rules ...`** when the installed version exposes it. That gives the agent a stable memory for what to **notify**, **inform**, and **ignore** instead of relearning preferences every turn. **`ignore`** decisions auto-archive locally on scan; for mail that was **surfaced** (`notify` / `inform`), use **`zmail archive`** (or MCP **`archive_mail`**) when done. Workflow, examples, and maintenance guidance: [references/INBOX-CUSTOMIZATION.md](references/INBOX-CUSTOMIZATION.md).
 
 ## Transparency (registries & security review)
 

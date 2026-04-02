@@ -55,7 +55,7 @@ Typical shape:
     {
       "id": "w5j1",
       "condition": "routine shipping and tracking updates unless delivery is today",
-      "action": "archive"
+      "action": "ignore"
     },
     {
       "id": "q2r6",
@@ -95,15 +95,15 @@ Rules should map to a small action set:
 | ------ | -------- | -------------- |
 | **`notify`** | Missing this right now would be costly | Surface it in `check` immediately |
 | **`inform`** | Worth mentioning, but not interrupting for | Surface it at the next `review` |
-| **`archive`** | Legitimate mail should stay searchable but not proactively surfaced | Keep for later search, skip proactive surfacing |
-| **`suppress`** | Routine noise the user does not want surfaced | Hide from normal inbox triage |
+| **`ignore`** | Routine noise or low-value mail the user does not want in proactive triage | Classifier skips surfacing and **auto-archives** locally (still searchable); use **`zmail archive`** for **`notify`** / **`inform`** mail once handled |
 
 Good examples:
 
 - **`notify`**: fraud alerts, password resets, urgent direct asks, OTP codes.
 - **`inform`**: personal updates, important non-urgent work mail, things the user should hear about at the next review.
-- **`suppress`**: newsletters, recruiting drip campaigns, social digests.
-- **`archive`**: routine shipping updates, recurring low-value confirmations.
+- **`ignore`**: newsletters, recruiting drip campaigns, social digests, routine shipping updates.
+
+Legacy CLI strings **`archive`** and **`suppress`** are accepted when adding rules and map to **`ignore`**.
 
 ---
 
@@ -145,7 +145,7 @@ Good context:
 Bad context:
 
 - "notify me about Kirsten"
-- "archive LinkedIn digests"
+- "ignore LinkedIn digests" (put that in a **rule** instead)
 
 Rule of thumb: if the statement implies **what to do**, it is probably a rule. If it explains **why a message matters**, it is probably context.
 
@@ -164,7 +164,7 @@ Use a write loop instead of ad hoc memory:
 
 Examples of good prompts to the user:
 
-- "I notice you keep dismissing LinkedIn digest mail. Want me to add a suppress rule?"
+- "I notice you keep archiving or ignoring LinkedIn digest mail. Want me to add an ignore rule?"
 - "You always care about fraud alerts and password resets. Want a notify rule for financial security mail?"
 - "You are in the middle of a house purchase. Want me to add temporary context so title and mortgage mail gets prioritized?"
 
@@ -184,9 +184,9 @@ Aim for a small ruleset that stays legible.
 
 Add a rule when:
 
-- the same class of mail keeps being surfaced or dismissed
+- the same class of mail keeps being surfaced when the user would rather ignore or archive it
 - the user states a stable preference
-- a recurring workflow would benefit from explicit notify/inform/archive/suppress behavior
+- a recurring workflow would benefit from explicit notify/inform/ignore behavior
 
 Edit or remove a rule when:
 

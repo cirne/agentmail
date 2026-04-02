@@ -12,6 +12,7 @@ pub struct ConfigJson {
     pub sync: Option<SyncJson>,
     pub attachments: Option<AttachmentsJson>,
     pub inbox: Option<InboxJson>,
+    pub mailbox_management: Option<MailboxManagementJson>,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -49,6 +50,15 @@ pub struct AttachmentsJson {
 #[serde(rename_all = "camelCase")]
 pub struct InboxJson {
     pub default_window: Option<String>,
+    /// Rolling window (e.g. `1d`): messages older than this are bulk-archived after `rebuild-index` bootstrap.
+    pub bootstrap_archive_older_than: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MailboxManagementJson {
+    pub enabled: Option<bool>,
+    pub allow: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone)]
@@ -150,6 +160,9 @@ pub struct Config {
     pub sync_exclude_labels: Vec<String>,
     pub attachments_cache_extracted_text: bool,
     pub inbox_default_window: String,
+    pub inbox_bootstrap_archive_older_than: String,
+    pub mailbox_management_enabled: bool,
+    pub mailbox_management_allow_archive: bool,
     pub data_dir: PathBuf,
     pub db_path: PathBuf,
     pub maildir_path: PathBuf,
@@ -231,6 +244,14 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
     let db_path = data_dir.join("zmail.db");
     let maildir_path = data_dir.join("maildir");
 
+    let mailbox_mgmt = json.mailbox_management.as_ref();
+    let mailbox_management_enabled = mailbox_mgmt.and_then(|m| m.enabled).unwrap_or(false);
+    let allow_list = mailbox_mgmt.and_then(|m| m.allow.as_ref());
+    let mailbox_management_allow_archive = mailbox_management_enabled
+        && allow_list
+            .map(|a| a.iter().any(|s| s.eq_ignore_ascii_case("archive")))
+            .unwrap_or(true);
+
     Config {
         imap_host,
         imap_port: json.imap.as_ref().and_then(|i| i.port).unwrap_or(993),
@@ -263,6 +284,13 @@ pub fn load_config(opts: LoadConfigOptions) -> Config {
             .as_ref()
             .and_then(|i| i.default_window.clone())
             .unwrap_or_else(|| "24h".into()),
+        inbox_bootstrap_archive_older_than: json
+            .inbox
+            .as_ref()
+            .and_then(|i| i.bootstrap_archive_older_than.clone())
+            .unwrap_or_else(|| "1d".into()),
+        mailbox_management_enabled,
+        mailbox_management_allow_archive,
         data_dir,
         db_path,
         maildir_path,

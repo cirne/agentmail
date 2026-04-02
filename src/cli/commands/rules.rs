@@ -102,8 +102,7 @@ fn preview_counts(rows: &[RefreshPreviewRow]) -> InboxDispositionCounts {
         match row.action.as_deref() {
             Some("notify") => counts.notify += 1,
             Some("inform") => counts.inform += 1,
-            Some("archive") => counts.archive += 1,
-            Some("suppress") => counts.suppress += 1,
+            Some("ignore") => counts.ignore += 1,
             _ => {}
         }
     }

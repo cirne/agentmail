@@ -1,3 +1,4 @@
+mod archive;
 mod assist;
 mod mail;
 mod rules;
@@ -96,6 +97,12 @@ pub(crate) fn handle_command(command: Commands) -> CliResult {
         Commands::Rules { sub } => rules::run_rules(sub),
         Commands::Ask { question, verbose } => assist::run_ask(question, verbose),
         Commands::Check(args) => assist::run_check(args),
-        Commands::Review { args, sub } => assist::run_review(args, sub),
+        Commands::Review(args) => assist::run_review(args),
+        Commands::Archive {
+            message_ids,
+            undo,
+            text,
+            json,
+        } => archive::run_archive(message_ids, undo, text, json),
     }
 }

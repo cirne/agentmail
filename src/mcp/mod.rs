@@ -10,7 +10,9 @@ use crate::collect_stats;
 use crate::config::{load_config, resolve_openai_api_key, LoadConfigOptions};
 use crate::draft::DRAFT_NEW_PLACEHOLDER_BODY;
 use crate::ids::{resolve_message_id, resolve_thread_id};
+use crate::inbox::archive_messages_locally;
 use crate::mail_category::parse_category_list;
+use crate::mailbox::provider_archive_message;
 use crate::search::who::{who, WhoOptions};
 use crate::search::{search_with_meta, SearchOptions};
 use crate::send::{
@@ -61,10 +63,11 @@ pub const TOOL_NAMES: &[&str] = &[
     "list_drafts",
     "get_draft",
     "delete_draft",
+    "archive_mail",
 ];
 
 pub fn tool_schemas_stable() -> bool {
-    TOOL_NAMES.len() == 13
+    TOOL_NAMES.len() == 14
 }
 
 fn schema(properties: Value, required: &[&str]) -> Value {
@@ -229,6 +232,19 @@ fn tools_list_value() -> Value {
             "inputSchema": schema(json!({
                 "draftId": { "type": "string" }
             }), &["draftId"])
+        }),
+        json!({
+            "name": "archive_mail",
+            "description": "Set or clear local is_archived for one or more messages; optional IMAP when mailboxManagement is enabled.",
+            "inputSchema": schema(json!({
+                "messageIds": {
+                    "oneOf": [
+                        { "type": "string" },
+                        { "type": "array", "items": { "type": "string" } }
+                    ]
+                },
+                "undo": { "type": "boolean" }
+            }), &["messageIds"])
         }),
     ];
     json!({ "tools": tools })
@@ -685,6 +701,29 @@ fn tool_call(
                 std::fs::remove_file(&path).map_err(|e| e.to_string())?;
                 Ok(json!({ "ok": true, "draftId": normalized }).to_string())
             }
+        })(),
+        "archive_mail" => (|| -> Result<String, String> {
+            let ids = parse_string_list_arg(&args, "messageIds").ok_or_else(|| {
+                "messageIds required (string or array of strings)".to_string()
+            })?;
+            let undo = args.get("undo").and_then(|x| x.as_bool()).unwrap_or(false);
+            let archived = !undo;
+            let cfg = load_config(LoadConfigOptions {
+                home: std::env::var("ZMAIL_HOME").ok().map(std::path::PathBuf::from),
+                env: None,
+            });
+            let mut results = Vec::new();
+            for mid in ids {
+                let local_ok = archive_messages_locally(conn, std::slice::from_ref(&mid), archived)
+                    .map_err(|e| e.to_string())?;
+                let provider = provider_archive_message(&cfg, conn, &mid, undo);
+                results.push(json!({
+                    "messageId": mid,
+                    "local": { "ok": local_ok > 0, "isArchived": archived },
+                    "providerMutation": provider,
+                }));
+            }
+            serde_json::to_string(&json!({ "results": results })).map_err(|e| e.to_string())
         })(),
         _ => Err(format!("Unknown tool {name}")),
     };

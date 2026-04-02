@@ -1,4 +1,4 @@
-//! Persistent inbox scan and handled-state helpers.
+//! Persistent inbox scan helpers.
 
 use rusqlite::{params, Connection};
 use uuid::Uuid;
@@ -72,42 +72,52 @@ pub fn record_inbox_scan(
     Ok(scan_id)
 }
 
-pub fn mark_message_handled(
+/// Set or clear `is_archived` for each message id. Returns how many ids existed.
+pub fn archive_messages_locally(
     conn: &Connection,
-    message_id: &str,
-    archive: bool,
-) -> rusqlite::Result<bool> {
-    let exists = conn.query_row(
-        "SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?1)",
-        [message_id],
-        |row| row.get::<_, i64>(0),
-    )? == 1;
-    if !exists {
-        return Ok(false);
+    message_ids: &[String],
+    archived: bool,
+) -> rusqlite::Result<usize> {
+    let v = if archived { 1 } else { 0 };
+    let mut n = 0usize;
+    for mid in message_ids {
+        let exists = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?1)",
+            [mid.as_str()],
+            |row| row.get::<_, i64>(0),
+        )? == 1;
+        if exists {
+            n += 1;
+            conn.execute(
+                "UPDATE messages SET is_archived = ?1 WHERE message_id = ?2",
+                params![v, mid.as_str()],
+            )?;
+        }
     }
-
-    if archive {
-        conn.execute(
-            "UPDATE messages SET is_archived = 1 WHERE message_id = ?1",
-            [message_id],
-        )?;
-    }
-
-    conn.execute(
-        "INSERT OR REPLACE INTO inbox_handled (message_id, handled_at, archived)
-         VALUES (?1, datetime('now'), ?2)",
-        params![message_id, if archive { 1 } else { 0 }],
-    )?;
-
-    Ok(true)
+    Ok(n)
 }
 
-pub fn dismiss_message(
+/// Archive all messages strictly older than `cutoff_iso` (RFC3339; string compare must match `messages.date` ordering).
+pub fn bulk_archive_messages_older_than(
     conn: &Connection,
-    message_id: &str,
-    archive: bool,
-) -> rusqlite::Result<bool> {
-    mark_message_handled(conn, message_id, archive)
+    cutoff_iso: &str,
+) -> rusqlite::Result<usize> {
+    let n = conn.execute(
+        "UPDATE messages SET is_archived = 1 WHERE date < ?1 AND is_archived = 0",
+        [cutoff_iso],
+    )?;
+    Ok(n)
+}
+
+/// Remove all rows from inbox history tables (scan records, surfaced ids, decisions).
+pub fn clear_inbox_tables(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "DELETE FROM inbox_alerts;
+         DELETE FROM inbox_reviews;
+         DELETE FROM inbox_decisions;
+         DELETE FROM inbox_scans;",
+    )?;
+    Ok(())
 }
 
 pub fn already_surfaced_filter_sql(mode: InboxSurfaceMode, replay: bool) -> &'static str {
@@ -266,14 +276,14 @@ mod tests {
             note: Some("note".into()),
             attachments: None,
             category: None,
-            action: Some("suppress".into()),
+            action: Some("ignore".into()),
             matched_rule_ids: vec!["r1".into()],
             decision_source: Some("rule".into()),
         };
         persist_inbox_decisions(&conn, "fp1", &[row]).unwrap();
         let loaded = load_cached_inbox_decisions(&conn, "fp1", &["m1".into()]).unwrap();
         assert_eq!(loaded.len(), 1);
-        assert_eq!(loaded[0].action, "suppress");
+        assert_eq!(loaded[0].action, "ignore");
         assert_eq!(loaded[0].matched_rule_ids, vec!["r1".to_string()]);
     }
 }

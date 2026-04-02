@@ -6,8 +6,9 @@ use std::sync::{
     Arc,
 };
 use zmail::{
-    dismiss_message, inbox_candidate_prefetch_limit, open_memory, persist_message, run_inbox_scan,
-    InboxNotablePick, InboxSurfaceMode, MockInboxClassifier, ParsedMessage, RunInboxScanOptions,
+    archive_messages_locally, inbox_candidate_prefetch_limit, open_memory, persist_message,
+    run_inbox_scan, InboxNotablePick, InboxSurfaceMode, MockInboxClassifier, ParsedMessage,
+    RunInboxScanOptions,
 };
 
 const MAILBOX: &str = "[Gmail]/All Mail";
@@ -359,7 +360,7 @@ async fn second_scan_dedups_unless_replay_is_enabled() {
 }
 
 #[tokio::test]
-async fn suppress_decisions_are_cached_and_skip_second_llm_call() {
+async fn ignore_classifications_archive_and_second_scan_skips_archived_candidate() {
     let conn = open_memory().unwrap();
     let recent = (Utc::now() - Duration::minutes(10)).to_rfc3339();
     insert_msg(
@@ -382,7 +383,7 @@ async fn suppress_decisions_are_cached_and_skip_second_llm_call() {
             .iter()
             .map(|m| InboxNotablePick {
                 message_id: m.message_id.clone(),
-                action: Some("suppress".into()),
+                action: Some("ignore".into()),
                 matched_rule_ids: vec!["promo".into()],
                 note: Some("routine promo".into()),
                 decision_source: Some("rule".into()),
@@ -415,8 +416,17 @@ async fn suppress_decisions_are_cached_and_skip_second_llm_call() {
     });
     let second_run = run_inbox_scan(&conn, &opts, &mut second).await.unwrap();
     assert!(second_run.surfaced.is_empty());
-    assert_eq!(second_run.processed.len(), 1);
+    assert_eq!(second_run.candidates_scanned, 0);
+    assert!(second_run.processed.is_empty());
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<suppress@x>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 1);
 }
 
 #[tokio::test]
@@ -443,7 +453,7 @@ async fn changed_rules_fingerprint_recomputes_decision() {
             .iter()
             .map(|m| InboxNotablePick {
                 message_id: m.message_id.clone(),
-                action: Some("suppress".into()),
+                action: Some("ignore".into()),
                 matched_rule_ids: vec![],
                 note: Some("first".into()),
                 decision_source: Some("model".into()),
@@ -471,6 +481,13 @@ async fn changed_rules_fingerprint_recomputes_decision() {
     .await
     .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
+
+    // First pass archives `ignore`; unarchive so the message remains a candidate for fp2.
+    conn.execute(
+        "UPDATE messages SET is_archived = 0 WHERE message_id = '<rules@x>'",
+        [],
+    )
+    .unwrap();
 
     let calls_second = Arc::clone(&calls);
     let mut second = MockInboxClassifier::new(move |batch| {
@@ -589,64 +606,51 @@ async fn reapply_llm_bypasses_cache_even_when_fingerprint_matches() {
 }
 
 #[test]
-fn dismiss_archives_or_only_marks_surfaced() {
+fn archive_messages_locally_toggles_is_archived_idempotently() {
     let conn = open_memory().unwrap();
     insert_msg(
         &conn,
-        "<dismiss@x>",
+        "<arch@x>",
         "a@b.com",
-        "dismiss me",
+        "hi",
         "body",
         "2026-01-01T00:00:00Z",
         1,
         None,
         "[]",
     );
-    let ok = dismiss_message(&conn, "<dismiss@x>", true).unwrap();
-    assert!(ok);
+    assert_eq!(
+        archive_messages_locally(&conn, &["<arch@x>".into()], true).unwrap(),
+        1
+    );
     let archived: i64 = conn
         .query_row(
-            "SELECT is_archived FROM messages WHERE message_id = '<dismiss@x>'",
+            "SELECT is_archived FROM messages WHERE message_id = '<arch@x>'",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(archived, 1);
-
-    insert_msg(
-        &conn,
-        "<dismiss-no-archive@x>",
-        "a@b.com",
-        "dismiss me too",
-        "body",
-        "2026-01-01T00:00:00Z",
-        2,
-        None,
-        "[]",
+    assert_eq!(
+        archive_messages_locally(&conn, &["<arch@x>".into()], true).unwrap(),
+        1
     );
-    let ok = dismiss_message(&conn, "<dismiss-no-archive@x>", false).unwrap();
-    assert!(ok);
+    assert_eq!(
+        archive_messages_locally(&conn, &["<arch@x>".into()], false).unwrap(),
+        1
+    );
     let archived: i64 = conn
         .query_row(
-            "SELECT is_archived FROM messages WHERE message_id = '<dismiss-no-archive@x>'",
+            "SELECT is_archived FROM messages WHERE message_id = '<arch@x>'",
             [],
             |row| row.get(0),
         )
         .unwrap();
     assert_eq!(archived, 0);
-
-    let surfaced: i64 = conn
-        .query_row(
-            "SELECT COUNT(*) FROM inbox_handled WHERE message_id IN ('<dismiss@x>', '<dismiss-no-archive@x>')",
-            [],
-            |row| row.get(0),
-        )
-        .unwrap();
-    assert_eq!(surfaced, 2);
 }
 
 #[tokio::test]
-async fn diagnostics_include_processed_rows_and_apply_archive_side_effects() {
+async fn diagnostics_include_processed_ignore_and_archives_locally() {
     let conn = open_memory().unwrap();
     let recent = (Utc::now() - Duration::minutes(20)).to_rfc3339();
     insert_msg(
@@ -699,6 +703,7 @@ async fn diagnostics_include_processed_rows_and_apply_archive_side_effects() {
         .processed
         .iter()
         .any(|row| row.message_id == "<archive@x>"));
+    assert_eq!(run.counts.ignore, 1);
 
     let archived: i64 = conn
         .query_row(

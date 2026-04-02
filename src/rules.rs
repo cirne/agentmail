@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::inbox::scan::InboxOwnerContext;
 
-pub const INBOX_RULES_PROMPT_VERSION: u32 = 4;
+pub const INBOX_RULES_PROMPT_VERSION: u32 = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RulesError {
@@ -68,10 +68,9 @@ pub struct ProposedRule {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RuleActionKind {
-    Suppress,
     Notify,
     Inform,
-    Archive,
+    Ignore,
 }
 
 fn default_rules_version() -> u32 {
@@ -88,17 +87,17 @@ fn rules_lock_path(home: &Path) -> PathBuf {
 
 pub fn parse_rule_action(action: &str) -> Result<RuleActionKind, RulesError> {
     let trimmed = action.trim();
-    if trimmed.eq_ignore_ascii_case("suppress") {
-        return Ok(RuleActionKind::Suppress);
-    }
     if trimmed.eq_ignore_ascii_case("notify") {
         return Ok(RuleActionKind::Notify);
     }
     if trimmed.eq_ignore_ascii_case("inform") {
         return Ok(RuleActionKind::Inform);
     }
-    if trimmed.eq_ignore_ascii_case("archive") {
-        return Ok(RuleActionKind::Archive);
+    if trimmed.eq_ignore_ascii_case("ignore")
+        || trimmed.eq_ignore_ascii_case("suppress")
+        || trimmed.eq_ignore_ascii_case("archive")
+    {
+        return Ok(RuleActionKind::Ignore);
     }
     Err(RulesError::InvalidAction(trimmed.to_string()))
 }
@@ -286,7 +285,7 @@ Return strict JSON:\n\
   \"results\": [\n\
     {\n\
       \"messageId\": \"<exact id from input>\",\n\
-      \"action\": \"notify|inform|archive|suppress\",\n\
+      \"action\": \"notify|inform|ignore\",\n\
       \"matchedRuleIds\": [\"<rule id>\", \"<rule id>\"]\n\
     }\n\
   ]\n\
@@ -295,11 +294,10 @@ For every message, return exactly one result row. Always populate matchedRuleIds
 For messages not matching any rule, apply common-sense email triage:\n\
 - Use `notify` only for messages that are interruption-worthy right now: OTP codes, active security issues, same-day deadlines, or urgent direct asks that should break the user's flow.\n\
 - Use `inform` only for messages worth surfacing at the next inbox review: mostly human-to-human mail, important work updates, non-urgent requests, and things the user would reasonably want summarized soon.\n\
-- Use `archive` for messages that are legitimate and potentially useful later (receipts, confirmations, statements, travel details, account records) but do not usually deserve proactive surfacing.\n\
-- Use `suppress` for low-value bulk mail, marketing, repetitive digests, and obvious noise.\n\
-Automated mail should usually NOT be `inform` unless the user has explicitly asked for it with a rule. Newsletters, mailing-list traffic, marketing, social notifications, digest emails, recommendations, deal alerts, automated invitations, and most no-reply senders should be `archive` or `suppress`, not `inform`.\n\
-Default to `archive` when a message seems legitimate but not clearly worth surfacing. Bias toward `suppress` for repetitive or low-value automation. When unsure between `notify` and `inform`, prefer `inform`. When unsure between `inform` and `archive`, prefer `archive`.\n\
-If a message is effectively from the user, sent by the user, or uses one of the user's own addresses as sender or reply identity, do not `notify`. Usually choose `archive` unless the user's rules say otherwise.\n\n",
+- Use `ignore` for mail that is legitimate and searchable but should not get proactive surfacing: receipts, confirmations, bulk updates, marketing, digests, and obvious low-priority automation.\n\
+Automated mail should usually NOT be `inform` unless the user has explicitly asked for it with a rule. Newsletters, mailing-list traffic, marketing, social notifications, digest emails, recommendations, deal alerts, automated invitations, and most no-reply senders should be `ignore`, not `inform`.\n\
+Default to `ignore` when a message seems legitimate but not clearly worth surfacing. When unsure between `notify` and `inform`, prefer `inform`. When unsure between `inform` and `ignore`, prefer `ignore`.\n\
+If a message is effectively from the user, sent by the user, or uses one of the user's own addresses as sender or reply identity, do not `notify`. Usually choose `ignore` unless the user's rules say otherwise.\n\n",
     );
     out.push_str("## User Identity:\n");
     match &owner.primary_address {
@@ -329,11 +327,8 @@ If a message is effectively from the user, sent by the user, or uses one of the 
     append_rule_group(&mut out, "INFORM", file, |action| {
         matches!(parse_rule_action(action), Ok(RuleActionKind::Inform))
     });
-    append_rule_group(&mut out, "SUPPRESS", file, |action| {
-        matches!(parse_rule_action(action), Ok(RuleActionKind::Suppress))
-    });
-    append_rule_group(&mut out, "ARCHIVE", file, |action| {
-        matches!(parse_rule_action(action), Ok(RuleActionKind::Archive))
+    append_rule_group(&mut out, "IGNORE", file, |action| {
+        matches!(parse_rule_action(action), Ok(RuleActionKind::Ignore))
     });
 
     out.push_str("## Context:\n");
@@ -400,8 +395,8 @@ pub fn propose_rule_from_feedback(feedback: &str) -> RuleFeedbackProposal {
     {
         (
                 "routine shipping and tracking updates unless delivery is scheduled for today or tomorrow".to_string(),
-                "archive".to_string(),
-                "Shipping notifications are usually low urgency except when delivery is imminent, so archive the routine updates while preserving time-sensitive alerts.".to_string(),
+                "ignore".to_string(),
+                "Shipping notifications are usually low urgency except when delivery is imminent, so ignore the routine updates while preserving time-sensitive alerts.".to_string(),
             )
     } else if lower.contains("invoice")
         || lower.contains("receipt")
@@ -410,8 +405,8 @@ pub fn propose_rule_from_feedback(feedback: &str) -> RuleFeedbackProposal {
     {
         (
             "invoices, receipts, or billing statements".to_string(),
-            "archive".to_string(),
-            "Financial paperwork is often useful later but rarely urgent, so archive it instead of surfacing it as notable mail.".to_string(),
+            "ignore".to_string(),
+            "Financial paperwork is often useful later but rarely urgent, so ignore it instead of surfacing it as notable mail.".to_string(),
         )
     } else if lower.contains("flight")
         || lower.contains("hotel")
@@ -420,8 +415,8 @@ pub fn propose_rule_from_feedback(feedback: &str) -> RuleFeedbackProposal {
     {
         (
             "flight confirmations, hotel bookings, and travel itineraries".to_string(),
-            "archive".to_string(),
-            "Travel confirmations are often useful later but usually do not need inbox attention, so archive them for later search.".to_string(),
+            "ignore".to_string(),
+            "Travel confirmations are often useful later but usually do not need inbox attention, so ignore them for later search.".to_string(),
         )
     } else if lower.contains("security")
         || lower.contains("fraud")
@@ -434,16 +429,7 @@ pub fn propose_rule_from_feedback(feedback: &str) -> RuleFeedbackProposal {
                 "Security and financial alerts should bypass normal filtering because they are usually urgent.".to_string(),
             )
     } else {
-        let action = if lower.contains("newsletter")
-            || lower.contains("marketing")
-            || lower.contains("promo")
-            || lower.contains("digest")
-            || lower.contains("too many")
-        {
-            "suppress".to_string()
-        } else {
-            "archive".to_string()
-        };
+        let action = "ignore".to_string();
         (
             normalized.to_string(),
             action.clone(),
@@ -492,9 +478,9 @@ mod tests {
     }
 
     #[test]
-    fn feedback_shipping_maps_to_archive_rule() {
+    fn feedback_shipping_maps_to_ignore_rule() {
         let proposal = propose_rule_from_feedback("too many shipping notifications");
-        assert_eq!(proposal.proposed.action, "archive");
+        assert_eq!(proposal.proposed.action, "ignore");
         assert!(proposal.proposed.condition.contains("shipping"));
     }
 
@@ -506,7 +492,7 @@ mod tests {
             rules: vec![UserRule {
                 id: "a1b2".into(),
                 condition: "promo email".into(),
-                action: "suppress".into(),
+                action: "ignore".into(),
             }],
             context: vec![],
         };
@@ -525,12 +511,12 @@ mod tests {
                 UserRule {
                     id: "b".into(),
                     condition: "beta".into(),
-                    action: "archive".into(),
+                    action: "ignore".into(),
                 },
                 UserRule {
                     id: "a".into(),
                     condition: "alpha".into(),
-                    action: "suppress".into(),
+                    action: "inform".into(),
                 },
             ],
             context: vec![
@@ -559,12 +545,12 @@ mod tests {
             rules: vec![UserRule {
                 id: "a".into(),
                 condition: "promo".into(),
-                action: "suppress".into(),
+                action: "ignore".into(),
             }],
             context: vec![],
         };
         let mut b = a.clone();
-        b.rules[0].action = "archive".into();
+        b.rules[0].action = "notify".into();
         assert_ne!(rules_fingerprint(&a), rules_fingerprint(&b));
     }
 
@@ -580,8 +566,8 @@ mod tests {
         let prompt =
             build_inbox_rules_prompt(&RulesFile::default(), true, &InboxOwnerContext::default());
         assert!(prompt.contains("optional `note` field"));
-        assert!(prompt.contains("\"action\": \"notify|inform|archive|suppress\""));
-        assert!(prompt.contains("Default to `archive`"));
+        assert!(prompt.contains("\"action\": \"notify|inform|ignore\""));
+        assert!(prompt.contains("Default to `ignore`"));
     }
 
     #[test]

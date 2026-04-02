@@ -60,13 +60,6 @@ struct InboxSurfacedRow {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-struct InboxHandledRow {
-    message_id: String,
-    handled_at: String,
-    archived: i64,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct InboxDecisionRow {
     message_id: String,
     rules_fingerprint: String,
@@ -82,7 +75,6 @@ struct InboxStateSnapshot {
     scans: Vec<(String, String, String, String, i64, i64)>,
     alerts: Vec<InboxSurfacedRow>,
     reviews: Vec<InboxSurfacedRow>,
-    handled: Vec<InboxHandledRow>,
     decisions: Vec<InboxDecisionRow>,
 }
 
@@ -188,24 +180,6 @@ fn load_inbox_state_snapshot(conn: &Connection) -> Result<InboxStateSnapshot, Db
     let alerts = load_surfaced_rows(conn, "inbox_alerts")?;
     let reviews = load_surfaced_rows(conn, "inbox_reviews")?;
 
-    let handled = if query_table_exists(conn, "inbox_handled")? {
-        let mut handled_stmt = conn.prepare(
-            "SELECT message_id, handled_at, archived FROM inbox_handled ORDER BY message_id",
-        )?;
-        let rows = handled_stmt
-            .query_map([], |row| {
-                Ok(InboxHandledRow {
-                    message_id: row.get(0)?,
-                    handled_at: row.get(1)?,
-                    archived: row.get(2)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows
-    } else {
-        Vec::new()
-    };
-
     let decisions = if query_table_exists(conn, "inbox_decisions")? {
         let mut decisions_stmt = conn.prepare(
             "SELECT message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at
@@ -234,9 +208,17 @@ fn load_inbox_state_snapshot(conn: &Connection) -> Result<InboxStateSnapshot, Db
         scans,
         alerts,
         reviews,
-        handled,
         decisions,
     })
+}
+
+fn normalize_inbox_decision_action(action: &str) -> &'static str {
+    match action {
+        "notify" => "notify",
+        "inform" => "inform",
+        "ignore" => "ignore",
+        _ => "ignore",
+    }
 }
 
 fn restore_sync_metadata(
@@ -307,14 +289,8 @@ fn restore_inbox_state(conn: &Connection, inbox: &InboxStateSnapshot) -> Result<
             (&row.message_id, &row.surfaced_at, &row.scan_id),
         )?;
     }
-    for row in &inbox.handled {
-        conn.execute(
-            "INSERT OR REPLACE INTO inbox_handled (message_id, handled_at, archived)
-             VALUES (?1, ?2, ?3)",
-            (&row.message_id, &row.handled_at, row.archived),
-        )?;
-    }
     for row in &inbox.decisions {
+        let action = normalize_inbox_decision_action(row.action.as_str());
         conn.execute(
             "INSERT OR REPLACE INTO inbox_decisions
              (message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at)
@@ -322,7 +298,7 @@ fn restore_inbox_state(conn: &Connection, inbox: &InboxStateSnapshot) -> Result<
             (
                 &row.message_id,
                 &row.rules_fingerprint,
-                &row.action,
+                action,
                 &row.matched_rule_ids,
                 row.note.as_deref(),
                 &row.decision_source,
@@ -376,6 +352,34 @@ fn maybe_rebuild_stale_db(path: &Path) -> Result<(), DbError> {
     let _ = crate::rebuild_index::rebuild_from_maildir(&mut conn, &maildir_root)?;
     restore_sync_metadata(&conn, &checkpoints, &summary)?;
     restore_inbox_state(&conn, &inbox)?;
+    let zmail_home = path
+        .parent()
+        .and_then(|p| p.parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."));
+    let cfg = crate::config::load_config(crate::config::LoadConfigOptions {
+        home: Some(zmail_home),
+        env: None,
+    });
+    if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        match rt.block_on(crate::inbox::bootstrap::run_post_rebuild_inbox_bootstrap(
+            &conn,
+            &cfg,
+            cfg.inbox_bootstrap_archive_older_than.as_str(),
+            false,
+        )) {
+            Ok(s) => eprintln!(
+                "Inbox bootstrap: bulk-archived {} older messages; classified {} (LLM skipped: {})",
+                s.bulk_archived_older_than_cutoff,
+                s.inbox_candidates_classified,
+                s.llm_skipped_no_api_key
+            ),
+            Err(e) => eprintln!("Inbox bootstrap failed: {e}"),
+        }
+    }
     conn.execute_batch("PRAGMA wal_checkpoint(FULL); PRAGMA journal_mode=DELETE;")?;
     drop(conn);
 
@@ -457,6 +461,10 @@ pub fn open_file(path: &Path) -> Result<Connection, DbError> {
 /// Apply schema + user_version + sync_summary bootstrap + optional ALTER (matches TS `getDb`).
 pub fn apply_schema(conn: &Connection) -> Result<(), DbError> {
     conn.execute_batch(SCHEMA)?;
+    let _ = conn.execute_batch(
+        "DROP INDEX IF EXISTS idx_inbox_handled_message;
+         DROP TABLE IF EXISTS inbox_handled;",
+    );
     conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     conn.execute_batch("INSERT OR IGNORE INTO sync_summary (id, total_messages) VALUES (1, 0);")?;
 
@@ -625,7 +633,7 @@ mod tests {
     }
 
     #[test]
-    fn open_file_rebuild_preserves_inbox_state() {
+    fn open_file_rebuild_clears_inbox_tables_and_bulk_archives_old_mail() {
         let dir = tempfile::tempdir().unwrap();
         let data_dir = dir.path().join("data");
         let maildir = data_dir.join("maildir/cur");
@@ -651,7 +659,7 @@ mod tests {
                     1i64,
                     "a@b.com",
                     "Hi",
-                    "2024-01-01T12:00:00Z",
+                    "2024-01-01T12:00:00.000Z",
                     "Body",
                     "cur/msg1.eml",
                 ),
@@ -673,16 +681,9 @@ mod tests {
             .unwrap();
         stale
             .execute(
-                "INSERT INTO inbox_handled (message_id, handled_at, archived)
-                 VALUES ('<rebuilt-inbox@test>', '2026-04-01 19:00:00', 1)",
-                [],
-            )
-            .unwrap();
-        stale
-            .execute(
                 "INSERT INTO inbox_decisions
                  (message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at)
-                 VALUES ('<rebuilt-inbox@test>', 'fp-1', 'archive', '[\"r1\"]', 'cached note', 'rule', '2026-04-01 18:30:00')",
+                 VALUES ('<rebuilt-inbox@test>', 'fp-1', 'ignore', '[\"r1\"]', 'cached note', 'rule', '2026-04-01 18:30:00')",
                 [],
             )
             .unwrap();
@@ -698,40 +699,21 @@ mod tests {
         let alert_count: i64 = conn
             .query_row("SELECT COUNT(*) FROM inbox_alerts", [], |row| row.get(0))
             .unwrap();
-        let handled: (i64, String) = conn
-            .query_row(
-                "SELECT archived, handled_at FROM inbox_handled WHERE message_id = '<rebuilt-inbox@test>'",
-                [],
-                |row| Ok((row.get(0)?, row.get(1)?)),
-            )
+        let decision_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM inbox_decisions", [], |row| row.get(0))
             .unwrap();
-        let decision: (String, String, String, String, String) = conn
+        let archived: i64 = conn
             .query_row(
-                "SELECT rules_fingerprint, action, matched_rule_ids, note, decision_source
-                 FROM inbox_decisions
-                 WHERE message_id = '<rebuilt-inbox@test>'",
+                "SELECT is_archived FROM messages WHERE message_id = '<rebuilt-inbox@test>'",
                 [],
-                |row| {
-                    Ok((
-                        row.get(0)?,
-                        row.get(1)?,
-                        row.get(2)?,
-                        row.get(3)?,
-                        row.get(4)?,
-                    ))
-                },
+                |row| row.get(0),
             )
             .unwrap();
 
-        assert_eq!(scan_count, 1);
-        assert_eq!(alert_count, 1);
-        assert_eq!(handled.0, 1);
-        assert_eq!(handled.1, "2026-04-01 19:00:00");
-        assert_eq!(decision.0, "fp-1");
-        assert_eq!(decision.1, "archive");
-        assert_eq!(decision.2, "[\"r1\"]");
-        assert_eq!(decision.3, "cached note");
-        assert_eq!(decision.4, "rule");
+        assert_eq!(scan_count, 0);
+        assert_eq!(alert_count, 0);
+        assert_eq!(decision_count, 0);
+        assert_eq!(archived, 1);
     }
 
     #[test]

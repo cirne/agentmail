@@ -48,8 +48,7 @@ pub struct RefreshPreviewRow {
 pub struct InboxDispositionCounts {
     pub notify: usize,
     pub inform: usize,
-    pub archive: usize,
-    pub suppress: usize,
+    pub ignore: usize,
 }
 
 fn strip_html_tags(s: &str) -> String {
@@ -331,8 +330,7 @@ fn print_indented_block(title: &str, body: &str) {
 fn print_counts(counts: &InboxDispositionCounts) {
     println!("  notify:   {}", counts.notify);
     println!("  inform:   {}", counts.inform);
-    println!("  archive:  {}", counts.archive);
-    println!("  suppress: {}", counts.suppress);
+    println!("  ignore:   {}", counts.ignore);
 }
 
 pub fn print_check_text(

@@ -16,7 +16,7 @@ fn rules_add_persists_file_and_show_reads_it() {
             "rules",
             "add",
             "--action",
-            "suppress",
+            "ignore",
             "linkedin digest emails",
         ])
         .output()
@@ -62,7 +62,7 @@ fn rules_feedback_returns_structured_proposal() {
         String::from_utf8_lossy(&out.stderr)
     );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["proposed"]["action"], "archive");
+    assert_eq!(v["proposed"]["action"], "ignore");
     assert!(v["apply"].as_str().unwrap().contains("zmail rules add"));
 }
 
@@ -76,7 +76,7 @@ fn rules_edit_returns_preview_payload() {
             "rules",
             "add",
             "--action",
-            "suppress",
+            "ignore",
             "--no-preview",
             "linkedin digest emails",
         ])
@@ -92,7 +92,7 @@ fn rules_edit_returns_preview_payload() {
 
     let edit = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
-        .args(["rules", "edit", id, "--action", "archive", "--no-preview"])
+        .args(["rules", "edit", id, "--action", "ignore", "--no-preview"])
         .output()
         .unwrap();
     assert!(
@@ -102,21 +102,21 @@ fn rules_edit_returns_preview_payload() {
     );
     let edited: serde_json::Value = serde_json::from_slice(&edit.stdout).unwrap();
     assert_eq!(edited["rule"]["id"], id);
-    assert_eq!(edited["rule"]["action"], "archive");
+    assert_eq!(edited["rule"]["action"], "ignore");
     assert_eq!(edited["preview"]["available"], false);
 }
 
 #[test]
-fn review_dismiss_cli_archives_message() {
+fn archive_cli_sets_is_archived_json() {
     let dir = tempdir().unwrap();
     let conn = db::open_file(&dir.path().join("data/zmail.db")).unwrap();
     let parsed = ParsedMessage {
-        message_id: "<dismiss-cli@test>".into(),
+        message_id: "<archive-cli@test>".into(),
         from_address: "a@b.com".into(),
         from_name: None,
         to_addresses: vec![],
         cc_addresses: vec![],
-        subject: "dismiss".into(),
+        subject: "hi".into(),
         date: "2026-01-01T00:00:00Z".into(),
         body_text: "body".into(),
         body_html: None,
@@ -129,7 +129,7 @@ fn review_dismiss_cli_archives_message() {
     let bin = env!("CARGO_BIN_EXE_zmail");
     let out = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
-        .args(["review", "dismiss", "<dismiss-cli@test>"])
+        .args(["archive", "<archive-cli@test>", "--json"])
         .output()
         .unwrap();
     assert!(
@@ -138,10 +138,15 @@ fn review_dismiss_cli_archives_message() {
         String::from_utf8_lossy(&out.stderr)
     );
 
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(v["results"][0]["local"]["ok"], true);
+    assert_eq!(v["results"][0]["local"]["isArchived"], true);
+    assert_eq!(v["results"][0]["providerMutation"]["attempted"], false);
+
     let conn = db::open_file(&dir.path().join("data/zmail.db")).unwrap();
     let archived: i64 = conn
         .query_row(
-            "SELECT is_archived FROM messages WHERE message_id = '<dismiss-cli@test>'",
+            "SELECT is_archived FROM messages WHERE message_id = '<archive-cli@test>'",
             [],
             |row| row.get(0),
         )

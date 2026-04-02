@@ -208,6 +208,25 @@ pub(crate) fn run_rebuild_index() -> CliResult {
         "Reindexed {count} messages from {}",
         cfg.maildir_path().display()
     );
+    let rt = tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()?;
+    match rt.block_on(zmail::run_post_rebuild_inbox_bootstrap(
+        &conn,
+        &cfg,
+        cfg.inbox_bootstrap_archive_older_than.as_str(),
+        false,
+    )) {
+        Ok(s) => {
+            eprintln!(
+                "Inbox bootstrap: bulk-archived {} older-than-window messages; classified {} candidates (LLM skipped: {})",
+                s.bulk_archived_older_than_cutoff,
+                s.inbox_candidates_classified,
+                s.llm_skipped_no_api_key
+            );
+        }
+        Err(e) => eprintln!("Inbox bootstrap failed: {e}"),
+    }
     Ok(())
 }
 

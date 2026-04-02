@@ -18,7 +18,7 @@ fn data_dir() -> std::path::PathBuf {
 #[test]
 fn mcp_tool_param_keys_stable() {
     assert!(tool_schemas_stable());
-    assert_eq!(TOOL_NAMES.len(), 13);
+    assert_eq!(TOOL_NAMES.len(), 14);
 }
 
 #[test]

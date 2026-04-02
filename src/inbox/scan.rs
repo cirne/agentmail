@@ -143,6 +143,10 @@ pub enum RunInboxScanError {
     OpenAI(#[from] async_openai::error::OpenAIError),
     #[error("JSON: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("Rules: {0}")]
+    Rules(#[from] crate::rules::RulesError),
+    #[error("Inbox window: {0}")]
+    InvalidWindow(String),
 }
 
 #[async_trait]
@@ -306,7 +310,7 @@ fn fallback_action(candidate: &InboxCandidate) -> &'static str {
     if candidate.category.as_deref().is_some_and(|category| {
         category == CATEGORY_LIST || is_default_excluded_category(Some(category))
     }) {
-        return "suppress";
+        return "ignore";
     }
 
     let from_address = candidate.from_address.to_ascii_lowercase();
@@ -336,10 +340,10 @@ fn fallback_action(candidate: &InboxCandidate) -> &'static str {
         || automated_subject
         || automated_snippet
     {
-        return "archive";
+        return "ignore";
     }
 
-    "archive"
+    "ignore"
 }
 
 fn parse_notable_response(
@@ -475,8 +479,8 @@ fn normalize_action(action: Option<&str>) -> &'static str {
     {
         "notify" => "notify",
         "inform" => "inform",
-        "suppress" => "suppress",
-        "archive" => "archive",
+        "ignore" => "ignore",
+        "suppress" | "archive" => "ignore",
         _ => "inform",
     }
 }
@@ -535,7 +539,6 @@ fn load_inbox_candidates(
          FROM messages
          WHERE date >= ?1
            AND is_archived = 0
-           AND NOT EXISTS (SELECT 1 FROM inbox_handled h WHERE h.message_id = messages.message_id)
            {category_sql}{surfaced_sql}
          ORDER BY date DESC
          LIMIT ?2"
@@ -659,16 +662,6 @@ pub async fn preview_rule_impact(
     })
 }
 
-fn apply_decision_side_effects(conn: &Connection, row: &RefreshPreviewRow) -> rusqlite::Result<()> {
-    if let Some("archive") = row.action.as_deref() {
-        conn.execute(
-            "UPDATE messages SET is_archived = 1 WHERE message_id = ?1",
-            [&row.message_id],
-        )?;
-    }
-    Ok(())
-}
-
 /// Run inbox notable scan (Node `runInboxScan`).
 pub async fn run_inbox_scan(
     conn: &Connection,
@@ -738,12 +731,10 @@ pub async fn run_inbox_scan(
         }
     }
     for row in ordered_rows {
-        apply_decision_side_effects(conn, &row)?;
         match row.action.as_deref().unwrap_or("inform") {
             "notify" => counts.notify += 1,
             "inform" => counts.inform += 1,
-            "archive" => counts.archive += 1,
-            "suppress" => counts.suppress += 1,
+            "ignore" => counts.ignore += 1,
             _ => {}
         }
         if row
@@ -755,6 +746,17 @@ pub async fn run_inbox_scan(
         }
         processed.push(row);
     }
+
+    // `ignore` leaves the unarchived working set immediately; search/read still see the message.
+    for row in &processed {
+        if row.action.as_deref() == Some("ignore") {
+            conn.execute(
+                "UPDATE messages SET is_archived = 1 WHERE message_id = ?1",
+                [&row.message_id],
+            )?;
+        }
+    }
+
     surfaced.truncate(notable_cap);
 
     let surfaced_message_ids: Vec<String> = surfaced.iter().map(|m| m.message_id.clone()).collect();
@@ -812,7 +814,7 @@ mod tests {
         }];
         let r = parse_notable_response("not json", &batch).unwrap();
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0].action.as_deref(), Some("archive"));
+        assert_eq!(r[0].action.as_deref(), Some("ignore"));
         assert_eq!(r[0].decision_source.as_deref(), Some("fallback"));
     }
 
@@ -861,7 +863,7 @@ mod tests {
             attachments: vec![],
         }];
         let r = parse_notable_response("not json", &batch).unwrap();
-        assert_eq!(r[0].action.as_deref(), Some("suppress"));
+        assert_eq!(r[0].action.as_deref(), Some("ignore"));
     }
 
     #[tokio::test]
@@ -902,7 +904,7 @@ mod tests {
                 .map(|candidate| InboxNotablePick {
                     message_id: candidate.message_id.clone(),
                     action: Some(if candidate.message_id == "m1" {
-                        "archive".into()
+                        "ignore".into()
                     } else {
                         "inform".into()
                     }),
@@ -945,7 +947,7 @@ mod tests {
         assert_eq!(preview.candidates_scanned, 2);
         assert_eq!(preview.matched.len(), 1);
         assert_eq!(preview.matched[0].message_id, "m1");
-        assert_eq!(preview.matched[0].action.as_deref(), Some("archive"));
+        assert_eq!(preview.matched[0].action.as_deref(), Some("ignore"));
         assert_eq!(
             preview.matched[0].matched_rule_ids,
             vec!["r123".to_string()]

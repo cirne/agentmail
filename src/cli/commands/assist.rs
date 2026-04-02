@@ -1,11 +1,10 @@
-use crate::cli::args::{CheckArgs, ReviewArgs, ReviewSubcommand};
+use crate::cli::args::{CheckArgs, ReviewArgs};
 use crate::cli::triage::run_triage_command;
 use crate::cli::util::load_cfg;
 use crate::cli::CliResult;
 use std::path::PathBuf;
 use zmail::{
-    db, dismiss_message, resolve_openai_api_key, run_ask as run_ask_query, LoadConfigOptions,
-    RunAskOptions,
+    db, resolve_openai_api_key, run_ask as run_ask_query, LoadConfigOptions, RunAskOptions,
 };
 
 pub(crate) fn run_ask(mut question: Vec<String>, verbose: bool) -> CliResult {
@@ -60,42 +59,7 @@ pub(crate) fn run_check(args: CheckArgs) -> CliResult {
     run_triage_command(&cfg, &args)
 }
 
-pub(crate) fn run_review(args: ReviewArgs, sub: Option<ReviewSubcommand>) -> CliResult {
+pub(crate) fn run_review(args: ReviewArgs) -> CliResult {
     let cfg = load_cfg();
-    if let Some(ReviewSubcommand::Dismiss {
-        message_id,
-        no_archive,
-        text,
-    }) = sub
-    {
-        let conn = db::open_file(cfg.db_path())?;
-        let archived = !no_archive;
-        let ok = dismiss_message(&conn, &message_id, archived)?;
-        if !ok {
-            eprintln!("Message not found: {message_id}");
-            std::process::exit(1);
-        }
-        if text {
-            println!(
-                "Dismissed {message_id}{}",
-                if archived {
-                    " and archived locally"
-                } else {
-                    ""
-                }
-            );
-        } else {
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&serde_json::json!({
-                    "ok": true,
-                    "messageId": message_id,
-                    "archived": archived,
-                }))?
-            );
-        }
-        return Ok(());
-    }
-
     run_triage_command(&cfg, &args)
 }

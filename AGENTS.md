@@ -155,7 +155,7 @@ zmail ask "<question>" [--verbose]  # Answer a question about your email (requir
 zmail update [--since <window>] [--foreground] [--force] [--text]  # sync local mail; use --foreground when backfilling older mail
 zmail check [--no-update] [--replay] [--reclassify] [--text] [--verbose]  # update first by default, then surface urgent mail
 zmail review [<window>] [--since <window>] [--replay] [--reclassify] [--text]  # review notable recent mail without urgent-only filtering
-zmail review dismiss <message_id> [--no-archive]  # mark a surfaced message handled; archives locally by default
+zmail archive <message_id>... [--undo] [--json] [--text]  # local is_archived; optional IMAP when mailboxManagement enabled
 zmail status [--json] [--imap]
 zmail stats [--json]
 zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)

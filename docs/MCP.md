@@ -4,7 +4,7 @@ zmail exposes an MCP (Model Context Protocol) server for agent access to your em
 
 ## Overview
 
-The MCP server provides programmatic access to zmail's search, message retrieval, attachment extraction, and (when configured) **outbound SMTP** (`send_email`, `create_draft`, `send_draft`, `list_drafts`). It shares the same underlying SQLite index as the CLI, so all data synced via `zmail update` is immediately available through MCP tools.
+The MCP server provides programmatic access to zmail's search, message retrieval, attachment extraction, **local archive** (`archive_mail`), and (when configured) **outbound SMTP** (`send_email`, `create_draft`, `send_draft`, `list_drafts`). It shares the same underlying SQLite index as the CLI, so all data synced via `zmail update` is immediately available through MCP tools.
 
 **Draft + send (core agent loop):** create or update drafts with **`create_draft`**, list with **`list_drafts`**, send with **`send_draft`** (mirrors **`zmail draft …`** and **`zmail send <draft-id>`**). Draft files are **`{id}.md`** under `data/drafts/` (`id` is a subject slug plus an 8-character suffix). **`send_draft`** accepts that id with or without **`.md`**. For kind **`new`**, omit **`subject`** and pass **`instruction`** to have the LLM generate subject and body (requires OpenAI key). Natural-language revision of an existing draft is still **CLI-only** (`zmail draft edit <id> "…"`); in MCP, revise the body in the outer agent and call **`create_draft`** again.
 
@@ -291,6 +291,20 @@ List local drafts. Returns a JSON **object** (same envelope idea as `search_mail
 - `resultFormat` (string, optional): `"auto"` | `"full"` | `"slim"` — same semantics as `search_mail` (default: `auto`).
 
 **CLI parity:** `zmail draft list [--result-format <m>]` uses the same flag and values as `zmail search` (`auto` \| `full` \| `slim`; space-separated value only).
+
+### `get_draft` / `delete_draft`
+
+Read or delete a draft file by **`draftId`** (stem of `{id}.md` under `data/drafts/`). See tool descriptions in the server for parameters.
+
+### `archive_mail`
+
+Set or clear **`messages.is_archived`** for one or more messages (same semantics as **`zmail archive`** / **`zmail archive --undo`**). Search and read still see archived mail; the flag mainly limits proactive inbox candidate pools.
+
+**Parameters:**
+- `messageIds` (string or array of strings, required): one or more message IDs (comma/semicolon-separated when passed as a single string, same splitting style as send `to`).
+- `undo` (boolean, optional): when true, clears local archive (`is_archived = 0`); default false archives locally.
+
+**Returns:** JSON object `{ "results": [ ... ] }`. Each element includes `messageId`, `local` (`ok`, `isArchived`), and `providerMutation` (`attempted`, `ok`, `error`) — provider IMAP moves run only when **`mailboxManagement`** is enabled and allows **`archive`** in config; otherwise `attempted` is false and local archive still applies.
 
 ---
 

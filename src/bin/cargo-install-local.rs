@@ -8,6 +8,10 @@
 //! (**`~/.claude/skills/zmail`** by default, symlink), matching **`npm run install-skill:claude`**.
 //! Skip with **`ZMAIL_SKIP_CLAUDE_SKILL=1`**, override destination with **`ZMAIL_CLAUDE_SKILL_DIR`**,
 //! use **`ZMAIL_CLAUDE_SKILL_MODE=copy`** instead of symlink.
+//!
+//! If **`~/.openclaw/skills`** exists (directory), the same skill is **copied** to
+//! **`~/.openclaw/skills/zmail`** (recursive), matching **`npm run install-skill:openclaw`**.
+//! Skip with **`ZMAIL_SKIP_OPENCLAW_SKILL=1`**.
 
 use std::env;
 use std::fs;
@@ -53,6 +57,7 @@ fn run() -> Result<(), String> {
     macos_normalize_installed_binary(&dest)?;
     println!("Installed {}", dest.display());
     install_claude_skill(&root)?;
+    install_openclaw_skill(&root)?;
     Ok(())
 }
 
@@ -177,8 +182,63 @@ fn install_claude_skill(workspace_root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn install_openclaw_skill(workspace_root: &Path) -> Result<(), String> {
+    if skip_openclaw_skill_install() {
+        println!("Skipping OpenClaw skill install (ZMAIL_SKIP_OPENCLAW_SKILL is set).");
+        return Ok(());
+    }
+    let home = dirs::home_dir()
+        .ok_or_else(|| "cannot resolve home; set HOME for OpenClaw skill install".to_string())?;
+    install_openclaw_skill_at(workspace_root, home.as_path(), true)
+}
+
+/// When `verbose` is false, skips silently if `home/.openclaw/skills` is missing (no OpenClaw layout).
+fn install_openclaw_skill_at(
+    workspace_root: &Path,
+    home: &Path,
+    verbose: bool,
+) -> Result<(), String> {
+    let src = workspace_root.join("skills/zmail");
+    if !src.is_dir() {
+        return Err(format!(
+            "publishable skill missing: {} (expected skills/zmail under repo root)",
+            src.display()
+        ));
+    }
+    let openclaw_skills = home.join(".openclaw/skills");
+    if !openclaw_skills.is_dir() {
+        return Ok(());
+    }
+    let dest = openclaw_skills.join("zmail");
+    if dest.exists() {
+        if dest.is_dir() {
+            fs::remove_dir_all(&dest).map_err(|e| e.to_string())?;
+        } else {
+            fs::remove_file(&dest).map_err(|e| e.to_string())?;
+        }
+    }
+    let src_abs = fs::canonicalize(&src).map_err(|e| format!("{}: {e}", src.display()))?;
+    copy_dir_all(&src_abs, &dest).map_err(|e| e.to_string())?;
+    if verbose {
+        println!(
+            "Installed zmail skill for OpenClaw (copy):\n  {}",
+            dest.display()
+        );
+        println!("Start a new OpenClaw session or restart the gateway so skills reload.");
+    }
+    Ok(())
+}
+
 fn skip_claude_skill_install() -> bool {
     let Some(v) = env::var("ZMAIL_SKIP_CLAUDE_SKILL").ok() else {
+        return false;
+    };
+    let v = v.trim();
+    v == "1" || v.eq_ignore_ascii_case("true")
+}
+
+fn skip_openclaw_skill_install() -> bool {
+    let Some(v) = env::var("ZMAIL_SKIP_OPENCLAW_SKILL").ok() else {
         return false;
     };
     let v = v.trim();
@@ -371,5 +431,34 @@ mod tests {
         writeln!(f, "[dependencies]").unwrap();
         writeln!(f, "zmail = {{ path = \"../zmail\" }}").unwrap();
         assert!(!is_zmail_manifest(&manifest));
+    }
+
+    #[test]
+    fn openclaw_skill_copies_when_skills_dir_exists() {
+        let tmp = tempdir().unwrap();
+        let home = tmp.path();
+        let ws = tmp.path().join("ws");
+        let skill = ws.join("skills/zmail");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), b"name: zmail\n").unwrap();
+        fs::create_dir_all(home.join(".openclaw/skills")).unwrap();
+
+        install_openclaw_skill_at(&ws, home, false).unwrap();
+
+        assert!(home.join(".openclaw/skills/zmail/SKILL.md").is_file());
+    }
+
+    #[test]
+    fn openclaw_skill_noop_when_openclaw_skills_missing() {
+        let tmp = tempdir().unwrap();
+        let home = tmp.path();
+        let ws = tmp.path().join("ws");
+        let skill = ws.join("skills/zmail");
+        fs::create_dir_all(&skill).unwrap();
+        fs::write(skill.join("SKILL.md"), b"x").unwrap();
+
+        install_openclaw_skill_at(&ws, home, false).unwrap();
+
+        assert!(!home.join(".openclaw/skills").exists());
     }
 }

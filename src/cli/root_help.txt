@@ -21,7 +21,7 @@ Assistants
   zmail ask "<question>" [--verbose]
   zmail check [--no-update] [--replay] [--reclassify] [--text] [--verbose]  # updates first by default
   zmail review [<window>] [--since ...] [--replay] [--reclassify] [--text]
-  zmail review dismiss <message_id> [--no-archive]
+  zmail archive <message_id> … [--undo] [--json] [--text]
 
 Send & integration
   zmail send [--to ... --subject ...] [<draft-id>]

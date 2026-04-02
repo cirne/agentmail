@@ -340,6 +340,7 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
         Ok(())
     };
 
+    let owner = (!cfg.imap_user.trim().is_empty()).then(|| cfg.imap_user.clone());
     let opts = RunInboxScanOptions {
         surface_mode: args.surface_mode(),
         cutoff_iso,
@@ -348,7 +349,7 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
         reapply_llm: args.reclassify(),
         diagnostics: args.diagnostics(),
         rules_fingerprint: None,
-        owner_address: None,
+        owner_address: owner,
         owner_aliases: cfg.imap_aliases.clone(),
         candidate_cap: None,
         notable_cap: None,

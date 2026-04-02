@@ -11,6 +11,7 @@ pub mod inbox;
 pub mod inbox_window;
 pub mod mail_category;
 pub mod mail_read;
+pub mod mailbox;
 pub mod mcp;
 pub mod rebuild_index;
 pub mod refresh;
@@ -44,10 +45,11 @@ pub use ids::{
     resolve_message_id_and_raw_path, resolve_message_id_thread_and_raw_path, resolve_thread_id,
 };
 pub use inbox::{
-    dismiss_message, inbox_candidate_prefetch_limit, preview_rule_impact, record_inbox_scan,
-    run_inbox_scan, InboxBatchClassifier, InboxCandidate, InboxNotablePick, InboxOwnerContext,
-    InboxSurfaceMode, MockInboxClassifier, OpenAiInboxClassifier, RuleImpactPreview,
-    RunInboxScanError, RunInboxScanOptions, RunInboxScanResult,
+    archive_messages_locally, inbox_candidate_prefetch_limit, preview_rule_impact,
+    record_inbox_scan, run_inbox_scan, run_post_rebuild_inbox_bootstrap, InboxBatchClassifier,
+    InboxCandidate, InboxNotablePick, InboxOwnerContext, InboxSurfaceMode, MockInboxClassifier,
+    OpenAiInboxClassifier, PostRebuildBootstrapSummary, RuleImpactPreview, RunInboxScanError,
+    RunInboxScanOptions, RunInboxScanResult,
 };
 pub use inbox_window::parse_inbox_window_to_iso_cutoff;
 pub use mail_category::{
@@ -58,6 +60,7 @@ pub use mail_read::{
     format_read_message_text, read_message_bytes, read_message_bytes_with_thread, resolve_raw_path,
     ReadMessageJson,
 };
+pub use mailbox::{provider_archive_message, ProviderArchiveOutcome};
 pub use mcp::{handle_request_line, tool_schemas_stable, JsonRpcRequest, TOOL_NAMES};
 pub use rebuild_index::{rebuild_from_maildir, rebuild_from_maildir_sequential};
 pub use refresh::{
