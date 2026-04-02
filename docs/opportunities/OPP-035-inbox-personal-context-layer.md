@@ -2,7 +2,7 @@
 
 **Status:** Open. **Created:** 2026-04-01. **Tags:** inbox, personalization, context, rules, review, inform, llm
 
-**Related:** [OPP-001](OPP-001-personalization.md) (personalization for search), [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox foundation), [OPP-034](OPP-034-simplified-inbox-cli-check-review.md) (review/check product contract)
+**Related:** [OPP-001](OPP-001-personalization.md) (personalization for search), [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox foundation), [OPP-034](OPP-034-simplified-inbox-cli-check-review.md) (review/check product contract), [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md) (triage vs explicit archive + optional IMAP)
 
 ---
 

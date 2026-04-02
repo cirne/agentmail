@@ -2,7 +2,7 @@
 
 **Status:** Archived. **Created:** 2026-04-01. **Updated:** 2026-04-01. **Tags:** cli, inbox, agent, review, check, notify, inform, workflow
 
-**Related:** [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox foundation), [OPP-021](OPP-021-ask-spam-promo-awareness.md) (promotional/newsletter awareness), [OPP-033](OPP-033-imap-write-operations-and-readonly-mode.md) (provider-side archive/write semantics), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox without daemon)
+**Related:** [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox foundation), [OPP-021](OPP-021-ask-spam-promo-awareness.md) (promotional/newsletter awareness), [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md) (triage vs archive + IMAP; historical: [archive/OPP-033](archive/OPP-033-imap-write-operations-and-readonly-mode.md)), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox without daemon)
 
 ---
 
