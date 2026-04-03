@@ -65,8 +65,8 @@ pub use mcp::{handle_request_line, tool_schemas_stable, JsonRpcRequest, TOOL_NAM
 pub use rebuild_index::{rebuild_from_maildir, rebuild_from_maildir_sequential};
 pub use refresh::{
     build_check_json, build_refresh_json_value, build_refresh_json_value_with_extras,
-    build_review_json, load_refresh_new_mail, print_check_text, print_refresh_text,
-    print_review_text, InboxDispositionCounts, RefreshPreviewRow,
+    build_review_json, inbox_json_hints, load_refresh_new_mail, print_check_text,
+    print_refresh_text, print_review_text, InboxDispositionCounts, RefreshPreviewRow,
 };
 pub use rules::{
     add_context, add_rule, build_inbox_rules_prompt, edit_rule, load_rules_file, parse_rule_action,

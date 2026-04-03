@@ -128,9 +128,8 @@ pub fn already_surfaced_filter_sql(mode: InboxSurfaceMode, replay: bool) -> &'st
             InboxSurfaceMode::Check => {
                 " AND NOT EXISTS (SELECT 1 FROM inbox_alerts s WHERE s.message_id = messages.message_id)"
             }
-            InboxSurfaceMode::Review => {
-                " AND NOT EXISTS (SELECT 1 FROM inbox_reviews s WHERE s.message_id = messages.message_id)"
-            }
+            // Review re-lists the current window each run; do not hide mail already shown in a prior review.
+            InboxSurfaceMode::Review => "",
         }
     }
 }

@@ -31,6 +31,7 @@ use crate::search::{
 
 const DEFAULT_CANDIDATE_CAP: usize = 80;
 const DEFAULT_NOTABLE_CAP: usize = 10;
+const DEFAULT_REVIEW_NOTABLE_CAP: usize = 30;
 const DEFAULT_BATCH_SIZE: usize = 40;
 const DEFAULT_INBOX_PREFETCH_CAP: usize = 200;
 
@@ -641,7 +642,8 @@ fn normalize_action(action: Option<&str>) -> &'static str {
 fn surface_matches(mode: InboxSurfaceMode, action: &str) -> bool {
     match mode {
         InboxSurfaceMode::Check => action == "notify",
-        InboxSurfaceMode::Review => matches!(action, "notify" | "inform"),
+        // Full inbox snapshot for the window: include notify, inform, and ignore so nothing is hidden.
+        InboxSurfaceMode::Review => matches!(action, "notify" | "inform" | "ignore"),
     }
 }
 
@@ -903,7 +905,13 @@ pub async fn run_inbox_scan(
     classifier: &mut dyn InboxBatchClassifier,
 ) -> Result<RunInboxScanResult, RunInboxScanError> {
     let candidate_cap = options.candidate_cap.unwrap_or(DEFAULT_CANDIDATE_CAP);
-    let notable_cap = options.notable_cap.unwrap_or(DEFAULT_NOTABLE_CAP);
+    let notable_cap = options.notable_cap.unwrap_or_else(|| {
+        if options.surface_mode == InboxSurfaceMode::Review {
+            DEFAULT_REVIEW_NOTABLE_CAP
+        } else {
+            DEFAULT_NOTABLE_CAP
+        }
+    });
     let batch_size = options.batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
     let mut candidates = load_inbox_candidates(conn, options)?;
     candidates.truncate(candidate_cap);
@@ -979,11 +987,8 @@ pub async fn run_inbox_scan(
             "ignore" => counts.ignore += 1,
             _ => {}
         }
-        if row
-            .action
-            .as_deref()
-            .is_some_and(|action| surface_matches(options.surface_mode, action))
-        {
+        let action = normalize_action(row.action.as_deref());
+        if surface_matches(options.surface_mode, action) {
             surfaced.push(row.clone());
         }
         processed.push(row);

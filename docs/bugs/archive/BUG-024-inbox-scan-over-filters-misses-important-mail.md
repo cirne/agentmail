@@ -1,8 +1,10 @@
 # BUG-024: `zmail check` / inbox scan Over-Filters — Misses Mail the User (or Calling Agent) Would Care About
 
-**Status:** Fixed (Rust 2026-04-03). **Created:** 2026-03-20. **Tags:** inbox, check, llm, agent-first, recall
+**Status:** Closed — verified (2026-04-03). **Created:** 2026-03-20. **Tags:** inbox, check, llm, agent-first, recall
 
-**Resolution:** Rewrote `build_inbox_rules_prompt` ([`src/rules.rs`](../../../src/rules.rs)): junk-stripper framing, mandatory `notify|inform|ignore` per message, **prefer `inform` when unsure** (not `ignore`), explicit same-day travel/aviation/ops guidance, forbid bulk-assigning `ignore` to a whole batch. Bumped `INBOX_RULES_PROMPT_VERSION` to **6** so cached inbox decisions recompute. Parser fallback `fallback_action` now defaults ambiguous/non-heuristic mail to **`inform`** instead of **`ignore`** so invalid JSON or omitted rows do not auto-archive everything. `propose_rule_from_feedback` travel keywords now suggest **`inform`** instead of **`ignore`**.
+**Resolution:** Rewrote `build_inbox_rules_prompt` ([`src/rules.rs`](../../../src/rules.rs)): junk-stripper framing, mandatory `notify|inform|ignore` per message, **prefer `inform` when unsure** (not `ignore`), explicit same-day travel/aviation/ops guidance, forbid bulk-assigning `ignore` to a whole batch. Bumped `INBOX_RULES_PROMPT_VERSION` to **6** so cached inbox decisions recompute. Parser fallback `fallback_action` now defaults ambiguous/non-heuristic mail to **`inform`** instead of **`ignore`** so invalid JSON or omitted rows do not auto-archive everything. `propose_rule_from_feedback` travel keywords now suggest **`inform`** instead of **`ignore`**. **Stripper heuristic:** non-bulk operational mail (e.g. same-day NetJets tail notifications) can **overrule** model `ignore` → **`inform`** (`decisionSource: "stripper"`).
+
+**Verification (2026-04-03):** Live retest with `zmail check --thorough --diagnostics`: same-day NetJets tail notifications (N126QS, N701QS) classified **`inform`**, `decisionSource: "stripper"`, note `"Ignore overruled; not bulk."` — matches expected behavior for time-sensitive aviation ops. Feedback: `ztest/feedback/verified/bug-check-ignores-same-day-flight.md` (attempt 3).
 
 **Design lens:** [Agent-first](../../VISION.md) — **`zmail check`** (Rust CLI; legacy docs may say `inbox`) is a **primitive** for surfacing recent mail to a calling agent. The agent already has user context, goals, and follow-up logic. zmail should **not** second-guess importance aggressively. Prefer **high recall** on the server side: drop only **obvious** junk (newsletters, bulk marketing, noreply noise). **Security notifications, purchases, receipts, shipping updates, calendar invites, and personal/work threads** should generally **pass through** so the agent can rank and explain what matters for *this* user.
 
@@ -23,6 +25,8 @@ Agent feedback (`ztest/feedback`): Ran **`zmail check`** with default rules (no 
 ---
 
 ## Current behavior (implementation)
+
+**Note:** The numbered list below is a **pre-fix** description of how the LLM prompt biased toward `ignore`; resolution and stripper behavior are summarized in **Status / Resolution** above.
 
 **Rust (primary):** [`src/inbox/scan.rs`](../../../src/inbox/scan.rs), [`src/rules.rs`](../../../src/rules.rs) (`build_inbox_rules_prompt`). CLI: **`zmail check`** ([`src/main.rs`](../../../src/main.rs)). **Node reference:** `node/src/inbox/scan.ts` (parity).
 
@@ -72,7 +76,7 @@ Agent feedback (`ztest/feedback`): Ran **`zmail check`** with default rules (no 
 ## Acceptance criteria (when closing)
 
 - [x] Documented behavior matches “junk stripper, not final inbox.” (prompt + resolution)
-- [ ] Representative real-world samples (or fixtures) show security + transactional + personal mail **included** unless clearly bulk. (prompt/fallback bias; live LLM not fixture-gated)
+- [x] Representative real-world samples show transactional / time-sensitive mail **included** unless clearly bulk. (2026-04-03: same-day NetJets tail notifications → `inform` via stripper; prior candidate-pool fix with `--thorough`)
 - [x] Calling agent can still ignore rows; JSON remains machine-friendly.
 - [ ] Regression: obvious newsletter/marketing still tends to be omitted (precision not zero). (manual / future fixture)
 

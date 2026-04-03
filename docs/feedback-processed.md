@@ -53,6 +53,7 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `ux-actionable-error-messages.md` | 2026-03-31 | Created bug | [BUG-033](bugs/BUG-033-actionable-file-not-found-errors.md) — missing local files still surface raw OS/path errors instead of actionable zmail-specific recovery messages |
 | `ux-cli-agent-friction-and-read-missing-recipients.md` | 2026-04-01 | Created bugs | [BUG-034](bugs/archive/BUG-034-cli-json-text-flags-inconsistent-across-subcommands.md) (CLI `--json`/`--text` friction); [BUG-035](bugs/archive/BUG-035-read-omits-to-cc-bcc-and-threading-headers.md) (`read` omits To/CC/BCC / threading headers) |
 | `bug-check-ignores-same-day-flight.md` | 2026-04-03 | Matched existing bug; extended context | [BUG-024](bugs/archive/BUG-024-inbox-scan-over-filters-misses-important-mail.md) — `zmail check` same-day NetJets tail notification classified `ignore`; Rust prompt/refs updated |
+| `verified/bug-check-ignores-same-day-flight.md` | 2026-04-03 | BUG-024 closed after verification | [BUG-024](bugs/archive/BUG-024-inbox-scan-over-filters-misses-important-mail.md) — attempt 3: stripper overrule → `inform` for NetJets tails; status **Closed — verified** |
 
 ---
 

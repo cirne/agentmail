@@ -6,11 +6,11 @@ use crate::cli::args::{CheckArgs, ReviewArgs};
 use crate::cli::util::zmail_home_path;
 use crate::cli::CliResult;
 use zmail::{
-    build_check_json, build_review_json, connect_imap_session, db, load_rules_file,
-    parse_inbox_window_to_iso_cutoff, print_check_text, print_review_text, resolve_openai_api_key,
-    resolve_sync_mailbox, resolve_sync_since_ymd, run_inbox_scan, InboxSurfaceMode,
-    LoadConfigOptions, OpenAiInboxClassifier, RunInboxScanOptions, SyncDirection, SyncFileLogger,
-    SyncOptions, SyncResult,
+    build_check_json, build_review_json, connect_imap_session, db, inbox_json_hints,
+    load_rules_file, parse_inbox_window_to_iso_cutoff, print_check_text, print_review_text,
+    resolve_openai_api_key, resolve_sync_mailbox, resolve_sync_since_ymd, run_inbox_scan,
+    InboxSurfaceMode, LoadConfigOptions, OpenAiInboxClassifier, RunInboxScanOptions, SyncDirection,
+    SyncFileLogger, SyncOptions, SyncResult,
 };
 
 pub(crate) trait InboxCliArgs {
@@ -22,6 +22,8 @@ pub(crate) trait InboxCliArgs {
     fn force(&self) -> bool;
     fn include_all(&self) -> bool;
     fn diagnostics(&self) -> bool;
+    /// Full per-row fields (note, decisionSource, attachments, matchedRuleIds) for JSON output.
+    fn inbox_json_full_detail(&self) -> bool;
     fn text(&self) -> bool;
     fn verbose(&self) -> bool {
         false
@@ -68,6 +70,15 @@ impl InboxCliArgs for CheckArgs {
 
     fn diagnostics(&self) -> bool {
         self.diagnostics
+    }
+
+    fn inbox_json_full_detail(&self) -> bool {
+        self.diagnostics
+            || self.thorough
+            || self.replay
+            || self.include_all
+            || self.reclassify
+            || self.verbose
     }
 
     fn text(&self) -> bool {
@@ -117,11 +128,16 @@ impl InboxCliArgs for ReviewArgs {
     }
 
     fn include_all(&self) -> bool {
-        self.thorough || self.include_all
+        // Review lists the full inbox window (all Gmail/label categories), not only primary-tab mail.
+        true
     }
 
     fn diagnostics(&self) -> bool {
         self.diagnostics
+    }
+
+    fn inbox_json_full_detail(&self) -> bool {
+        self.diagnostics || self.thorough || self.replay || self.include_all || self.reclassify
     }
 
     fn text(&self) -> bool {
@@ -286,6 +302,13 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
     }
 
     let print_scan = |sync_result: &SyncResult, scan: &zmail::RunInboxScanResult| -> CliResult {
+        let hints = inbox_json_hints(
+            args.surface_mode(),
+            &scan.surfaced,
+            &scan.counts,
+            scan.candidates_scanned,
+            args.diagnostics(),
+        );
         match args.surface_mode() {
             InboxSurfaceMode::Check => {
                 let json = build_check_json(
@@ -296,6 +319,8 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
                     scan.candidates_scanned,
                     scan.llm_duration_ms,
                     !args.refresh(),
+                    &hints,
+                    args.inbox_json_full_detail(),
                 );
                 if args.text() {
                     print_check_text(
@@ -323,6 +348,8 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
                     &scan.counts,
                     scan.candidates_scanned,
                     scan.llm_duration_ms,
+                    &hints,
+                    args.inbox_json_full_detail(),
                 );
                 if args.text() {
                     print_review_text(
