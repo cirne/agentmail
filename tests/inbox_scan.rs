@@ -2,7 +2,7 @@
 
 use chrono::{Duration, Utc};
 use std::sync::{
-    atomic::{AtomicUsize, Ordering},
+    atomic::{AtomicBool, AtomicUsize, Ordering},
     Arc,
 };
 use zmail::{
@@ -136,6 +136,14 @@ async fn includes_attachment_metadata_on_notable_rows() {
     };
     let r = run_inbox_scan(&conn, &opts, &mut mock).await.unwrap();
     assert_eq!(r.surfaced.len(), 1);
+    assert!(
+        r.surfaced[0]
+            .note
+            .as_deref()
+            .is_some_and(|n| n.contains("Model classified")),
+        "{:?}",
+        r.surfaced[0].note
+    );
     let atts = r.surfaced[0].attachments.as_ref().unwrap();
     assert_eq!(atts.len(), 1);
     assert_eq!(atts[0].filename, "report.pdf");
@@ -430,6 +438,197 @@ async fn ignore_classifications_archive_and_second_scan_skips_archived_candidate
 }
 
 #[tokio::test]
+async fn ignore_without_archive_signals_does_not_set_is_archived() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::minutes(10)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<plain@x>",
+        "ops@example.com",
+        "Operational update",
+        "Departure details in body. No marketing footer.",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
+    let mut mock = MockInboxClassifier::new(|batch| {
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("ignore".into()),
+                matched_rule_ids: vec![],
+                note: Some("model ignore".into()),
+                decision_source: Some("model".into()),
+            })
+            .collect()
+    });
+    run_inbox_scan(
+        &conn,
+        &RunInboxScanOptions {
+            surface_mode: InboxSurfaceMode::Check,
+            cutoff_iso: cutoff,
+            include_all: true,
+            replay: true,
+            reapply_llm: false,
+            diagnostics: true,
+            rules_fingerprint: Some("fp-archive-test".into()),
+            owner_address: None,
+            owner_aliases: vec![],
+            candidate_cap: None,
+            notable_cap: None,
+            batch_size: None,
+        },
+        &mut mock,
+    )
+    .await
+    .unwrap();
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<plain@x>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 0);
+}
+
+#[tokio::test]
+async fn reclassify_includes_archived_messages_in_scan() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::minutes(10)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<was-archived@x>",
+        "flight@example.com",
+        "Tail number",
+        "Body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    conn.execute(
+        "UPDATE messages SET is_archived = 1 WHERE message_id = '<was-archived@x>'",
+        [],
+    )
+    .unwrap();
+    let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
+    let saw_archived = Arc::new(AtomicBool::new(false));
+    let saw = Arc::clone(&saw_archived);
+    let mut mock = MockInboxClassifier::new(move |batch| {
+        if batch.iter().any(|m| m.message_id == "<was-archived@x>") {
+            saw.store(true, Ordering::SeqCst);
+        }
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec![],
+                note: None,
+                decision_source: Some("model".into()),
+            })
+            .collect()
+    });
+    let r = run_inbox_scan(
+        &conn,
+        &RunInboxScanOptions {
+            surface_mode: InboxSurfaceMode::Check,
+            cutoff_iso: cutoff,
+            include_all: true,
+            replay: true,
+            reapply_llm: true,
+            diagnostics: false,
+            rules_fingerprint: Some("fp-reclassify-archived".into()),
+            owner_address: None,
+            owner_aliases: vec![],
+            candidate_cap: None,
+            notable_cap: None,
+            batch_size: None,
+        },
+        &mut mock,
+    )
+    .await
+    .unwrap();
+    assert!(
+        saw_archived.load(Ordering::SeqCst),
+        "classifier should see archived row"
+    );
+    assert_eq!(r.candidates_scanned, 1);
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<was-archived@x>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 0);
+}
+
+#[tokio::test]
+async fn scan_without_reclassify_skips_archived_messages() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::minutes(10)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<only-archived@x>",
+        "a@b.com",
+        "Hi",
+        "Body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    conn.execute(
+        "UPDATE messages SET is_archived = 1 WHERE message_id = '<only-archived@x>'",
+        [],
+    )
+    .unwrap();
+    let cutoff = (Utc::now() - Duration::hours(1)).to_rfc3339();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_c = Arc::clone(&calls);
+    let mut mock = MockInboxClassifier::new(move |batch| {
+        calls_c.fetch_add(1, Ordering::SeqCst);
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("notify".into()),
+                matched_rule_ids: vec![],
+                note: None,
+                decision_source: Some("model".into()),
+            })
+            .collect()
+    });
+    let r = run_inbox_scan(
+        &conn,
+        &RunInboxScanOptions {
+            surface_mode: InboxSurfaceMode::Check,
+            cutoff_iso: cutoff,
+            include_all: true,
+            replay: true,
+            reapply_llm: false,
+            diagnostics: false,
+            rules_fingerprint: Some("fp-no-reclassify".into()),
+            owner_address: None,
+            owner_aliases: vec![],
+            candidate_cap: None,
+            notable_cap: None,
+            batch_size: None,
+        },
+        &mut mock,
+    )
+    .await
+    .unwrap();
+    assert_eq!(r.candidates_scanned, 0);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
 async fn changed_rules_fingerprint_recomputes_decision() {
     let conn = open_memory().unwrap();
     let recent = (Utc::now() - Duration::minutes(10)).to_rfc3339();
@@ -482,7 +681,7 @@ async fn changed_rules_fingerprint_recomputes_decision() {
     .unwrap();
     assert_eq!(calls.load(Ordering::SeqCst), 1);
 
-    // First pass archives `ignore`; unarchive so the message remains a candidate for fp2.
+    // First pass does not set is_archived (model ignore without safe-archive signals); message stays a candidate for fp2.
     conn.execute(
         "UPDATE messages SET is_archived = 0 WHERE message_id = '<rules@x>'",
         [],

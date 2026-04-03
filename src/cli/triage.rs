@@ -43,11 +43,11 @@ impl InboxCliArgs for CheckArgs {
     }
 
     fn window(&self) -> Option<String> {
-        None
+        self.window.clone()
     }
 
     fn since(&self) -> Option<String> {
-        None
+        self.since.clone()
     }
 
     fn refresh(&self) -> bool {
@@ -55,15 +55,15 @@ impl InboxCliArgs for CheckArgs {
     }
 
     fn replay(&self) -> bool {
-        self.replay
+        self.thorough || self.replay
     }
 
     fn force(&self) -> bool {
-        self.force
+        self.thorough || self.force
     }
 
     fn include_all(&self) -> bool {
-        self.include_all
+        self.thorough || self.include_all
     }
 
     fn diagnostics(&self) -> bool {
@@ -87,7 +87,7 @@ impl InboxCliArgs for CheckArgs {
     }
 
     fn reclassify(&self) -> bool {
-        self.reclassify
+        self.thorough || self.reclassify
     }
 }
 
@@ -109,7 +109,7 @@ impl InboxCliArgs for ReviewArgs {
     }
 
     fn replay(&self) -> bool {
-        self.replay
+        self.thorough || self.replay
     }
 
     fn force(&self) -> bool {
@@ -117,7 +117,7 @@ impl InboxCliArgs for ReviewArgs {
     }
 
     fn include_all(&self) -> bool {
-        self.include_all
+        self.thorough || self.include_all
     }
 
     fn diagnostics(&self) -> bool {
@@ -129,7 +129,7 @@ impl InboxCliArgs for ReviewArgs {
     }
 
     fn reclassify(&self) -> bool {
-        self.reclassify
+        self.thorough || self.reclassify
     }
 }
 

@@ -95,7 +95,7 @@ Rules should map to a small action set:
 | ------ | -------- | -------------- |
 | **`notify`** | Missing this right now would be costly | Surface it in `check` immediately |
 | **`inform`** | Worth mentioning, but not interrupting for | Surface it at the next `review` |
-| **`ignore`** | Routine noise or low-value mail the user does not want in proactive triage | Classifier skips surfacing and **auto-archives** locally (still searchable); use **`zmail archive`** for **`notify`** / **`inform`** mail once handled |
+| **`ignore`** | Routine noise or low-value mail the user does not want in proactive triage | Classifier skips surfacing. **Local auto-archive** applies when a user rule matched, the message is in an excluded provider category, the sender looks like **no-reply**, or body/subject has **unsubscribe** boilerplate — otherwise mail stays in the working set (still searchable). Use **`zmail archive`** for **`notify`** / **`inform`** mail once handled |
 
 Good examples:
 

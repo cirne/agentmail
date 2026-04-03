@@ -150,10 +150,6 @@ pub(crate) enum Commands {
         message_ids: Vec<String>,
         #[arg(long)]
         undo: bool,
-        #[arg(long, conflicts_with = "json")]
-        text: bool,
-        #[arg(long, conflicts_with = "text")]
-        json: bool,
     },
     /// Send mail via SMTP (same IMAP credentials; optional `ZMAIL_SEND_TEST=1` guard)
     Send {
@@ -216,15 +212,22 @@ pub(crate) enum AttachmentCmd {
 
 #[derive(Args, Debug, Clone, Default)]
 pub(crate) struct CheckArgs {
+    /// Rolling window e.g. `24h`, `7d` (optional; overrides `inbox.defaultWindow` in config; use `--since` for `YYYY-MM-DD`)
+    pub(crate) window: Option<String>,
+    #[arg(long)]
+    pub(crate) since: Option<String>,
     #[arg(long)]
     pub(crate) no_update: bool,
+    /// Slow path: when syncing, no IMAP early-exit; scan all categories; rerun LLM (bypass cache); include archived; ignore prior surfaced dedup
     #[arg(long)]
+    pub(crate) thorough: bool,
+    #[arg(long, hide = true)]
     pub(crate) force: bool,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub(crate) include_all: bool,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub(crate) replay: bool,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub(crate) reclassify: bool,
     #[arg(long)]
     pub(crate) diagnostics: bool,
@@ -244,11 +247,14 @@ pub(crate) struct ReviewArgs {
     pub(crate) window: Option<String>,
     #[arg(long)]
     pub(crate) since: Option<String>,
+    /// Slow path: all categories; rerun LLM (bypass cache); include archived; ignore prior surfaced dedup
     #[arg(long)]
+    pub(crate) thorough: bool,
+    #[arg(long, hide = true)]
     pub(crate) replay: bool,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub(crate) include_all: bool,
-    #[arg(long)]
+    #[arg(long, hide = true)]
     pub(crate) reclassify: bool,
     #[arg(long)]
     pub(crate) diagnostics: bool,
@@ -326,4 +332,40 @@ pub(crate) enum RulesContextCmd {
         #[arg(long)]
         text: bool,
     },
+}
+
+#[cfg(test)]
+mod draft_cli_tests {
+    use super::Cli;
+    use clap::Parser;
+    use zmail::draft::DraftCmd;
+
+    #[test]
+    fn draft_list_accepts_json_flag_for_agents() {
+        let cli = Cli::try_parse_from(["zmail", "draft", "list", "--json"]).expect("parse");
+        match cli.command {
+            super::Commands::Draft { sub } => match sub {
+                DraftCmd::List {
+                    text: false,
+                    json: true,
+                    ..
+                } => {}
+                _ => panic!("unexpected draft subcommand"),
+            },
+            _ => panic!("expected draft list"),
+        }
+    }
+
+    #[test]
+    fn draft_list_text_conflicts_with_json() {
+        let err = match Cli::try_parse_from(["zmail", "draft", "list", "--text", "--json"]) {
+            Err(e) => e,
+            Ok(_) => panic!("expected --text/--json conflict"),
+        };
+        let s = err.to_string();
+        assert!(
+            s.contains("text") && s.contains("json") || s.contains("cannot be used with"),
+            "{s}"
+        );
+    }
 }

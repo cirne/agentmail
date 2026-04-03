@@ -26,6 +26,7 @@ fn run_draft_list_without_connection_succeeds() {
     run_draft(
         DraftCmd::List {
             text: false,
+            json: false,
             result_format: None,
         },
         &cfg,
@@ -51,6 +52,7 @@ fn run_draft_view_without_connection_succeeds() {
         DraftCmd::View {
             id: "v1".into(),
             text: false,
+            json: false,
             with_body: false,
         },
         &cfg,
@@ -73,6 +75,7 @@ fn run_draft_reply_without_connection_fails_fast() {
             body_file: None,
             with_body: false,
             text: false,
+            json: false,
         },
         &cfg,
         None,

@@ -98,11 +98,6 @@ pub(crate) fn handle_command(command: Commands) -> CliResult {
         Commands::Ask { question, verbose } => assist::run_ask(question, verbose),
         Commands::Check(args) => assist::run_check(args),
         Commands::Review(args) => assist::run_review(args),
-        Commands::Archive {
-            message_ids,
-            undo,
-            text,
-            json,
-        } => archive::run_archive(message_ids, undo, text, json),
+        Commands::Archive { message_ids, undo } => archive::run_archive(message_ids, undo),
     }
 }

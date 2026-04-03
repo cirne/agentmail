@@ -11,7 +11,7 @@ use uuid::Uuid;
 
 use crate::inbox::scan::InboxOwnerContext;
 
-pub const INBOX_RULES_PROMPT_VERSION: u32 = 5;
+pub const INBOX_RULES_PROMPT_VERSION: u32 = 6;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RulesError {
@@ -279,8 +279,10 @@ pub fn build_inbox_rules_prompt(
     owner: &InboxOwnerContext,
 ) -> String {
     let mut out = String::from(
-        "You filter email for a user. Evaluate each message against the user's rules below.\n\
-Return strict JSON:\n\
+        "You are a coarse junk stripper, not a final inbox curator. A downstream agent will rank and explain mail.\n\
+Your job: drop only obvious bulk/noise; keep borderline, transactional, security-adjacent, and ambiguous mail so the agent can judge.\n\
+High recall matters: false negatives (hiding something the user would care about) are worse than false positives.\n\n\
+Return strict JSON only:\n\
 {\n\
   \"results\": [\n\
     {\n\
@@ -290,14 +292,15 @@ Return strict JSON:\n\
     }\n\
   ]\n\
 }\n\n\
-For every message, return exactly one result row. Always populate matchedRuleIds; use [] when no explicit user rule matched.\n\
-For messages not matching any rule, apply common-sense email triage:\n\
-- Use `notify` only for messages that are interruption-worthy right now: OTP codes, active security issues, same-day deadlines, or urgent direct asks that should break the user's flow.\n\
-- Use `inform` only for messages worth surfacing at the next inbox review: mostly human-to-human mail, important work updates, non-urgent requests, and things the user would reasonably want summarized soon.\n\
-- Use `ignore` for mail that is legitimate and searchable but should not get proactive surfacing: receipts, confirmations, bulk updates, marketing, digests, and obvious low-priority automation.\n\
-Automated mail should usually NOT be `inform` unless the user has explicitly asked for it with a rule. Newsletters, mailing-list traffic, marketing, social notifications, digest emails, recommendations, deal alerts, automated invitations, and most no-reply senders should be `ignore`, not `inform`.\n\
-Default to `ignore` when a message seems legitimate but not clearly worth surfacing. When unsure between `notify` and `inform`, prefer `inform`. When unsure between `inform` and `ignore`, prefer `ignore`.\n\
-If a message is effectively from the user, sent by the user, or uses one of the user's own addresses as sender or reply identity, do not `notify`. Usually choose `ignore` unless the user's rules say otherwise.\n\n",
+Rules:\n\
+- You MUST output exactly one result per input message. Every `action` MUST be exactly one of: notify, inform, ignore — never omit, never leave blank, never use synonyms.\n\
+- Always populate matchedRuleIds; use [] when no explicit user rule matched.\n\
+- Use `notify` for interruption-worthy items now: OTP/login codes, active security or fraud alerts, same-day deadlines, urgent direct asks, same-day travel/aviation/crew/ops or logistics that affect today.\n\
+- Use `inform` for mail worth a review soon: person-to-person threads, work updates, requests, purchases/receipts/shipping/calendar when not clearly pure marketing, anything ambiguous or thin evidence.\n\
+- Use `ignore` ONLY when the message is clearly safe to skip: newsletters, digests, marketing blasts, social/recommendation spam, obvious bulk noreply churn, routine list traffic — not because you are unsure.\n\
+- If you are unsure between `inform` and `ignore`, choose `inform`. Never bulk-assign `ignore` to a whole batch; vary by message.\n\
+- Same-day departure/arrival, tail/crew/route operational mail (e.g. aviation charter ops) is at least `inform`, often `notify` — not routine \"travel confirmation\" noise.\n\
+- If a message is effectively from the user (sent-by-self / user's own address as sender identity), do not `notify`; prefer `ignore` for true self-mail unless a user rule says otherwise.\n\n",
     );
     out.push_str("## User Identity:\n");
     match &owner.primary_address {
@@ -318,7 +321,7 @@ If a message is effectively from the user, sent by the user, or uses one of the 
     }
     if diagnostics {
         out.push_str(
-            "When helpful for diagnostics, you may also include an optional `note` field with one short line why.\n\n",
+            "Always include a `note` field on every result (one short line explaining the action).\n\n",
         );
     }
     append_rule_group(&mut out, "NOTIFY", file, |action| {
@@ -415,8 +418,8 @@ pub fn propose_rule_from_feedback(feedback: &str) -> RuleFeedbackProposal {
     {
         (
             "flight confirmations, hotel bookings, and travel itineraries".to_string(),
-            "ignore".to_string(),
-            "Travel confirmations are often useful later but usually do not need inbox attention, so ignore them for later search.".to_string(),
+            "inform".to_string(),
+            "Travel and itinerary mail is often time-sensitive; surface it so the user or agent can decide urgency instead of hiding it as bulk.".to_string(),
         )
     } else if lower.contains("security")
         || lower.contains("fraud")
@@ -482,6 +485,17 @@ mod tests {
         let proposal = propose_rule_from_feedback("too many shipping notifications");
         assert_eq!(proposal.proposed.action, "ignore");
         assert!(proposal.proposed.condition.contains("shipping"));
+    }
+
+    #[test]
+    fn feedback_travel_maps_to_inform_rule() {
+        let proposal = propose_rule_from_feedback("too many flight confirmations");
+        assert_eq!(proposal.proposed.action, "inform");
+        assert!(proposal
+            .proposed
+            .condition
+            .to_ascii_lowercase()
+            .contains("flight"));
     }
 
     #[test]
@@ -562,12 +576,12 @@ mod tests {
     }
 
     #[test]
-    fn inbox_rules_prompt_mentions_optional_note_with_diagnostics() {
+    fn inbox_rules_prompt_requires_note_with_diagnostics() {
         let prompt =
             build_inbox_rules_prompt(&RulesFile::default(), true, &InboxOwnerContext::default());
-        assert!(prompt.contains("optional `note` field"));
+        assert!(prompt.contains("Always include a `note` field"));
         assert!(prompt.contains("\"action\": \"notify|inform|ignore\""));
-        assert!(prompt.contains("Default to `ignore`"));
+        assert!(prompt.contains("choose `inform`"));
     }
 
     #[test]

@@ -2,12 +2,7 @@ use crate::cli::util::load_cfg;
 use crate::cli::CliResult;
 use zmail::{archive_messages_locally, db, provider_archive_message};
 
-pub(crate) fn run_archive(
-    message_ids: Vec<String>,
-    undo: bool,
-    text: bool,
-    _json: bool,
-) -> CliResult {
+pub(crate) fn run_archive(message_ids: Vec<String>, undo: bool) -> CliResult {
     let cfg = load_cfg();
     let conn = db::open_file(cfg.db_path())?;
     let archived = !undo;
@@ -21,22 +16,9 @@ pub(crate) fn run_archive(
             "providerMutation": provider,
         }));
     }
-    if text {
-        for r in &results {
-            println!(
-                "{} local={} providerAttempted={}",
-                r["messageId"].as_str().unwrap_or(""),
-                r["local"]["ok"].as_bool().unwrap_or(false),
-                r["providerMutation"]["attempted"]
-                    .as_bool()
-                    .unwrap_or(false),
-            );
-        }
-    } else {
-        println!(
-            "{}",
-            serde_json::to_string_pretty(&serde_json::json!({ "results": results }))?
-        );
-    }
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&serde_json::json!({ "results": results }))?
+    );
     Ok(())
 }

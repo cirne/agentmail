@@ -56,7 +56,7 @@ Map former triage intent **`archive`** and **`suppress`** → **`ignore`** in pr
 ### 4. Explicit `zmail archive` CLI (and MCP parity)
 
 ```text
-zmail archive <message_id> … [--undo] [--json] [--text]
+zmail archive <message_id> … [--undo]
 ```
 
 - **Default:** set **local** `is_archived = 1` for each id.
@@ -125,7 +125,7 @@ Start with a boolean if simpler; leave room for per-action gates.
 
 1. **Schema + rebuild path:** Bump version; drop `inbox_handled`; tighten `inbox_decisions` CHECK; snapshot/rebuild behavior per §Schema above.
 2. **Rust triage:** Prompts, parsers, rules CLI, surface matching; remove legacy classifier archive path; **`ignore` → `is_archived`** after persist on every **`run_inbox_scan`**; bootstrap adds age bulk-archive + inbox table reset.
-3. **`zmail archive` / `--undo`:** Local SQLite, JSON/text; remove **`review dismiss`**; MCP tool(s).
+3. **`zmail archive` / `--undo`:** Local SQLite, JSON on stdout; remove **`review dismiss`**; MCP tool(s).
 4. **Config + IMAP:** `mailboxManagement` parsing; provider archive adapter; structured output.
 5. **Docs:** AGENTS, SKILL, RELEASING notes for breaking CLI/schema; optional Node parity only if required by [RUST_PORT.md](../RUST_PORT.md).
 

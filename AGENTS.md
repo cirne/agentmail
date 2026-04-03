@@ -125,6 +125,7 @@ See `.cursor/skills/process-feedback/SKILL.md` for the complete workflow. The `d
 ```bash
 cargo test
 cargo run -- --help
+cargo run -- check 7d --no-update --thorough   # iterate on inbox scan without release build
 cargo build --release
 ./target/release/zmail status
 ```
@@ -153,9 +154,9 @@ zmail read <message_id> [--raw] [--json] [--text]
 zmail thread <thread_id> [--json] [--text]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
 zmail update [--since <window>] [--foreground] [--force] [--text]  # sync local mail; use --foreground when backfilling older mail
-zmail check [--no-update] [--replay] [--reclassify] [--text] [--verbose]  # update first by default, then surface urgent mail
-zmail review [<window>] [--since <window>] [--replay] [--reclassify] [--text]  # review notable recent mail without urgent-only filtering
-zmail archive <message_id>... [--undo] [--json] [--text]  # local is_archived; optional IMAP when mailboxManagement enabled
+zmail check [<window>] [--since YYYY-MM-DD] [--thorough] [--no-update] [--text] [--verbose]  # update first by default, then surface urgent mail
+zmail review [<window>] [--since <window>] [--thorough] [--text]  # review notable recent mail without urgent-only filtering
+zmail archive <message_id>... [--undo]  # local is_archived; optional IMAP when mailboxManagement enabled; JSON stdout
 zmail status [--json] [--imap]
 zmail stats [--json]
 zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)
@@ -165,6 +166,10 @@ zmail send [--to addr --subject s] [<draft-id>]   # SMTP; saved draft under data
 zmail draft new|reply|forward|list|view|edit|rewrite [--help]   # Local drafts (data/drafts/); list JSON: slim/full like search (--result-format); bodyPreview when full; edit = LLM instruction, rewrite = replace body
 zmail mcp  # Start MCP server (stdio)
 ```
+
+**`zmail check` / `zmail review` — fast vs thorough:** Default is the **fast** path (category filter on candidates, cached LLM decisions when fingerprint matches, skip already-surfaced ids, `check` may **early-exit** IMAP forward sync when STATUS says nothing new). **`--thorough`** is the **slow/complete** path: no forward-sync early exit (`check` only), **all** categories, **rerun** the LLM (bypass cache), **include archived** mail in the window, **replay** (ignore prior surfaced dedup). Hidden compatibility flags `--force`, `--include-all`, `--reclassify`, `--replay` still work and combine with `OR` semantics against the same toggles.
+
+**Archived mail in the scan:** included when **`--thorough`** or **`--reclassify`** (hidden). **`search` / `read`** always see archived mail.
 
 See [`docs/ASK.md`](docs/ASK.md) for **`zmail ask`** vs primitives and for the **compose loop** (`zmail draft` → **`zmail draft edit`** / **`rewrite`** → **`zmail send <draft-id>`**). Publishable playbook: [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md).
 

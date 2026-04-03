@@ -73,9 +73,9 @@ zmail update [--since <spec>] [--foreground] [--force] [--text]
 zmail search <query> [--limit <n>] [--from <addr>] [--after <date>] [--before <date>]
                   [--include-noise] [--result-format auto|full|slim] [--timings]
                   [--json|--text]
-zmail check [--no-update] [--replay] [--reclassify] [--text] [--verbose]
-zmail review [<window>] [--since <window>] [--replay] [--reclassify] [--text]
-zmail archive <id>... [--undo] [--json] [--text]
+zmail check [<window>] [--since YYYY-MM-DD] [--no-update] [--thorough] [--text] [--verbose]
+zmail review [<window>] [--since <window>] [--thorough] [--text]
+zmail archive <id>... [--undo]
 zmail status [--json] [--imap]
 zmail stats
 zmail read <id> [--raw]         # or zmail message <id>

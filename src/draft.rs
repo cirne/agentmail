@@ -25,16 +25,20 @@ use crate::send::{
 pub enum DraftCmd {
     /// List drafts (JSON by default)
     List {
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         text: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
         #[arg(long, value_parser = ["auto", "full", "slim"])]
         result_format: Option<String>,
     },
     /// Show one draft
     View {
         id: String,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         text: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
         #[arg(long)]
         with_body: bool,
     },
@@ -52,8 +56,10 @@ pub enum DraftCmd {
         instruction: Option<String>,
         #[arg(long)]
         with_body: bool,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         text: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
     },
     /// Reply draft from indexed message
     Reply {
@@ -69,8 +75,10 @@ pub enum DraftCmd {
         body_file: Option<PathBuf>,
         #[arg(long)]
         with_body: bool,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         text: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
     },
     /// Forward draft from indexed message
     Forward {
@@ -86,8 +94,10 @@ pub enum DraftCmd {
         body_file: Option<PathBuf>,
         #[arg(long)]
         with_body: bool,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         text: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
     },
     /// LLM edit of an existing draft
     Edit {
@@ -96,8 +106,10 @@ pub enum DraftCmd {
         instruction: Vec<String>,
         #[arg(long)]
         with_body: bool,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         text: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
     },
     /// Replace draft body (and optional headers) without LLM
     Rewrite {
@@ -112,8 +124,10 @@ pub enum DraftCmd {
         body_words: Vec<String>,
         #[arg(long)]
         with_body: bool,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "json")]
         text: bool,
+        #[arg(long, conflicts_with = "text")]
+        json: bool,
     },
 }
 
@@ -136,6 +150,7 @@ pub fn run_draft(
     match cmd {
         DraftCmd::List {
             text,
+            json: _,
             result_format,
         } => {
             let pref = parse_result_format(result_format.as_deref());
@@ -173,6 +188,7 @@ pub fn run_draft(
         DraftCmd::View {
             id,
             text,
+            json: _,
             with_body,
         } => {
             let d = read_draft_in_data_dir(data_dir, &id).map_err(|e| e.to_string())?;
@@ -191,6 +207,7 @@ pub fn run_draft(
             instruction,
             with_body,
             text,
+            json: _,
         } => {
             let Some(to_s) = to.filter(|s| !s.trim().is_empty()) else {
                 return Err("zmail draft new requires --to".into());
@@ -271,6 +288,7 @@ pub fn run_draft(
             body_file,
             with_body,
             text,
+            json: _,
         } => {
             let Some(conn) = conn else {
                 return Err(
@@ -333,6 +351,7 @@ pub fn run_draft(
             body_file,
             with_body,
             text,
+            json: _,
         } => {
             let Some(conn) = conn else {
                 return Err(
@@ -384,10 +403,11 @@ pub fn run_draft(
             instruction,
             with_body,
             text,
+            json: _,
         } => {
             let instr = instruction
                 .into_iter()
-                .filter(|a| a != "--text" && a != "--with-body")
+                .filter(|a| a != "--text" && a != "--with-body" && a != "--json")
                 .collect::<Vec<_>>()
                 .join(" ")
                 .trim()
@@ -426,6 +446,7 @@ pub fn run_draft(
             body_words,
             with_body,
             text,
+            json: _,
         } => {
             let d = read_draft_in_data_dir(data_dir, &id).map_err(|e| e.to_string())?;
             let body = if let Some(ref p) = body_file {

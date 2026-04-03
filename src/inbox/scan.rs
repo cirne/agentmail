@@ -1,7 +1,10 @@
 //! Notable-mail LLM scan (`src/inbox/scan.ts`).
 
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 use std::time::Instant;
+
+use regex::Regex;
 
 use async_openai::config::OpenAIConfig;
 use async_openai::types::{
@@ -32,6 +35,10 @@ const DEFAULT_BATCH_SIZE: usize = 40;
 const DEFAULT_INBOX_PREFETCH_CAP: usize = 200;
 
 const NANO_MODEL: &str = "gpt-4.1-nano";
+
+/// List-management boilerplate (word boundary; avoids accidental substrings).
+static UNSUBSCRIBE_WORD: LazyLock<Regex> =
+    LazyLock::new(|| Regex::new(r"(?i)\bunsubscribe\b").expect("unsubscribe word regex"));
 
 /// Bounded prefetch: `min(2 * candidate_cap, 200)` — matches Node `inboxCandidatePrefetchLimit`.
 pub fn inbox_candidate_prefetch_limit(candidate_cap: usize) -> usize {
@@ -85,6 +92,7 @@ pub struct RunInboxScanOptions {
     pub cutoff_iso: String,
     pub include_all: bool,
     pub replay: bool,
+    /// When true (`--thorough` or `--reclassify`), candidate SQL includes archived rows so the LLM can re-decide.
     pub reapply_llm: bool,
     pub diagnostics: bool,
     pub rules_fingerprint: Option<String>,
@@ -306,11 +314,44 @@ fn strip_snippet_html(s: &str) -> String {
     out.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-fn fallback_action(candidate: &InboxCandidate) -> &'static str {
+/// True when `from_address` matches the configured account primary or an IMAP alias (normalized).
+fn is_from_owner(
+    from_address: &str,
+    owner_address: Option<&str>,
+    owner_aliases: &[String],
+) -> bool {
+    let Some(primary) = owner_address.map(str::trim).filter(|s| !s.is_empty()) else {
+        return false;
+    };
+    let from_norm = normalize_address(from_address.trim());
+    if from_norm.is_empty() {
+        return false;
+    }
+    if normalize_address(primary) == from_norm {
+        return true;
+    }
+    owner_aliases.iter().any(|a| {
+        let t = a.trim();
+        !t.is_empty() && normalize_address(t) == from_norm
+    })
+}
+
+/// Cheap bulk heuristics used when the model JSON is missing or invalid (`decision_source: fallback`).
+/// `note` explains which signal fired; `action` mirrors the same branch ordering as historical `fallback_action`.
+#[derive(Clone, Copy)]
+struct FallbackHeuristic {
+    action: &'static str,
+    note: &'static str,
+}
+
+fn evaluate_fallback_heuristic(candidate: &InboxCandidate) -> FallbackHeuristic {
     if candidate.category.as_deref().is_some_and(|category| {
         category == CATEGORY_LIST || is_default_excluded_category(Some(category))
     }) {
-        return "ignore";
+        return FallbackHeuristic {
+            action: "ignore",
+            note: "Heuristic: list or excluded provider category.",
+        };
     }
 
     let from_address = candidate.from_address.to_ascii_lowercase();
@@ -334,16 +375,121 @@ fn fallback_action(candidate: &InboxCandidate) -> &'static str {
         .iter()
         .any(|needle| snippet.contains(needle));
 
-    if is_noreply(&from_address)
-        || from_address.contains("newsletter")
-        || from_address.contains("linkedin")
-        || automated_subject
-        || automated_snippet
-    {
-        return "ignore";
+    if is_noreply(&from_address) {
+        return FallbackHeuristic {
+            action: "ignore",
+            note: "Heuristic: noreply-style sender address.",
+        };
+    }
+    if from_address.contains("newsletter") {
+        return FallbackHeuristic {
+            action: "ignore",
+            note: "Heuristic: sender address looks like newsletter traffic.",
+        };
+    }
+    if from_address.contains("linkedin") {
+        return FallbackHeuristic {
+            action: "ignore",
+            note: "Heuristic: sender address looks like LinkedIn traffic.",
+        };
+    }
+    if automated_subject {
+        return FallbackHeuristic {
+            action: "ignore",
+            note: "Heuristic: subject suggests marketing or automated bulk mail.",
+        };
+    }
+    if automated_snippet {
+        return FallbackHeuristic {
+            action: "ignore",
+            note: "Heuristic: snippet suggests list or marketing boilerplate (unsubscribe, view in browser, or preferences).",
+        };
     }
 
-    "ignore"
+    FallbackHeuristic {
+        action: "inform",
+        note: "Heuristic: ambiguous or non-bulk mail; defaulting to inform.",
+    }
+}
+
+fn fallback_action(candidate: &InboxCandidate) -> &'static str {
+    evaluate_fallback_heuristic(candidate).action
+}
+
+fn note_is_empty(note: &Option<String>) -> bool {
+    note.as_deref()
+        .map(str::trim)
+        .map(|s| s.is_empty())
+        .unwrap_or(true)
+}
+
+fn local_archive_signals_hint(
+    row: &RefreshPreviewRow,
+    owner_address: Option<&str>,
+    owner_aliases: &[String],
+) -> &'static str {
+    if is_from_owner(&row.from_address, owner_address, owner_aliases) {
+        return "message sent from your address";
+    }
+    if !row.matched_rule_ids.is_empty() {
+        return "user rule matched";
+    }
+    if is_default_excluded_category(row.category.as_deref()) {
+        return "excluded provider category";
+    }
+    if is_noreply(&row.from_address) {
+        return "noreply-style sender";
+    }
+    let subj = row.subject.to_ascii_lowercase();
+    let snip = row.snippet.to_ascii_lowercase();
+    if UNSUBSCRIBE_WORD.is_match(&subj) || UNSUBSCRIBE_WORD.is_match(&snip) {
+        return "unsubscribe word in subject or snippet";
+    }
+    "local archive conditions matched"
+}
+
+fn synthesize_default_note(candidate: &InboxCandidate, row: &RefreshPreviewRow) -> String {
+    match row.decision_source.as_deref() {
+        Some("model") => {
+            let a = row.action.as_deref().unwrap_or("inform");
+            format!("Model classified as {a} (no note).")
+        }
+        Some("rule") => {
+            if row.matched_rule_ids.is_empty() {
+                "Matched user rule.".to_string()
+            } else {
+                format!("Matched user rule(s): {}.", row.matched_rule_ids.join(", "))
+            }
+        }
+        Some("fallback") => evaluate_fallback_heuristic(candidate).note.to_string(),
+        Some("stripper") => "Ignore overruled; not bulk.".to_string(),
+        Some("cached") => "Cached decision from previous scan.".to_string(),
+        Some("heuristic") => "Heuristic classification (no note).".to_string(),
+        _ => format!(
+            "Classified as {}.",
+            row.action.as_deref().unwrap_or("inform")
+        ),
+    }
+}
+
+fn finalize_preview_note(
+    candidate: &InboxCandidate,
+    row: &mut RefreshPreviewRow,
+    owner_address: Option<&str>,
+    owner_aliases: &[String],
+) {
+    if note_is_empty(&row.note) {
+        row.note = Some(synthesize_default_note(candidate, row));
+    }
+    if row.action.as_deref() == Some("ignore")
+        && ignore_should_apply_local_archive(row, owner_address, owner_aliases)
+    {
+        let n = row.note.as_deref().unwrap_or("");
+        if !n.to_ascii_lowercase().contains("local archive") {
+            let hint = local_archive_signals_hint(row, owner_address, owner_aliases);
+            row.note = Some(format!("{n} Local archive: {hint}."));
+        }
+    }
 }
 
 fn parse_notable_response(
@@ -364,9 +510,10 @@ fn parse_notable_response(
             return Ok(batch
                 .iter()
                 .map(|candidate| {
+                    let h = evaluate_fallback_heuristic(candidate);
                     fallback_pick(
                         candidate,
-                        "Included by fallback because the model returned invalid JSON.",
+                        &format!("{} Fallback: model returned invalid JSON.", h.note),
                     )
                 })
                 .collect())
@@ -378,9 +525,10 @@ fn parse_notable_response(
             return Ok(batch
                 .iter()
                 .map(|candidate| {
+                    let h = evaluate_fallback_heuristic(candidate);
                     fallback_pick(
                         candidate,
-                        "Included by fallback because the model omitted results.",
+                        &format!("{} Fallback: model omitted results.", h.note),
                     )
                 })
                 .collect())
@@ -392,10 +540,14 @@ fn parse_notable_response(
             return Ok(batch
                 .iter()
                 .map(|candidate| {
+                    let h = evaluate_fallback_heuristic(candidate);
                     fallback_pick(
-                    candidate,
-                    "Included by fallback because the model returned a malformed results payload.",
-                )
+                        candidate,
+                        &format!(
+                            "{} Fallback: model returned a malformed results payload.",
+                            h.note
+                        ),
+                    )
                 })
                 .collect())
         }
@@ -448,11 +600,12 @@ fn parse_notable_response(
         if seen.contains(&candidate.message_id) {
             continue;
         }
+        let h = evaluate_fallback_heuristic(candidate);
         out.push(InboxNotablePick {
             message_id: candidate.message_id.clone(),
-            action: Some(fallback_action(candidate).into()),
+            action: Some(h.action.into()),
             matched_rule_ids: vec![],
-            note: Some("Included by fallback because no explicit decision was returned.".into()),
+            note: Some(format!("{} Model response omitted this message.", h.note)),
             decision_source: Some("fallback".into()),
         });
     }
@@ -492,27 +645,90 @@ fn surface_matches(mode: InboxSurfaceMode, action: &str) -> bool {
     }
 }
 
-fn to_preview_row(candidate: &InboxCandidate, pick: InboxNotablePick) -> RefreshPreviewRow {
+/// Whether an LLM `ignore` should set local `is_archived`.
+///
+/// Conservative: honor explicit user rules, provider category (sync metadata), noreply-style
+/// senders, unsubscribe boilerplate, or mail sent from the user's own address — not long
+/// marketing-keyword lists.
+fn ignore_should_apply_local_archive(
+    row: &RefreshPreviewRow,
+    owner_address: Option<&str>,
+    owner_aliases: &[String],
+) -> bool {
+    if is_from_owner(&row.from_address, owner_address, owner_aliases) {
+        return true;
+    }
+    if !row.matched_rule_ids.is_empty() {
+        return true;
+    }
+    if is_default_excluded_category(row.category.as_deref()) {
+        return true;
+    }
+    if is_noreply(&row.from_address) {
+        return true;
+    }
+    let subj = row.subject.to_ascii_lowercase();
+    let snip = row.snippet.to_ascii_lowercase();
+    UNSUBSCRIBE_WORD.is_match(&subj) || UNSUBSCRIBE_WORD.is_match(&snip)
+}
+
+fn to_preview_row(
+    candidate: &InboxCandidate,
+    pick: InboxNotablePick,
+    owner_address: Option<&str>,
+    owner_aliases: &[String],
+) -> RefreshPreviewRow {
     let attachments = if candidate.attachments.is_empty() {
         None
     } else {
         Some(list_to_preview_attachments(candidate.attachments.clone()))
     };
-    let action = normalize_action(pick.action.as_deref()).to_string();
-    RefreshPreviewRow {
+    let mut action = normalize_action(pick.action.as_deref()).to_string();
+    let mut decision_source = pick.decision_source;
+    let mut note = pick.note;
+
+    // If the model says `ignore` but cheap bulk heuristics would not, prefer `inform`.
+    // Uses the same signals as parser fallback — no domain-specific keywords.
+    if action == "ignore"
+        && pick.matched_rule_ids.is_empty()
+        && fallback_action(candidate) == "inform"
+        && !is_from_owner(&candidate.from_address, owner_address, owner_aliases)
+    {
+        action = "inform".into();
+        decision_source = Some("stripper".into());
+        let hint = "Ignore overruled; not bulk.";
+        note = Some(match note {
+            Some(n) if !n.trim().is_empty() => format!("{n} ({hint})"),
+            _ => hint.to_string(),
+        });
+    }
+
+    if is_from_owner(&candidate.from_address, owner_address, owner_aliases) {
+        action = "ignore".into();
+        decision_source = Some("heuristic".into());
+        let self_note = "Heuristic: message sent from your address; treating as ignore.";
+        note = Some(match note {
+            Some(n) if !n.trim().is_empty() => format!("{n} ({self_note})"),
+            _ => self_note.to_string(),
+        });
+    }
+
+    let mut row = RefreshPreviewRow {
         message_id: candidate.message_id.clone(),
         date: candidate.date.clone(),
         from_address: candidate.from_address.clone(),
         from_name: candidate.from_name.clone(),
         subject: candidate.subject.clone(),
         snippet: candidate.snippet.clone(),
-        note: pick.note,
+        note,
         attachments,
         category: candidate.category.clone(),
         action: Some(action),
         matched_rule_ids: pick.matched_rule_ids.clone(),
-        decision_source: pick.decision_source,
-    }
+        decision_source,
+    };
+    finalize_preview_note(candidate, &mut row, owner_address, owner_aliases);
+    row
 }
 
 fn load_inbox_candidates(
@@ -530,6 +746,11 @@ fn load_inbox_candidates(
     };
     let surfaced_sql = already_surfaced_filter_sql(options.surface_mode, options.replay);
     let fetch_limit = inbox_candidate_prefetch_limit(candidate_cap);
+    let archived_sql = if options.reapply_llm {
+        ""
+    } else {
+        " AND is_archived = 0"
+    };
 
     let sql = format!(
         "SELECT message_id, from_address, from_name, to_addresses, cc_addresses, subject, date,
@@ -538,8 +759,7 @@ fn load_inbox_candidates(
          category
          FROM messages
          WHERE date >= ?1
-           AND is_archived = 0
-           {category_sql}{surfaced_sql}
+           {archived_sql}{category_sql}{surfaced_sql}
          ORDER BY date DESC
          LIMIT ?2"
     );
@@ -605,6 +825,8 @@ async fn classify_candidates(
     candidates: &[InboxCandidate],
     batch_size: usize,
     classifier: &mut dyn InboxBatchClassifier,
+    owner_address: Option<&str>,
+    owner_aliases: &[String],
 ) -> Result<(Vec<RefreshPreviewRow>, u64), RunInboxScanError> {
     let by_id: HashMap<String, InboxCandidate> = candidates
         .iter()
@@ -633,7 +855,12 @@ async fn classify_candidates(
         let Some(candidate) = by_id.get(&pick.message_id) else {
             continue;
         };
-        rows.push(to_preview_row(candidate, pick));
+        rows.push(to_preview_row(
+            candidate,
+            pick,
+            owner_address,
+            owner_aliases,
+        ));
     }
     Ok((rows, llm_duration_ms))
 }
@@ -646,7 +873,14 @@ pub async fn preview_rule_impact(
 ) -> Result<RuleImpactPreview, RunInboxScanError> {
     let batch_size = options.batch_size.unwrap_or(DEFAULT_BATCH_SIZE);
     let candidates = load_inbox_candidates(conn, options)?;
-    let (rows, llm_duration_ms) = classify_candidates(&candidates, batch_size, classifier).await?;
+    let (rows, llm_duration_ms) = classify_candidates(
+        &candidates,
+        batch_size,
+        classifier,
+        options.owner_address.as_deref(),
+        &options.owner_aliases,
+    )
+    .await?;
     let matched = rows
         .into_iter()
         .filter(|row| {
@@ -698,6 +932,8 @@ pub async fn run_inbox_scan(
                     note: cached.note,
                     decision_source: Some("cached".into()),
                 },
+                options.owner_address.as_deref(),
+                &options.owner_aliases,
             );
             cached_by_id.insert(row.message_id.clone(), row);
         }
@@ -708,8 +944,14 @@ pub async fn run_inbox_scan(
         .cloned()
         .collect();
 
-    let (fresh_rows, llm_duration_ms) =
-        classify_candidates(&llm_candidates, batch_size, classifier).await?;
+    let (fresh_rows, llm_duration_ms) = classify_candidates(
+        &llm_candidates,
+        batch_size,
+        classifier,
+        options.owner_address.as_deref(),
+        &options.owner_aliases,
+    )
+    .await?;
 
     let mut fresh_by_id: HashMap<String, RefreshPreviewRow> = HashMap::new();
     for row in fresh_rows.iter().cloned() {
@@ -747,13 +989,35 @@ pub async fn run_inbox_scan(
         processed.push(row);
     }
 
-    // `ignore` leaves the unarchived working set immediately; search/read still see the message.
+    // Sync local archive to triage action: notify/inform stay (or return to) the working set;
+    // ignore archives only when broad safe-to-archive signals match.
     for row in &processed {
-        if row.action.as_deref() == Some("ignore") {
-            conn.execute(
-                "UPDATE messages SET is_archived = 1 WHERE message_id = ?1",
-                [&row.message_id],
-            )?;
+        let action = normalize_action(row.action.as_deref());
+        match action {
+            "notify" | "inform" => {
+                conn.execute(
+                    "UPDATE messages SET is_archived = 0 WHERE message_id = ?1",
+                    [&row.message_id],
+                )?;
+            }
+            "ignore" => {
+                if ignore_should_apply_local_archive(
+                    row,
+                    options.owner_address.as_deref(),
+                    &options.owner_aliases,
+                ) {
+                    conn.execute(
+                        "UPDATE messages SET is_archived = 1 WHERE message_id = ?1",
+                        [&row.message_id],
+                    )?;
+                } else {
+                    conn.execute(
+                        "UPDATE messages SET is_archived = 0 WHERE message_id = ?1",
+                        [&row.message_id],
+                    )?;
+                }
+            }
+            _ => {}
         }
     }
 
@@ -798,8 +1062,124 @@ mod tests {
         assert_eq!(inbox_candidate_prefetch_limit(150), 200);
     }
 
+    fn sample_preview_row(
+        from: &str,
+        subject: &str,
+        snippet: &str,
+        category: Option<&str>,
+        matched: &[&str],
+    ) -> RefreshPreviewRow {
+        RefreshPreviewRow {
+            message_id: "m".into(),
+            date: "2026-01-01T00:00:00Z".into(),
+            from_address: from.into(),
+            from_name: None,
+            subject: subject.into(),
+            snippet: snippet.into(),
+            note: None,
+            attachments: None,
+            category: category.map(str::to_string),
+            action: Some("ignore".into()),
+            matched_rule_ids: matched.iter().map(|s| (*s).to_string()).collect(),
+            decision_source: None,
+        }
+    }
+
     #[test]
-    fn parse_notable_invalid_json_defaults_to_inform() {
+    fn ignore_archive_honors_noreply() {
+        let row = sample_preview_row("no-reply@corp.com", "Hi", "body", None, &[]);
+        assert!(ignore_should_apply_local_archive(&row, None, &[]));
+    }
+
+    #[test]
+    fn ignore_archive_honors_unsubscribe_in_snippet() {
+        let row = sample_preview_row(
+            "news@corp.com",
+            "Weekly",
+            "Click here. Unsubscribe",
+            None,
+            &[],
+        );
+        assert!(ignore_should_apply_local_archive(&row, None, &[]));
+    }
+
+    #[test]
+    fn ignore_archive_skips_plain_personal_mail() {
+        let row = sample_preview_row(
+            "human@example.com",
+            "Flight update",
+            "Departure at 2pm",
+            None,
+            &[],
+        );
+        assert!(!ignore_should_apply_local_archive(&row, None, &[]));
+    }
+
+    #[test]
+    fn ignore_archive_honors_user_rule_ids() {
+        let row = sample_preview_row("human@example.com", "x", "y", None, &["r1"]);
+        assert!(ignore_should_apply_local_archive(&row, None, &[]));
+    }
+
+    #[test]
+    fn ignore_archive_honors_mail_from_owner_address() {
+        let row = sample_preview_row("LewisCirne@gmail.com", "Re: thread", "Thanks", None, &[]);
+        assert!(ignore_should_apply_local_archive(
+            &row,
+            Some("lewiscirne@gmail.com"),
+            &[]
+        ));
+    }
+
+    #[test]
+    fn ignore_archive_honors_mail_from_owner_alias() {
+        let row = sample_preview_row("work@company.com", "Hi", "Hey", None, &[]);
+        assert!(ignore_should_apply_local_archive(
+            &row,
+            Some("me@company.com"),
+            &["work@company.com".to_string()]
+        ));
+    }
+
+    #[test]
+    fn self_sent_forces_ignore_over_model_inform() {
+        let candidate = InboxCandidate {
+            message_id: "m1".into(),
+            date: "2025-01-01".into(),
+            from_address: "lewiscirne@gmail.com".into(),
+            from_name: None,
+            to_addresses: vec![],
+            cc_addresses: vec![],
+            subject: "Re: test".into(),
+            snippet: "body".into(),
+            category: None,
+            attachments: vec![],
+        };
+        let row = to_preview_row(
+            &candidate,
+            InboxNotablePick {
+                message_id: "m1".into(),
+                action: Some("inform".into()),
+                matched_rule_ids: vec![],
+                note: Some("model liked it".into()),
+                decision_source: Some("model".into()),
+            },
+            Some("lewiscirne@gmail.com"),
+            &[],
+        );
+        assert_eq!(row.action.as_deref(), Some("ignore"));
+        assert_eq!(row.decision_source.as_deref(), Some("heuristic"));
+        assert!(
+            row.note
+                .as_deref()
+                .is_some_and(|n| n.contains("sent from your address")),
+            "{:?}",
+            row.note
+        );
+    }
+
+    #[test]
+    fn parse_notable_invalid_json_fallback_prefers_inform_for_ambiguous_mail() {
         let batch = vec![InboxCandidate {
             message_id: "m1".into(),
             date: "2025-01-01".into(),
@@ -814,8 +1194,11 @@ mod tests {
         }];
         let r = parse_notable_response("not json", &batch).unwrap();
         assert_eq!(r.len(), 1);
-        assert_eq!(r[0].action.as_deref(), Some("ignore"));
+        assert_eq!(r[0].action.as_deref(), Some("inform"));
         assert_eq!(r[0].decision_source.as_deref(), Some("fallback"));
+        let n = r[0].note.as_deref().unwrap();
+        assert!(n.contains("Heuristic:"), "{n}");
+        assert!(n.contains("Fallback: model returned invalid JSON."), "{n}");
     }
 
     #[test]
@@ -864,6 +1247,8 @@ mod tests {
         }];
         let r = parse_notable_response("not json", &batch).unwrap();
         assert_eq!(r[0].action.as_deref(), Some("ignore"));
+        let n = r[0].note.as_deref().unwrap();
+        assert!(n.contains("list") || n.contains("excluded"), "{n}");
     }
 
     #[tokio::test]

@@ -129,7 +129,7 @@ fn archive_cli_sets_is_archived_json() {
     let bin = env!("CARGO_BIN_EXE_zmail");
     let out = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
-        .args(["archive", "<archive-cli@test>", "--json"])
+        .args(["archive", "<archive-cli@test>"])
         .output()
         .unwrap();
     assert!(
@@ -170,8 +170,9 @@ fn check_and_review_help_expose_new_cli_surface() {
     );
     let check_stdout = String::from_utf8_lossy(&check.stdout);
     assert!(check_stdout.contains("--no-update"));
-    assert!(check_stdout.contains("--replay"));
-    assert!(check_stdout.contains("--reclassify"));
+    assert!(check_stdout.contains("--thorough"));
+    assert!(!check_stdout.contains("--replay"));
+    assert!(!check_stdout.contains("--reclassify"));
     assert!(!check_stdout.contains("--refresh"));
 
     let review = Command::new(bin)
@@ -185,8 +186,9 @@ fn check_and_review_help_expose_new_cli_surface() {
         String::from_utf8_lossy(&review.stderr)
     );
     let review_stdout = String::from_utf8_lossy(&review.stdout);
-    assert!(review_stdout.contains("--replay"));
-    assert!(review_stdout.contains("--reclassify"));
+    assert!(review_stdout.contains("--thorough"));
+    assert!(!review_stdout.contains("--replay"));
+    assert!(!review_stdout.contains("--reclassify"));
     assert!(!review_stdout.contains("--refresh"));
     assert!(!review_stdout.contains("inbox replay"));
 }

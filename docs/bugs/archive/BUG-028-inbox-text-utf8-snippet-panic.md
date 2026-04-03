@@ -42,4 +42,4 @@ byte index 100 is not a char boundary; it is inside '…' (bytes 98..101) of `..
 ## References
 
 - Vision (agent-first): [VISION.md](../../VISION.md)
-- Related inbox behavior (different issue): [BUG-024](../BUG-024-inbox-scan-over-filters-misses-important-mail.md)
+- Related inbox behavior (different issue): [BUG-024](./BUG-024-inbox-scan-over-filters-misses-important-mail.md)
