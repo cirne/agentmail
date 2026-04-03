@@ -26,16 +26,9 @@ fn attachment_is_pdf(mime: &str, filename: &str) -> bool {
     mime_is_application_pdf(mime) || filename.to_lowercase().ends_with(".pdf")
 }
 
-/// `pdf-extract` depends on `cff-parser` and can **panic** on some real-world PDFs (fonts/encoding).
-/// Treat panics as extraction failure so CLI/MCP return the binary stub instead of aborting.
-fn extract_pdf_text_pdf_extract(bytes: &[u8]) -> Option<String> {
-    let owned = bytes.to_vec();
-    panic::catch_unwind(move || pdf_extract::extract_text_from_mem(&owned).ok()).unwrap_or_default()
-}
-
-/// Fallback when `pdf-extract` fails or returns empty. `pdf_oxide` tolerates many real-world PDFs
-/// that trip pure-Rust xref parsers (same class of files Node's pdf.js-based `@cedrugs/pdf-parse`
-/// handles). `extract_all_text` uses form-feed page breaks; normalize for readable markdown.
+/// PDF text via `pdf_oxide` (tolerates many real-world PDFs vs older pure-Rust extractors).
+/// `extract_all_text` uses form-feed page breaks; normalize for readability.
+/// Panics are caught so CLI/MCP return the binary stub instead of aborting.
 fn extract_pdf_text_pdf_oxide(bytes: &[u8]) -> Option<String> {
     let mut doc = pdf_oxide::PdfDocument::from_bytes(bytes.to_vec()).ok()?;
     let raw = doc.extract_all_text().ok()?;
@@ -47,20 +40,11 @@ fn extract_pdf_text_pdf_oxide(bytes: &[u8]) -> Option<String> {
     }
 }
 
-fn extract_pdf_text_pdf_oxide_safe(bytes: &[u8]) -> Option<String> {
+fn extract_pdf_text(bytes: &[u8]) -> Option<String> {
     let owned = bytes.to_vec();
     panic::catch_unwind(move || extract_pdf_text_pdf_oxide(&owned))
         .ok()
         .flatten()
-}
-
-fn extract_pdf_text(bytes: &[u8]) -> Option<String> {
-    if let Some(s) = extract_pdf_text_pdf_extract(bytes) {
-        if !s.trim().is_empty() {
-            return Some(s.trim().to_string());
-        }
-    }
-    extract_pdf_text_pdf_oxide_safe(bytes)
 }
 
 /// Best-effort text/markdown extraction by MIME type and filename (order aligned with Node; PDF also matches `.pdf` for wrong Content-Type).
