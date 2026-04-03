@@ -20,6 +20,18 @@ fn fixture(name: &str) -> PathBuf {
         .join(name)
 }
 
+fn minimal_pdf_hellopdf_bytes() -> Vec<u8> {
+    let (doc, page, layer) = PdfDocument::new("t", Mm(210.0), Mm(297.0), "L1");
+    let font = doc.add_builtin_font(BuiltinFont::Helvetica).unwrap();
+    {
+        let layer = doc.get_page(page).get_layer(layer);
+        layer.use_text("HelloPDF", 12.0, Mm(10.0), Mm(280.0), &font);
+    }
+    let mut buf = BufWriter::new(Vec::new());
+    doc.save(&mut buf).unwrap();
+    buf.into_inner().unwrap()
+}
+
 #[test]
 fn extract_csv_passthrough() {
     let p = fixture("sample-data.csv");
@@ -63,17 +75,24 @@ fn extract_xlsx_produces_csv() {
 
 #[test]
 fn extract_pdf_non_null() {
-    use printpdf::*;
-    let (doc, page, layer) = PdfDocument::new("t", Mm(210.0), Mm(297.0), "L1");
-    let font = doc.add_builtin_font(BuiltinFont::Helvetica).unwrap();
-    {
-        let layer = doc.get_page(page).get_layer(layer);
-        layer.use_text("HelloPDF", 12.0, Mm(10.0), Mm(280.0), &font);
-    }
-    let mut buf = BufWriter::new(Vec::new());
-    doc.save(&mut buf).unwrap();
-    let bytes = buf.into_inner().unwrap();
+    let bytes = minimal_pdf_hellopdf_bytes();
     let t = extract_attachment(&bytes, "application/pdf", "x.pdf").expect("pdf text");
+    assert!(t.contains("HelloPDF"));
+}
+
+#[test]
+fn extract_pdf_by_filename_when_mime_wrong() {
+    let bytes = minimal_pdf_hellopdf_bytes();
+    let t =
+        extract_attachment(&bytes, "application/octet-stream", "invoice.PDF").expect("pdf text");
+    assert!(t.contains("HelloPDF"));
+}
+
+#[test]
+fn extract_pdf_parameterized_mime_type() {
+    let bytes = minimal_pdf_hellopdf_bytes();
+    let t =
+        extract_attachment(&bytes, "application/pdf; name=\"x.pdf\"", "y.dat").expect("pdf text");
     assert!(t.contains("HelloPDF"));
 }
 

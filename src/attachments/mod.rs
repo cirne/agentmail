@@ -21,21 +21,56 @@ fn mime_is_application_pdf(mime: &str) -> bool {
         .unwrap_or(false)
 }
 
+/// PDF extract + markdown wrapping: correct MIME, or `.pdf` filename (common `application/octet-stream`).
+fn attachment_is_pdf(mime: &str, filename: &str) -> bool {
+    mime_is_application_pdf(mime) || filename.to_lowercase().ends_with(".pdf")
+}
+
 /// `pdf-extract` depends on `cff-parser` and can **panic** on some real-world PDFs (fonts/encoding).
 /// Treat panics as extraction failure so CLI/MCP return the binary stub instead of aborting.
-fn extract_pdf_text_safe(bytes: &[u8]) -> Option<String> {
+fn extract_pdf_text_pdf_extract(bytes: &[u8]) -> Option<String> {
     let owned = bytes.to_vec();
     panic::catch_unwind(move || pdf_extract::extract_text_from_mem(&owned).ok()).unwrap_or_default()
 }
 
-/// Best-effort text/markdown extraction by MIME type and filename (same order as Node extractors).
+/// Fallback when `pdf-extract` fails or returns empty. `pdf_oxide` tolerates many real-world PDFs
+/// that trip pure-Rust xref parsers (same class of files Node's pdf.js-based `@cedrugs/pdf-parse`
+/// handles). `extract_all_text` uses form-feed page breaks; normalize for readable markdown.
+fn extract_pdf_text_pdf_oxide(bytes: &[u8]) -> Option<String> {
+    let mut doc = pdf_oxide::PdfDocument::from_bytes(bytes.to_vec()).ok()?;
+    let raw = doc.extract_all_text().ok()?;
+    let t = raw.replace('\u{000C}', "\n\n").trim().to_string();
+    if t.is_empty() {
+        None
+    } else {
+        Some(t)
+    }
+}
+
+fn extract_pdf_text_pdf_oxide_safe(bytes: &[u8]) -> Option<String> {
+    let owned = bytes.to_vec();
+    panic::catch_unwind(move || extract_pdf_text_pdf_oxide(&owned))
+        .ok()
+        .flatten()
+}
+
+fn extract_pdf_text(bytes: &[u8]) -> Option<String> {
+    if let Some(s) = extract_pdf_text_pdf_extract(bytes) {
+        if !s.trim().is_empty() {
+            return Some(s.trim().to_string());
+        }
+    }
+    extract_pdf_text_pdf_oxide_safe(bytes)
+}
+
+/// Best-effort text/markdown extraction by MIME type and filename (order aligned with Node; PDF also matches `.pdf` for wrong Content-Type).
 pub fn extract_attachment(bytes: &[u8], mime: &str, filename: &str) -> Option<String> {
     let m = mime.to_lowercase();
     let name = filename.to_lowercase();
 
-    // PDF — MIME only (matches Node PdfExtractor)
-    if m == "application/pdf" {
-        return extract_pdf_text_safe(bytes);
+    // PDF — MIME or `.pdf` name (CLI: tolerate wrong Content-Type on real mail)
+    if attachment_is_pdf(mime, filename) {
+        return extract_pdf_text(bytes);
     }
 
     // DOCX
@@ -428,7 +463,7 @@ pub fn read_attachment_text(
         .map_err(|e| e.to_string())?
     };
 
-    if mime_is_application_pdf(&mime) {
+    if attachment_is_pdf(&mime, &filename) {
         Ok(format_pdf_attachment_markdown(&filename, &text))
     } else {
         Ok(text)

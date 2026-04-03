@@ -41,6 +41,7 @@ indicatif = "0.17"
 fs2 = "0.4.3"
 sha2 = "0.11.0"
 unicode-normalization = "0.1"
+pdf_oxide = "0.3"
 
 [dev-dependencies]
 printpdf = "0.7"

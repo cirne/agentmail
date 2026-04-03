@@ -264,6 +264,7 @@ ImapProvider (interface)
 - `@cedrugs/pdf-parse` (fork of pdf-parse v1 API): works in Node. The original `pdf-parse` v2 depends on `pdfjs-dist` which requires `DOMMatrix` / canvas — not available in headless Node.
 - `exceljs`: handles real `.xlsx` files correctly. The SheetJS community edition (`xlsx` v0.18.5) cannot parse modern XLSX files.
 - `mammoth`: converts DOCX to markdown natively, best-in-class for Word docs.
+- **Rust (primary prebuilt binary):** PDF text uses **pdf-extract** first, then **pdf_oxide** if that yields nothing or errors; MIME `application/pdf` (with parameters) or a `.pdf` filename selects the PDF path; panics from extractors are caught so the CLI/MCP can fall back or return a stub. Parity notes: [RUST_PORT.md](RUST_PORT.md).
 
 **Storage:**
 
