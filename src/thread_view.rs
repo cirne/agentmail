@@ -7,6 +7,7 @@ use serde::Serialize;
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadMessageRow {
+    #[serde(serialize_with = "crate::ids::serialize_string_id_for_json")]
     pub message_id: String,
     pub from_address: String,
     #[serde(skip_serializing_if = "Option::is_none")]

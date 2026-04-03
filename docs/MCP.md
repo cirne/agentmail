@@ -14,6 +14,7 @@ The MCP server provides programmatic access to zmail's search, message retrieval
 - **Protocol:** MCP (Model Context Protocol) via `@modelcontextprotocol/sdk`
 - **Data source:** Same SQLite database (`~/.zmail/data/zmail.db`) as CLI commands
 - **Index:** FTS5 full-text search
+- **IDs in JSON:** Responses use **bare** `messageId` / `threadId` strings (no surrounding `<>`). Tool parameters still accept **either** bare or RFC 5322 bracketed ids; the server normalizes on input.
 
 ## Starting the Server
 
@@ -82,20 +83,20 @@ Retrieve a single message by message ID. **Returns the same JSON shape as one el
 **Example (full, default):**
 ```json
 {
-  "messageId": "<abc123@example.com>"
+  "messageId": "abc123@example.com"
 }
 ```
 
 **Example (summary or custom body cap):**
 ```json
 {
-  "messageId": "<abc123@example.com>",
+  "messageId": "abc123@example.com",
   "detail": "summary"
 }
 ```
 ```json
 {
-  "messageId": "<abc123@example.com>",
+  "messageId": "abc123@example.com",
   "detail": "full",
   "maxBodyChars": 4000
 }
@@ -122,7 +123,7 @@ Retrieve multiple messages by message IDs. Use **detail** to control payload siz
 **Example (full):**
 ```json
 {
-  "messageIds": ["<abc123@example.com>", "<def456@example.com>"],
+  "messageIds": ["abc123@example.com", "def456@example.com"],
   "maxBodyChars": 500
 }
 ```
@@ -130,7 +131,7 @@ Retrieve multiple messages by message IDs. Use **detail** to control payload siz
 **Example (summary — for scanning):**
 ```json
 {
-  "messageIds": ["<id1>", "<id2>", "<id3>", "<id4>", "<id5>"],
+  "messageIds": ["id1", "id2", "id3", "id4", "id5"],
   "detail": "summary"
 }
 ```
@@ -150,7 +151,7 @@ Retrieve a full conversation thread by thread ID. Returns all messages in the th
 **Example:**
 ```json
 {
-  "threadId": "<thread-123>",
+  "threadId": "thread-123",
   "raw": false
 }
 ```
@@ -227,7 +228,7 @@ List all attachments for a message. Message IDs can be passed with or without an
 **Example:**
 ```json
 {
-  "messageId": "<abc123@example.com>"
+  "messageId": "abc123@example.com"
 }
 ```
 
@@ -319,17 +320,17 @@ Set or clear **`messages.is_archived`** for one or more messages (same semantics
 
 2. **Get full message:**
    ```json
-   { "tool": "get_message", "arguments": { "messageId": "<msg-id-from-search>" } }
+   { "tool": "get_message", "arguments": { "messageId": "msg-id-from-search" } }
    ```
 
 3. **Get full thread:**
    ```json
-   { "tool": "get_thread", "arguments": { "threadId": "<thread-id-from-search>" } }
+   { "tool": "get_thread", "arguments": { "threadId": "thread-id-from-search" } }
    ```
 
 4. **List attachments:**
    ```json
-   { "tool": "list_attachments", "arguments": { "messageId": "<msg-id>" } }
+   { "tool": "list_attachments", "arguments": { "messageId": "msg-id" } }
    ```
 
 5. **Read attachment:**
@@ -341,7 +342,7 @@ Set or clear **`messages.is_archived`** for one or more messages (same semantics
 
 1. **Create a draft** (reply example):
    ```json
-   { "tool": "create_draft", "arguments": { "kind": "reply", "sourceMessageId": "<id-from-search>", "body": "Thanks — sounds good.\n" } }
+   { "tool": "create_draft", "arguments": { "kind": "reply", "sourceMessageId": "id-from-search", "body": "Thanks — sounds good.\n" } }
    ```
 
 2. **List drafts** (get `draftId` if needed; optional `resultFormat: "full"` when many drafts):

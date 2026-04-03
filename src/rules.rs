@@ -286,7 +286,7 @@ Return strict JSON only:\n\
 {\n\
   \"results\": [\n\
     {\n\
-      \"messageId\": \"<exact id from input>\",\n\
+      \"messageId\": \"exact messageId from each candidate (same string as in the input)\",\n\
       \"action\": \"notify|inform|ignore\",\n\
       \"matchedRuleIds\": [\"<rule id>\", \"<rule id>\"]\n\
     }\n\

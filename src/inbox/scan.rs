@@ -18,6 +18,7 @@ use rusqlite::Connection;
 use serde_json::json;
 
 use crate::attachments::{list_attachments_for_message, AttachmentListRow};
+use crate::ids::message_id_for_json_output;
 use crate::inbox::state::{
     already_surfaced_filter_sql, load_cached_inbox_decisions, persist_inbox_decisions,
     record_inbox_scan, InboxSurfaceMode,
@@ -208,7 +209,10 @@ impl InboxBatchClassifier for OpenAiInboxClassifier {
                     _ => c.from_address.clone(),
                 };
                 let mut o = serde_json::Map::new();
-                o.insert("messageId".into(), json!(c.message_id));
+                o.insert(
+                    "messageId".into(),
+                    json!(message_id_for_json_output(&c.message_id)),
+                );
                 o.insert("date".into(), json!(c.date));
                 o.insert("fromAddress".into(), json!(c.from_address));
                 o.insert("fromName".into(), json!(c.from_name));
@@ -493,6 +497,20 @@ fn finalize_preview_note(
     }
 }
 
+/// Map model `messageId` (bare or bracketed) to the candidate's canonical stored id.
+fn canonical_candidate_message_id<'a>(batch: &'a [InboxCandidate], mid: &str) -> Option<&'a str> {
+    let t = mid.trim();
+    for b in batch {
+        if b.message_id == t {
+            return Some(b.message_id.as_str());
+        }
+        if message_id_for_json_output(&b.message_id) == t {
+            return Some(b.message_id.as_str());
+        }
+    }
+    None
+}
+
 fn parse_notable_response(
     text: &str,
     batch: &[InboxCandidate],
@@ -504,7 +522,6 @@ fn parse_notable_response(
         note: Some(note.into()),
         decision_source: Some("fallback".into()),
     };
-    let allowed: HashSet<&str> = batch.iter().map(|b| b.message_id.as_str()).collect();
     let parsed: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
         Err(_) => {
@@ -557,9 +574,9 @@ fn parse_notable_response(
     for item in arr {
         let mid = item.get("messageId").and_then(|x| x.as_str());
         let Some(mid) = mid else { continue };
-        if !allowed.contains(mid) {
+        let Some(canonical_mid) = canonical_candidate_message_id(batch, mid) else {
             continue;
-        }
+        };
         let action = item
             .get("action")
             .and_then(|x| x.as_str())
@@ -589,7 +606,7 @@ fn parse_notable_response(
             Some("rule".to_string())
         };
         out.push(InboxNotablePick {
-            message_id: mid.to_string(),
+            message_id: canonical_mid.to_string(),
             action,
             matched_rule_ids,
             note,

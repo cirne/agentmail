@@ -2,6 +2,8 @@
 
 use serde_json::{json, Value};
 
+use crate::ids::message_id_for_json_output;
+
 use super::types::SearchResult;
 
 /// Above this many results, `auto` chooses slim.
@@ -43,7 +45,10 @@ pub fn resolve_search_json_format(
 /// Slim row: messageId, subject, fromName?, date (no attachments in Rust search yet).
 pub fn search_result_to_slim_json_row(r: &SearchResult) -> Value {
     let mut out = serde_json::Map::new();
-    out.insert("messageId".into(), json!(r.message_id));
+    out.insert(
+        "messageId".into(),
+        json!(message_id_for_json_output(&r.message_id)),
+    );
     out.insert("subject".into(), json!(r.subject));
     out.insert("date".into(), json!(r.date));
     if let Some(ref n) = r.from_name {
@@ -105,7 +110,7 @@ mod tests {
             rank: -1.0,
         };
         let v = search_result_to_slim_json_row(&r);
-        assert_eq!(v["messageId"], "<a@b>");
+        assert_eq!(v["messageId"], "a@b");
         assert_eq!(v["subject"], "Hi");
         assert_eq!(v["date"], "2026-01-01T00:00:00.000Z");
         assert_eq!(v["fromName"], "X");

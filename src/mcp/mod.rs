@@ -9,7 +9,7 @@ use crate::attachments::{list_attachments_for_message, read_attachment_text};
 use crate::collect_stats;
 use crate::config::{load_config, resolve_openai_api_key, LoadConfigOptions};
 use crate::draft::DRAFT_NEW_PLACEHOLDER_BODY;
-use crate::ids::{resolve_message_id, resolve_thread_id};
+use crate::ids::{message_id_for_json_output, resolve_message_id, resolve_thread_id};
 use crate::inbox::archive_messages_locally;
 use crate::mail_category::parse_category_list;
 use crate::mailbox::provider_archive_message;
@@ -381,7 +381,7 @@ fn tool_call(
                         if seen.insert(row.thread_id.clone()) {
                             let rows = list_thread_messages(conn, &row.thread_id)?;
                             threads.push(json!({
-                                "threadId": row.thread_id,
+                                "threadId": message_id_for_json_output(&row.thread_id),
                                 "messages": rows,
                             }));
                         }
@@ -718,7 +718,7 @@ fn tool_call(
                     .map_err(|e| e.to_string())?;
                 let provider = provider_archive_message(&cfg, conn, &mid, undo);
                 results.push(json!({
-                    "messageId": mid,
+                    "messageId": message_id_for_json_output(&mid),
                     "local": { "ok": local_ok > 0, "isArchived": archived },
                     "providerMutation": provider,
                 }));

@@ -10,7 +10,9 @@ use std::path::{Path, PathBuf};
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReadMessageJson<'a> {
+    #[serde(serialize_with = "crate::ids::serialize_borrowed_str_id_for_json")]
     pub message_id: &'a str,
+    #[serde(serialize_with = "crate::ids::serialize_borrowed_str_id_for_json")]
     pub thread_id: &'a str,
     pub from: &'a MailboxEntry,
     pub subject: &'a str,
@@ -19,9 +21,15 @@ pub struct ReadMessageJson<'a> {
     pub cc: &'a [MailboxEntry],
     pub bcc: &'a [MailboxEntry],
     pub reply_to: &'a [MailboxEntry],
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(
+        skip_serializing_if = "Option::is_none",
+        serialize_with = "crate::ids::serialize_option_str_id_for_json"
+    )]
     pub in_reply_to: Option<&'a str>,
-    #[serde(skip_serializing_if = "<[_]>::is_empty")]
+    #[serde(
+        skip_serializing_if = "<[_]>::is_empty",
+        serialize_with = "crate::ids::serialize_borrowed_slice_str_ids_for_json"
+    )]
     pub references: &'a [String],
     pub recipients_disclosed: bool,
     pub body: &'a str,

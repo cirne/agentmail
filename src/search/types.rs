@@ -21,7 +21,9 @@ pub struct SearchOptions {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
+    #[serde(serialize_with = "crate::ids::serialize_string_id_for_json")]
     pub message_id: String,
+    #[serde(serialize_with = "crate::ids::serialize_string_id_for_json")]
     pub thread_id: String,
     pub from_address: String,
     pub from_name: Option<String>,

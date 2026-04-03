@@ -1,5 +1,6 @@
 //! Markdown drafts with YAML frontmatter in `data/drafts/`.
 
+use crate::ids::message_id_for_json_output;
 use serde::{Deserialize, Deserializer, Serialize};
 use serde_json::json;
 use std::fs;
@@ -341,19 +342,22 @@ pub fn draft_file_to_json(d: &DraftFile, with_body: bool) -> serde_json::Value {
         m.insert("subject".into(), json!(s));
     }
     if let Some(ref x) = d.meta.in_reply_to {
-        m.insert("inReplyTo".into(), json!(x));
+        m.insert("inReplyTo".into(), json!(message_id_for_json_output(x)));
     }
     if let Some(ref x) = d.meta.references {
         m.insert("references".into(), json!(x));
     }
     if let Some(ref x) = d.meta.source_message_id {
-        m.insert("sourceMessageId".into(), json!(x));
+        m.insert(
+            "sourceMessageId".into(),
+            json!(message_id_for_json_output(x)),
+        );
     }
     if let Some(ref x) = d.meta.thread_id {
-        m.insert("threadId".into(), json!(x));
+        m.insert("threadId".into(), json!(message_id_for_json_output(x)));
     }
     if let Some(ref x) = d.meta.forward_of {
-        m.insert("forwardOf".into(), json!(x));
+        m.insert("forwardOf".into(), json!(message_id_for_json_output(x)));
     }
     if with_body {
         m.insert("body".into(), json!(d.body));

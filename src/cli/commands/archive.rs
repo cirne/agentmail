@@ -1,6 +1,6 @@
 use crate::cli::util::load_cfg;
 use crate::cli::CliResult;
-use zmail::{archive_messages_locally, db, provider_archive_message};
+use zmail::{archive_messages_locally, db, message_id_for_json_output, provider_archive_message};
 
 pub(crate) fn run_archive(message_ids: Vec<String>, undo: bool) -> CliResult {
     let cfg = load_cfg();
@@ -11,7 +11,7 @@ pub(crate) fn run_archive(message_ids: Vec<String>, undo: bool) -> CliResult {
         let local_ok = archive_messages_locally(&conn, std::slice::from_ref(mid), archived)?;
         let provider = provider_archive_message(&cfg, &conn, mid, undo);
         results.push(serde_json::json!({
-            "messageId": mid,
+            "messageId": message_id_for_json_output(mid),
             "local": { "ok": local_ok > 0, "isArchived": archived },
             "providerMutation": provider,
         }));

@@ -26,7 +26,10 @@ pub struct RefreshPreviewAttachment {
 /// Subset of [`RefreshPreviewRow`] for default `check`/`review` JSON (no `--thorough` / `--diagnostics` / etc.).
 #[derive(Debug, Clone, Serialize)]
 struct InboxPreviewRowSlim {
-    #[serde(rename = "messageId")]
+    #[serde(
+        rename = "messageId",
+        serialize_with = "crate::ids::serialize_string_id_for_json"
+    )]
     message_id: String,
     date: String,
     #[serde(rename = "fromAddress")]
@@ -67,7 +70,10 @@ fn preview_rows_json_value(rows: &[RefreshPreviewRow], full_detail: bool) -> Val
 
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct RefreshPreviewRow {
-    #[serde(rename = "messageId")]
+    #[serde(
+        rename = "messageId",
+        serialize_with = "crate::ids::serialize_string_id_for_json"
+    )]
     pub message_id: String,
     pub date: String,
     #[serde(rename = "fromAddress")]

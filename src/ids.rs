@@ -1,6 +1,76 @@
 //! Message-ID and thread-ID normalization for DB lookups (RFC 5322 angle brackets).
+//!
+//! **Storage / resolve:** rows keep bracketed `msg-id` form where applicable; [`normalize_message_id`]
+//! and [`message_id_lookup_keys`] support lookups.
+//! **JSON output:** [`message_id_for_json_output`] strips one pair of surrounding `<>` for CLI/MCP/agent ergonomics.
 
 use rusqlite::{Connection, OptionalExtension};
+use serde::{Serialize, Serializer};
+
+/// Strip one pair of surrounding angle brackets for JSON/API output (RFC 5322 `msg-id` wire form).
+/// Bare strings and odd shapes are returned trimmed; `<<id>>` becomes `<id>` after one strip.
+pub fn message_id_for_json_output(id: &str) -> String {
+    let t = id.trim();
+    if t.len() >= 2 && t.starts_with('<') && t.ends_with('>') {
+        t[1..t.len() - 1].to_string()
+    } else {
+        t.to_string()
+    }
+}
+
+/// Serde `serialize_with` for `String` fields (`message_id`, `thread_id`, etc.).
+pub fn serialize_string_id_for_json<S>(id: &str, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    message_id_for_json_output(id).serialize(serializer)
+}
+
+/// Serde `serialize_with` for `&str` / `&'a str` fields (`serialize_with` passes `&&str`).
+pub fn serialize_borrowed_str_id_for_json<S>(id: &&str, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    message_id_for_json_output(id).serialize(serializer)
+}
+
+/// Serde `serialize_with` for `&[String]` fields (`serialize_with` passes `&&[String]`).
+pub fn serialize_borrowed_slice_str_ids_for_json<S>(
+    ids: &&[String],
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serialize_vec_str_ids_for_json(ids, serializer)
+}
+
+/// Serde `serialize_with` for `Option<&str>` (e.g. `in_reply_to`).
+pub fn serialize_option_str_id_for_json<S>(
+    id: &Option<&str>,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    match id {
+        None => serializer.serialize_none(),
+        Some(s) => serializer.serialize_some(&message_id_for_json_output(s)),
+    }
+}
+
+/// Serde `serialize_with` for `&[String]` (e.g. `references` msg-id list).
+pub fn serialize_vec_str_ids_for_json<S>(ids: &[String], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    use serde::ser::SerializeSeq;
+    let mut seq = serializer.serialize_seq(Some(ids.len()))?;
+    for id in ids {
+        seq.serialize_element(&message_id_for_json_output(id))?;
+    }
+    seq.end()
+}
 
 /// Normalize for display / single-form APIs (ask tools, send): prefer bracketed storage.
 pub fn normalize_message_id(id: &str) -> String {
@@ -126,6 +196,20 @@ mod tests {
         assert_eq!(normalize_message_id("a@b"), "<a@b>");
         assert_eq!(normalize_message_id("<a@b>"), "<a@b>");
         assert_eq!(normalize_message_id("  "), "  ");
+    }
+
+    #[test]
+    fn message_id_for_json_output_strips_one_pair() {
+        assert_eq!(message_id_for_json_output("<a@b>"), "a@b");
+        assert_eq!(message_id_for_json_output("  <a@b>  "), "a@b");
+        assert_eq!(message_id_for_json_output("a@b"), "a@b");
+        assert_eq!(message_id_for_json_output(""), "");
+        assert_eq!(message_id_for_json_output("mid-a"), "mid-a");
+    }
+
+    #[test]
+    fn message_id_for_json_output_double_brackets_one_layer() {
+        assert_eq!(message_id_for_json_output("<<a@b>>"), "<a@b>");
     }
 
     #[test]

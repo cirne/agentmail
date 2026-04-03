@@ -186,8 +186,8 @@ Hello.";
         String::from_utf8_lossy(&out.stderr)
     );
     let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
-    assert_eq!(v["messageId"], "<mid-json@test>");
-    assert!(v.get("threadId").is_some());
+    assert_eq!(v["messageId"], "mid-json@test");
+    assert_eq!(v["threadId"], "mid-json@test");
     assert_eq!(v["bcc"].as_array().unwrap().len(), 1);
     assert_eq!(v["bcc"][0]["address"], "dave@d.com");
     assert_eq!(v["inReplyTo"], "parent@x.com");

@@ -65,6 +65,7 @@ These are **acceptable by default** unless we explicitly decide to match Node.
 | **Async model** | Library and CLI use **synchronous** SQLite and blocking IMAP in many paths — simpler than forcing full async end-to-end; differs from Node’s async `SqliteDatabase` facade but matches “blocking is OK” for a CLI tool. |
 | **Nickname map (`who`)** | Rust intentionally ships a smaller embedded map (`src/search/nicknames.rs`) than the old TypeScript reference unless/until we choose a shared data artifact. Do not blindly port the large Node list; see [BUG-026](bugs/BUG-026-who-nicknames-i18n-and-query-contract.md). |
 | **Wizard UX** | **inquire** + **indicatif** vs Node line prompts — intentional UX upgrade; flags and config shape match Node. |
+| **JSON `messageId` / `threadId`** | Rust CLI and MCP emit **bare** ids (no RFC 5322 `<>`). The Node reference package may still show bracketed strings in JSON until aligned; both stacks accept bracketed or bare on input. |
 
 “Better” is not automatic: differences must still pass **real-mailbox validation** and documented agent contracts ([MCP.md](MCP.md), CLI help).
 

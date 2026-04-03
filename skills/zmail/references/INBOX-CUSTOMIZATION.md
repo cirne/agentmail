@@ -2,6 +2,8 @@
 
 This companion to [`../SKILL.md`](../SKILL.md) explains how to make **`zmail check`** and **`zmail review`** smarter over time by giving them **durable memory** about what matters to the mailbox owner.
 
+**Cadence (current behavior):** run **`zmail check`** on a **short loop** (e.g. every 1–5 minutes) to surface **`notify`** only. Run **`zmail review`** **periodically or when asked** to survey the **unarchived** time window with full **notify / inform / ignore** triage (all categories; **`review`** does not sync by default—run **`zmail update`** first when freshness matters). Use **`zmail archive`** when mail no longer needs focused attention; **`search` / `read` / `ask`** still see archived mail. Full table: [Inbox workflow](../SKILL.md#inbox-workflow) in **`SKILL.md`**.
+
 The core idea: do not force the agent to rediscover the same preferences on every pass. Keep a small, explicit ruleset plus a little background context so inbox triage gets better with use.
 
 ---

@@ -41,7 +41,7 @@ pub use db::{
     apply_schema, journal_mode, list_user_tables, open_file, open_memory, DbError, SCHEMA_VERSION,
 };
 pub use ids::{
-    message_id_lookup_keys, normalize_message_id, resolve_message_id,
+    message_id_for_json_output, message_id_lookup_keys, normalize_message_id, resolve_message_id,
     resolve_message_id_and_raw_path, resolve_message_id_thread_and_raw_path, resolve_thread_id,
 };
 pub use inbox::{

@@ -32,6 +32,7 @@ pub struct SendSimpleFields {
 #[serde(rename_all = "camelCase")]
 pub struct SendResult {
     pub ok: bool,
+    #[serde(serialize_with = "crate::ids::serialize_string_id_for_json")]
     pub message_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub smtp_response: Option<String>,

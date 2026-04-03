@@ -6,7 +6,7 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 use serde_json::{json, Value};
 
-use crate::ids::{resolve_message_id, resolve_thread_id};
+use crate::ids::{message_id_for_json_output, resolve_message_id, resolve_thread_id};
 use crate::mail_category::parse_category_list;
 use crate::search::{search_with_meta, SearchOptions, SearchResult};
 use crate::sync::{parse_read_full, parse_since_to_date};
@@ -26,7 +26,9 @@ fn parse_date_param(date_str: Option<&str>) -> Option<String> {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct MetadataSearchRow<'a> {
+    #[serde(serialize_with = "crate::ids::serialize_borrowed_str_id_for_json")]
     message_id: &'a str,
+    #[serde(serialize_with = "crate::ids::serialize_borrowed_str_id_for_json")]
     thread_id: &'a str,
     from_address: &'a str,
     from_name: Option<&'a str>,
@@ -244,7 +246,7 @@ pub fn execute_search_tool(
                     .iter()
                     .map(|thread_row| {
                         json!({
-                            "messageId": thread_row.message_id,
+                            "messageId": message_id_for_json_output(&thread_row.message_id),
                             "fromAddress": thread_row.from_address,
                             "fromName": thread_row.from_name,
                             "subject": thread_row.subject,
@@ -253,7 +255,7 @@ pub fn execute_search_tool(
                     })
                     .collect();
                 threads.push(json!({
-                    "threadId": row.thread_id,
+                    "threadId": message_id_for_json_output(&row.thread_id),
                     "messages": messages,
                 }));
             }
@@ -277,17 +279,23 @@ pub fn execute_get_thread_headers_tool(
 ) -> rusqlite::Result<String> {
     let thread_id = args.get("threadId").and_then(|v| v.as_str()).unwrap_or("");
     let Some(normalized) = resolve_thread_id(conn, thread_id)? else {
-        return Ok(json!({ "error": "Thread not found", "threadId": thread_id }).to_string());
+        return Ok(
+            json!({ "error": "Thread not found", "threadId": message_id_for_json_output(thread_id) })
+                .to_string(),
+        );
     };
     let rows = list_thread_messages(conn, &normalized)?;
     if rows.is_empty() {
-        return Ok(json!({ "error": "Thread not found", "threadId": normalized }).to_string());
+        return Ok(
+            json!({ "error": "Thread not found", "threadId": message_id_for_json_output(&normalized) })
+                .to_string(),
+        );
     }
     let messages: Vec<Value> = rows
         .iter()
         .map(|r| {
             json!({
-                "messageId": r.message_id,
+                "messageId": message_id_for_json_output(&r.message_id),
                 "fromAddress": r.from_address,
                 "fromName": r.from_name,
                 "subject": r.subject,
@@ -296,7 +304,7 @@ pub fn execute_get_thread_headers_tool(
         })
         .collect();
     Ok(json!({
-        "threadId": normalized,
+        "threadId": message_id_for_json_output(&normalized),
         "messages": messages,
     })
     .to_string())
@@ -377,7 +385,7 @@ pub fn execute_get_message_tool(
             if raw || detail == "raw" {
                 return Ok(json!({
                     "error": format!("read raw: {e}"),
-                    "messageId": mid,
+                    "messageId": message_id_for_json_output(&mid),
                 })
                 .to_string());
             }
@@ -390,8 +398,8 @@ pub fn execute_get_message_tool(
         let bytes = bytes_opt.expect("raw implies bytes read ok");
         let b64 = Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
         return Ok(json!({
-            "messageId": mid,
-            "threadId": thread_id,
+            "messageId": message_id_for_json_output(&mid),
+            "threadId": message_id_for_json_output(&thread_id),
             "fromAddress": from_address,
             "fromName": from_name,
             "subject": subject,
@@ -401,8 +409,12 @@ pub fn execute_get_message_tool(
             "cc": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.cc)),
             "bcc": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.bcc)),
             "replyTo": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.reply_to)),
-            "inReplyTo": parsed_opt.as_ref().and_then(|p| p.in_reply_to.as_ref()),
-            "references": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.references)),
+            "inReplyTo": parsed_opt.as_ref().and_then(|p| p.in_reply_to.as_ref().map(|s| message_id_for_json_output(s))),
+            "references": parsed_opt.as_ref().map_or(json!([]), |p| {
+                let refs: Vec<String> =
+                    p.references.iter().map(|s| message_id_for_json_output(s)).collect();
+                json!(refs)
+            }),
             "recipientsDisclosed": parsed_opt.as_ref().map(|p| p.recipients_disclosed).unwrap_or(false),
             "attachments": attachments,
         })
@@ -416,8 +428,8 @@ pub fn execute_get_message_tool(
     };
 
     Ok(json!({
-        "messageId": mid,
-        "threadId": thread_id,
+        "messageId": message_id_for_json_output(&mid),
+        "threadId": message_id_for_json_output(&thread_id),
         "fromAddress": from_address,
         "fromName": from_name,
         "subject": subject,
@@ -426,8 +438,11 @@ pub fn execute_get_message_tool(
         "cc": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.cc)),
         "bcc": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.bcc)),
         "replyTo": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.reply_to)),
-        "inReplyTo": parsed_opt.as_ref().and_then(|p| p.in_reply_to.as_ref()),
-        "references": parsed_opt.as_ref().map_or(json!([]), |p| json!(p.references)),
+        "inReplyTo": parsed_opt.as_ref().and_then(|p| p.in_reply_to.as_ref().map(|s| message_id_for_json_output(s))),
+        "references": parsed_opt.as_ref().map_or(json!([]), |p| {
+            let refs: Vec<String> = p.references.iter().map(|s| message_id_for_json_output(s)).collect();
+            json!(refs)
+        }),
         "recipientsDisclosed": parsed_opt.as_ref().map(|p| p.recipients_disclosed).unwrap_or(false),
         "content": { "markdown": body_for_out },
         "attachments": attachments,
