@@ -54,6 +54,7 @@ This file tracks feedback files from `../ztest/feedback/` that have been process
 | `ux-cli-agent-friction-and-read-missing-recipients.md` | 2026-04-01 | Created bugs | [BUG-034](bugs/archive/BUG-034-cli-json-text-flags-inconsistent-across-subcommands.md) (CLI `--json`/`--text` friction); [BUG-035](bugs/archive/BUG-035-read-omits-to-cc-bcc-and-threading-headers.md) (`read` omits To/CC/BCC / threading headers) |
 | `bug-check-ignores-same-day-flight.md` | 2026-04-03 | Matched existing bug; extended context | [BUG-024](bugs/archive/BUG-024-inbox-scan-over-filters-misses-important-mail.md) — `zmail check` same-day NetJets tail notification classified `ignore`; Rust prompt/refs updated |
 | `verified/bug-check-ignores-same-day-flight.md` | 2026-04-03 | BUG-024 closed after verification | [BUG-024](bugs/archive/BUG-024-inbox-scan-over-filters-misses-important-mail.md) — attempt 3: stripper overrule → `inform` for NetJets tails; status **Closed — verified** |
+| `bug-attachment-not-detected-non-ascii-filename.md` | 2026-04-03 | Created bug; fixed | [BUG-036 archived](bugs/archive/BUG-036-pdf-attachments-non-ascii-filename-mime-parse.md) — UTF-8 `filename=` + fallback names; tests + Node parity |
 
 ---
 

@@ -281,8 +281,8 @@ payload-{i}\r\n\
     let count2: i64 = c2
         .query_row("SELECT COUNT(*) FROM attachments", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(count1, 0);
-    assert_eq!(count2, 0);
+    assert_eq!(count1, 50);
+    assert_eq!(count2, 50);
 
     let fts1 = search_with_meta(
         &c1,

@@ -1,19 +1,26 @@
 //! MIME parse → structured message (mirrors `src/sync/parse-message.ts`).
 
-use mail_parser::{Address, Message, MessageParser, MimeHeaders, PartType};
+use std::collections::HashSet;
+
+use mail_parser::{Address, Message, MessageParser, MessagePart, MimeHeaders, PartType};
 use serde::Serialize;
 
 use crate::mail_category::{CATEGORY_AUTOMATED, CATEGORY_BULK, CATEGORY_LIST, CATEGORY_SPAM};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ParseMessageOptions {
+    /// When false, skip attachment collection entirely (fast index path).
     pub include_attachments: bool,
+    /// When true, fill `ParsedAttachment::content` from MIME bodies. When false, only
+    /// `filename`, `mime_type`, and `size` are set (sync / rebuild index metadata).
+    pub include_attachment_bytes: bool,
 }
 
 impl Default for ParseMessageOptions {
     fn default() -> Self {
         Self {
             include_attachments: true,
+            include_attachment_bytes: false,
         }
     }
 }
@@ -199,46 +206,149 @@ fn classify_category(msg: &Message<'_>) -> Option<String> {
     None
 }
 
-fn collect_attachments(msg: &Message<'_>) -> Vec<ParsedAttachment> {
+/// When `filename` / `name` are missing (common for `Content-Disposition: attachment` without
+/// parameters), still surface the part so agents can read it — matches BUG-036 / Node fallback.
+fn fallback_attachment_filename(mime_type: &str, attachment_index: usize) -> String {
+    let sub = mime_type
+        .split_once('/')
+        .map(|(_, s)| s.to_ascii_lowercase())
+        .unwrap_or_else(|| "octet-stream".to_string());
+    let ext = match sub.as_str() {
+        "pdf" => "pdf",
+        "zip" => "zip",
+        "gzip" => "gz",
+        "msword" => "doc",
+        "vnd.openxmlformats-officedocument.wordprocessingml.document" => "docx",
+        "vnd.openxmlformats-officedocument.spreadsheetml.sheet" => "xlsx",
+        "vnd.openxmlformats-officedocument.presentationml.presentation" => "pptx",
+        "csv" => "csv",
+        "plain" => "txt",
+        "html" => "html",
+        "octet-stream" => "bin",
+        s if s.len() <= 32
+            && s.chars()
+                .all(|c| c.is_alphanumeric() || c == '-' || c == '.') =>
+        {
+            let t = s.trim_matches('.');
+            if t.is_empty() {
+                "bin"
+            } else {
+                t
+            }
+        }
+        _ => "bin",
+    };
+    format!("attachment-{}.{}", attachment_index + 1, ext)
+}
+
+fn parsed_attachment_from_part(
+    part: &MessagePart<'_>,
+    attachment_index: usize,
+    include_bytes: bool,
+) -> Option<ParsedAttachment> {
+    if part
+        .content_disposition()
+        .map(|d| d.is_inline())
+        .unwrap_or(false)
+    {
+        return None;
+    }
+    let mime_type = part
+        .content_type()
+        .map(|ct| {
+            ct.c_subtype
+                .as_ref()
+                .map(|st| format!("{}/{}", ct.c_type, st))
+                .unwrap_or_else(|| ct.c_type.to_string())
+        })
+        .unwrap_or_else(|| "application/octet-stream".into());
+    let filename = part
+        .attachment_name()
+        .map(str::to_string)
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| fallback_attachment_filename(&mime_type, attachment_index));
+    let (size, content) = match &part.body {
+        PartType::Text(t) => {
+            let b = t.as_bytes();
+            let size = b.len();
+            let content = if include_bytes {
+                b.to_vec()
+            } else {
+                Vec::new()
+            };
+            (size, content)
+        }
+        PartType::Html(h) => {
+            let b = h.as_bytes();
+            let size = b.len();
+            let content = if include_bytes {
+                b.to_vec()
+            } else {
+                Vec::new()
+            };
+            (size, content)
+        }
+        PartType::Binary(b) | PartType::InlineBinary(b) => {
+            let size = b.len();
+            let content = if include_bytes {
+                b.to_vec()
+            } else {
+                Vec::new()
+            };
+            (size, content)
+        }
+        _ => return None,
+    };
+    Some(ParsedAttachment {
+        filename,
+        mime_type,
+        size,
+        content,
+    })
+}
+
+fn collect_attachments(msg: &Message<'_>, include_attachment_bytes: bool) -> Vec<ParsedAttachment> {
     let mut out = Vec::new();
+    let mut seen_part_ids: HashSet<usize> = HashSet::new();
+
     for i in 0..msg.attachment_count() {
         let Some(part) = msg.attachment(i) else {
             continue;
         };
-        let disp = part.content_disposition();
-        if disp.map(|d| d.is_inline()).unwrap_or(false) {
+        seen_part_ids.insert(msg.attachments[i]);
+        if let Some(pa) = parsed_attachment_from_part(part, i, include_attachment_bytes) {
+            out.push(pa);
+        }
+    }
+
+    // mail-parser sometimes omits parts from `attachments` (e.g. `Content-Disposition: attachment`
+    // with no filename / name). Scan parts for explicit attachment dispositions.
+    for (part_id, part) in msg.parts.iter().enumerate() {
+        if seen_part_ids.contains(&part_id) {
             continue;
         }
-        let Some(filename) = part
-            .attachment_name()
-            .map(str::to_string)
-            .filter(|s| !s.is_empty())
-        else {
+        if part
+            .content_disposition()
+            .map(|d| d.is_inline())
+            .unwrap_or(false)
+        {
             continue;
-        };
-        let body = match &part.body {
-            PartType::Text(t) => t.as_bytes().to_vec(),
-            PartType::Html(h) => h.as_bytes().to_vec(),
-            PartType::Binary(b) | PartType::InlineBinary(b) => b.to_vec(),
-            _ => continue,
-        };
-        let mime_type = part
-            .content_type()
-            .map(|ct| {
-                ct.c_subtype
-                    .as_ref()
-                    .map(|st| format!("{}/{}", ct.c_type, st))
-                    .unwrap_or_else(|| ct.c_type.to_string())
-            })
-            .unwrap_or_else(|| "application/octet-stream".into());
-        let size = body.len();
-        out.push(ParsedAttachment {
-            filename,
-            mime_type,
-            size,
-            content: body,
-        });
+        }
+        let is_explicit_attachment = part
+            .content_disposition()
+            .map(|d| d.is_attachment())
+            .unwrap_or(false);
+        if !is_explicit_attachment {
+            continue;
+        }
+        if !matches!(&part.body, PartType::Binary(_) | PartType::InlineBinary(_)) {
+            continue;
+        }
+        if let Some(pa) = parsed_attachment_from_part(part, out.len(), include_attachment_bytes) {
+            out.push(pa);
+        }
     }
+
     out
 }
 
@@ -335,7 +445,7 @@ pub fn parse_raw_message_with_options(raw: &[u8], options: ParseMessageOptions) 
         body_text,
         body_html,
         attachments: if options.include_attachments {
-            collect_attachments(&msg)
+            collect_attachments(&msg, options.include_attachment_bytes)
         } else {
             Vec::new()
         },
@@ -349,6 +459,7 @@ pub fn parse_index_message(raw: &[u8]) -> ParsedMessage {
         raw,
         ParseMessageOptions {
             include_attachments: false,
+            ..Default::default()
         },
     )
 }

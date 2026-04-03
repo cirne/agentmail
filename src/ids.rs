@@ -98,6 +98,23 @@ pub fn message_id_lookup_keys(id: &str) -> Vec<String> {
     vec![format!("<{t}>"), t.to_string()]
 }
 
+/// Keys that may appear in `attachments.message_id` when the logical message id is `canonical_mid`
+/// from `messages` (handles bare vs bracketed drift between tables).
+pub fn attachment_message_id_lookup_keys(canonical_mid: &str) -> Vec<String> {
+    let mut keys = message_id_lookup_keys(canonical_mid);
+    let bare = message_id_for_json_output(canonical_mid);
+    if !keys.iter().any(|k| k == &bare) {
+        keys.push(bare.clone());
+    }
+    let norm = normalize_message_id(&bare);
+    if !keys.iter().any(|k| k == &norm) {
+        keys.push(norm);
+    }
+    keys.sort();
+    keys.dedup();
+    keys
+}
+
 /// First `messages.message_id` that exists for this input (tries bracketed then bare).
 pub fn resolve_message_id(conn: &Connection, id: &str) -> rusqlite::Result<Option<String>> {
     for key in message_id_lookup_keys(id) {
@@ -187,6 +204,14 @@ mod tests {
     fn lookup_keys_bare_then_bracketed() {
         assert_eq!(
             message_id_lookup_keys("a@b"),
+            vec!["<a@b>".to_string(), "a@b".to_string()]
+        );
+    }
+
+    #[test]
+    fn attachment_message_id_lookup_keys_adds_bare_when_canonical_bracketed() {
+        assert_eq!(
+            attachment_message_id_lookup_keys("<a@b>"),
             vec!["<a@b>".to_string(), "a@b".to_string()]
         );
     }

@@ -37,6 +37,11 @@ pub async fn run_post_rebuild_inbox_bootstrap(
     clear_inbox_tables(conn)?;
     let cutoff = parse_inbox_window_to_iso_cutoff(bootstrap_window)
         .map_err(RunInboxScanError::InvalidWindow)?;
+    eprintln!(
+        "Inbox bootstrap: bulk-archiving messages older than {} (cutoff {})…",
+        bootstrap_window,
+        cutoff.as_str()
+    );
     summary.bulk_archived_older_than_cutoff =
         bulk_archive_messages_older_than(conn, cutoff.as_str())?;
 
@@ -47,8 +52,11 @@ pub async fn run_post_rebuild_inbox_bootstrap(
     });
     let Some(ref key) = api_key else {
         summary.llm_skipped_no_api_key = true;
+        eprintln!("Inbox bootstrap: skipping recent-inbox categorization (no OpenAI API key).");
         return Ok(summary);
     };
+
+    eprintln!("Inbox bootstrap: categorizing recent inbox (LLM)…");
 
     let rules = load_rules_file(&home)?;
     let imap_user = cfg.imap_user.as_str();

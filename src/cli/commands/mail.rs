@@ -1,12 +1,14 @@
 use std::io::Write;
 
+use unicode_normalization::UnicodeNormalization;
+
 use crate::cli::args::AttachmentCmd;
 use crate::cli::util::{format_attachment_size, load_cfg};
 use crate::cli::CliResult;
 use zmail::{
     db, format_read_message_text, list_attachments_for_message, list_thread_messages,
-    parse_category_list, parse_read_full, read_attachment_text, read_message_bytes_with_thread,
-    read_stored_file, resolve_message_id, resolve_search_json_format,
+    parse_category_list, parse_read_full, read_attachment_bytes, read_attachment_text,
+    read_message_bytes_with_thread, resolve_message_id, resolve_search_json_format,
     search_result_to_slim_json_row, search_with_meta, send_draft_by_id, send_simple_message,
     split_address_list, who, ReadMessageJson, SearchOptions, SearchResultFormatPreference,
     SendSimpleFields, WhoOptions,
@@ -179,7 +181,7 @@ pub(crate) fn run_attachment(sub: AttachmentCmd) -> CliResult {
             }
             let attachment = resolve_attachment(&rows, &index_or_name);
             if raw {
-                let bytes = read_stored_file(&attachment.stored_path, &cfg.data_dir)?;
+                let bytes = read_attachment_bytes(&conn, &cfg.data_dir, attachment.id)?;
                 std::io::stdout().write_all(&bytes)?;
             } else {
                 let text =
@@ -377,7 +379,10 @@ fn resolve_attachment<'a>(
         std::process::exit(1);
     }
 
-    if let Some(attachment) = rows.iter().find(|row| row.filename == index_or_name) {
+    if let Some(attachment) = rows
+        .iter()
+        .find(|row| attachment_filename_matches(&row.filename, index_or_name))
+    {
         return attachment;
     }
 
@@ -387,4 +392,13 @@ fn resolve_attachment<'a>(
         rows.len()
     );
     std::process::exit(1);
+}
+
+fn attachment_filename_matches(stored: &str, query: &str) -> bool {
+    if stored == query {
+        return true;
+    }
+    let a: String = stored.nfc().collect();
+    let b: String = query.nfc().collect();
+    a == b
 }

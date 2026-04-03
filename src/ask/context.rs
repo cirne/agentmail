@@ -1,11 +1,11 @@
 //! Context assembly for `zmail ask` Phase 2 (Node `assembleContext`).
 
-use rusqlite::{Connection, OptionalExtension};
+use rusqlite::{Connection, OptionalExtension, ToSql};
 use std::collections::HashSet;
 use std::path::Path;
 
-use crate::attachments::{extract_and_cache, read_stored_file};
-use crate::ids::resolve_message_id;
+use crate::attachments::{extract_and_cache, read_attachment_bytes};
+use crate::ids::{attachment_message_id_lookup_keys, resolve_message_id};
 
 const DEFAULT_MAX_MESSAGES: usize = 50;
 const DEFAULT_MAX_BODY_CHARS: usize = 2000;
@@ -154,22 +154,28 @@ fn assemble_context_inner(
         let mut total_attachment_chars = 0usize;
 
         if process_attachments {
-            let mut stmt = conn.prepare(
-                "SELECT id, filename, mime_type, size, extracted_text, stored_path FROM attachments WHERE message_id = ?1 ORDER BY id",
-            )?;
-            let rows = stmt.query_map([&message_id], |r| {
+            let keys = attachment_message_id_lookup_keys(&message_id);
+            if keys.is_empty() {
+                continue;
+            }
+            let placeholders = keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+            let sql = format!(
+                "SELECT id, filename, mime_type, size, extracted_text FROM attachments WHERE message_id IN ({placeholders}) ORDER BY id"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let params: Vec<&dyn ToSql> = keys.iter().map(|s| s as &dyn ToSql).collect();
+            let rows = stmt.query_map(params.as_slice(), |r| {
                 Ok((
                     r.get::<_, i64>(0)?,
                     r.get::<_, String>(1)?,
                     r.get::<_, String>(2)?,
                     r.get::<_, i64>(3)?,
                     r.get::<_, Option<String>>(4)?,
-                    r.get::<_, String>(5)?,
                 ))
             })?;
 
             for r in rows {
-                let (id, filename, mime_type, size, extracted_text, stored_path) = r?;
+                let (id, filename, mime_type, size, extracted_text) = r?;
                 if !specific_attachment_ids.is_empty() && !specific_attachment_ids.contains(&id) {
                     continue;
                 }
@@ -186,8 +192,8 @@ fn assemble_context_inner(
                 }
 
                 let mut text = extracted_text;
-                if text.is_none() && !stored_path.is_empty() {
-                    match read_stored_file(&stored_path, data_dir) {
+                if text.is_none() {
+                    match read_attachment_bytes(conn, data_dir, id) {
                         Ok(bytes) => {
                             let mut t = extract_and_cache(
                                 conn,

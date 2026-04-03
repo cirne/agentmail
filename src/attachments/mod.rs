@@ -1,8 +1,32 @@
 //! On-demand attachment text extraction (TS `~/attachments` subset).
 
 use calamine::{Data, Reader};
-use rusqlite::Connection;
+use rusqlite::{Connection, ToSql};
 use std::io::Cursor;
+use std::panic;
+use std::path::{Path, PathBuf};
+
+use crate::mail_read::resolve_raw_path;
+use crate::sync::parse_message::{parse_raw_message_with_options, ParseMessageOptions};
+
+/// CLI/MCP: present PDF text as markdown (`## filename` + body) for agent readability (matches MCP tool copy).
+fn format_pdf_attachment_markdown(filename: &str, body: &str) -> String {
+    format!("## {}\n\n{}", filename, body.trim())
+}
+
+fn mime_is_application_pdf(mime: &str) -> bool {
+    mime.split(';')
+        .next()
+        .map(|s| s.trim().eq_ignore_ascii_case("application/pdf"))
+        .unwrap_or(false)
+}
+
+/// `pdf-extract` depends on `cff-parser` and can **panic** on some real-world PDFs (fonts/encoding).
+/// Treat panics as extraction failure so CLI/MCP return the binary stub instead of aborting.
+fn extract_pdf_text_safe(bytes: &[u8]) -> Option<String> {
+    let owned = bytes.to_vec();
+    panic::catch_unwind(move || pdf_extract::extract_text_from_mem(&owned).ok()).unwrap_or_default()
+}
 
 /// Best-effort text/markdown extraction by MIME type and filename (same order as Node extractors).
 pub fn extract_attachment(bytes: &[u8], mime: &str, filename: &str) -> Option<String> {
@@ -11,7 +35,7 @@ pub fn extract_attachment(bytes: &[u8], mime: &str, filename: &str) -> Option<St
 
     // PDF — MIME only (matches Node PdfExtractor)
     if m == "application/pdf" {
-        return pdf_extract::extract_text_from_mem(bytes).ok();
+        return extract_pdf_text_safe(bytes);
     }
 
     // DOCX
@@ -157,10 +181,17 @@ pub fn list_attachments_for_message(
     let Some(mid) = crate::ids::resolve_message_id(conn, message_id)? else {
         return Ok(Vec::new());
     };
-    let mut stmt = conn.prepare(
-        "SELECT id, filename, mime_type, size, extracted_text, stored_path FROM attachments WHERE message_id = ?1 ORDER BY id",
-    )?;
-    let rows = stmt.query_map([&mid], |row| {
+    let keys = crate::ids::attachment_message_id_lookup_keys(&mid);
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let placeholders = keys.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+    let sql = format!(
+        "SELECT id, filename, mime_type, size, extracted_text, stored_path FROM attachments WHERE message_id IN ({placeholders}) ORDER BY id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let params: Vec<&dyn ToSql> = keys.iter().map(|s| s as &dyn ToSql).collect();
+    let rows = stmt.query_map(params.as_slice(), |row| {
         Ok((
             row.get::<_, i64>(0)?,
             row.get::<_, String>(1)?,
@@ -187,13 +218,153 @@ pub fn list_attachments_for_message(
 }
 
 /// Read attachment bytes from `stored_path` (absolute or relative to `data_dir`).
-pub fn read_stored_file(stored_path: &str, data_dir: &std::path::Path) -> std::io::Result<Vec<u8>> {
-    let p = if std::path::Path::new(stored_path).is_absolute() {
-        std::path::PathBuf::from(stored_path)
+pub fn read_stored_file(stored_path: &str, data_dir: &Path) -> std::io::Result<Vec<u8>> {
+    let sp = stored_path.trim();
+    if sp.is_empty() || sp == "." {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::InvalidInput,
+            "empty or invalid stored_path",
+        ));
+    }
+    let p = if Path::new(sp).is_absolute() {
+        PathBuf::from(sp)
     } else {
-        data_dir.join(stored_path)
+        data_dir.join(sp)
     };
     std::fs::read(p)
+}
+
+fn stored_path_is_usable(stored_path: &str) -> bool {
+    let sp = stored_path.trim();
+    !sp.is_empty() && sp != "."
+}
+
+/// `maildir/attachments/<message-id-folder>/<filename>` (folder name may be bare or bracketed).
+fn try_legacy_attachment_bytes(
+    conn: &Connection,
+    data_dir: &Path,
+    attachment_id: i64,
+    message_id: &str,
+    filename: &str,
+) -> Result<Option<Vec<u8>>, String> {
+    let Some(canonical) =
+        crate::ids::resolve_message_id(conn, message_id).map_err(|e| e.to_string())?
+    else {
+        return Ok(None);
+    };
+    let keys = crate::ids::attachment_message_id_lookup_keys(&canonical);
+    let base = data_dir.join("maildir").join("attachments");
+    for folder in keys {
+        let p = base.join(&folder).join(filename);
+        if p.is_file() {
+            let bytes = std::fs::read(&p).map_err(|e| e.to_string())?;
+            let rel = p
+                .strip_prefix(data_dir)
+                .unwrap_or(p.as_path())
+                .to_string_lossy()
+                .to_string();
+            let _ = conn.execute(
+                "UPDATE attachments SET stored_path = ?1 WHERE id = ?2 AND (stored_path IS NULL OR trim(stored_path) = '')",
+                rusqlite::params![&rel, attachment_id],
+            );
+            return Ok(Some(bytes));
+        }
+    }
+    Ok(None)
+}
+
+fn ordinal_attachment_1based(
+    conn: &Connection,
+    message_id_keys: &[String],
+    attachment_id: i64,
+) -> Result<i64, String> {
+    if message_id_keys.is_empty() {
+        return Err("attachment message id keys empty".into());
+    }
+    let placeholders = message_id_keys
+        .iter()
+        .map(|_| "?")
+        .collect::<Vec<_>>()
+        .join(",");
+    let sql = format!(
+        "SELECT COUNT(*) FROM attachments a2 WHERE a2.message_id IN ({placeholders}) AND a2.id <= ?"
+    );
+    let mut vals: Vec<&dyn ToSql> = message_id_keys.iter().map(|s| s as &dyn ToSql).collect();
+    vals.push(&attachment_id);
+    conn.query_row(&sql, vals.as_slice(), |r| r.get::<_, i64>(0))
+        .map_err(|e| e.to_string())
+}
+
+/// Load raw bytes for an attachment: legacy `stored_path` file, or extract from the message `.eml`
+/// when `stored_path` is empty (metadata-only index).
+pub fn read_attachment_bytes(
+    conn: &Connection,
+    data_dir: &Path,
+    attachment_id: i64,
+) -> Result<Vec<u8>, String> {
+    let row: (String, String, String) = conn
+        .query_row(
+            "SELECT stored_path, message_id, filename FROM attachments WHERE id = ?1",
+            [attachment_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+        )
+        .map_err(|e| e.to_string())?;
+    let (stored_path, message_id, filename) = row;
+    if stored_path_is_usable(&stored_path) {
+        if let Ok(bytes) = read_stored_file(stored_path.trim(), data_dir) {
+            return Ok(bytes);
+        }
+    }
+    if let Some(bytes) =
+        try_legacy_attachment_bytes(conn, data_dir, attachment_id, &message_id, &filename)?
+    {
+        return Ok(bytes);
+    }
+    attachment_bytes_from_raw_mail(conn, data_dir, attachment_id)
+}
+
+fn attachment_bytes_from_raw_mail(
+    conn: &Connection,
+    data_dir: &Path,
+    attachment_id: i64,
+) -> Result<Vec<u8>, String> {
+    let att_mid: String = conn
+        .query_row(
+            "SELECT message_id FROM attachments WHERE id = ?1",
+            [attachment_id],
+            |r| r.get(0),
+        )
+        .map_err(|e| e.to_string())?;
+    let Some((canonical_mid, raw_path)) =
+        crate::ids::resolve_message_id_and_raw_path(conn, &att_mid).map_err(|e| e.to_string())?
+    else {
+        return Err(format!(
+            "no message in index for attachment id {attachment_id}"
+        ));
+    };
+    let keys = crate::ids::attachment_message_id_lookup_keys(&canonical_mid);
+    let ord_1based = ordinal_attachment_1based(conn, &keys, attachment_id)?;
+    let path = resolve_raw_path(&raw_path, data_dir);
+    let raw = std::fs::read(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+    let parsed = parse_raw_message_with_options(
+        &raw,
+        ParseMessageOptions {
+            include_attachments: true,
+            include_attachment_bytes: true,
+        },
+    );
+    let idx = (ord_1based as usize).saturating_sub(1);
+    parsed
+        .attachments
+        .get(idx)
+        .map(|a| a.content.clone())
+        .ok_or_else(|| {
+            format!(
+                "attachment ordinal {} not in parsed message (have {} attachment(s))",
+                ord_1based,
+                parsed.attachments.len()
+            )
+        })
 }
 
 /// Extract text (or MIME-style stub), optionally persist to `attachments.extracted_text`.
@@ -232,35 +403,34 @@ pub fn read_attachment_text(
         .map_err(|e| e.to_string())?;
     }
 
-    let (filename, mime, stored_path, extracted_text): (String, String, String, Option<String>) = conn
+    let (filename, mime, extracted_text): (String, String, Option<String>) = conn
         .query_row(
-            "SELECT filename, mime_type, stored_path, extracted_text FROM attachments WHERE id = ?1",
+            "SELECT filename, mime_type, extracted_text FROM attachments WHERE id = ?1",
             [attachment_id],
-            |r| {
-                Ok((
-                    r.get(0)?,
-                    r.get(1)?,
-                    r.get(2)?,
-                    r.get(3)?,
-                ))
-            },
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .map_err(|e| e.to_string())?;
 
     let use_cached =
         cache_extracted && !no_cache && extracted_text.as_ref().is_some_and(|s| !s.is_empty());
-    if use_cached {
-        return Ok(extracted_text.unwrap());
-    }
+    let text = if use_cached {
+        extracted_text.unwrap()
+    } else {
+        let bytes = read_attachment_bytes(conn, data_dir, attachment_id)?;
+        extract_and_cache(
+            conn,
+            attachment_id,
+            &bytes,
+            &mime,
+            &filename,
+            cache_extracted,
+        )
+        .map_err(|e| e.to_string())?
+    };
 
-    let bytes = read_stored_file(&stored_path, data_dir).map_err(|e| e.to_string())?;
-    extract_and_cache(
-        conn,
-        attachment_id,
-        &bytes,
-        &mime,
-        &filename,
-        cache_extracted,
-    )
-    .map_err(|e| e.to_string())
+    if mime_is_application_pdf(&mime) {
+        Ok(format_pdf_attachment_markdown(&filename, &text))
+    } else {
+        Ok(text)
+    }
 }

@@ -115,15 +115,106 @@ fn parse_index_message_skips_attachment_bytes() {
         raw.as_bytes(),
         ParseMessageOptions {
             include_attachments: false,
+            ..Default::default()
         },
     );
 
     assert_eq!(full.subject, indexed.subject);
     assert_eq!(full.body_text, indexed.body_text);
     assert!(full.attachments.iter().any(|a| a.filename == "f.txt"));
+    assert!(
+        full.attachments
+            .iter()
+            .any(|a| a.filename == "f.txt" && a.content.is_empty()),
+        "default parse should omit attachment bytes"
+    );
     assert!(indexed.attachments.is_empty());
     assert!(explicit.attachments.is_empty());
     assert_eq!(indexed.subject, explicit.subject);
+}
+
+/// Regression: raw UTF-8 in quoted `filename=` / `name=` (RFC 2047/2231 not used) must still yield attachments.
+/// See BUG-036 — mail-parser can misclassify the part when Content-Type parses empty.
+#[test]
+fn parse_message_attachment_utf8_filename() {
+    let mut raw: Vec<u8> = concat!(
+        "From: a@b.com\r\n",
+        "Subject: utf8 fn\r\n",
+        "Date: Thu, 4 Jan 2024 10:00:00 +0000\r\n",
+        "Message-ID: <utf8fn@test>\r\n",
+        "MIME-Version: 1.0\r\n",
+        "Content-Type: multipart/mixed; boundary=\"b\"\r\n",
+        "\r\n",
+        "--b\r\n",
+        "Content-Type: text/plain\r\n",
+        "\r\n",
+        "Hi\r\n",
+        "--b\r\n",
+        "Content-Disposition: attachment; filename=\"Bel",
+    )
+    .as_bytes()
+    .to_vec();
+    raw.extend_from_slice("óved in Christ Last Mile First Partnership (March 2026).pdf".as_bytes());
+    raw.extend_from_slice(
+        concat!("\"\r\n", "Content-Type: application/pdf; name=\"Bel",).as_bytes(),
+    );
+    raw.extend_from_slice("óved in Christ Last Mile First Partnership (March 2026).pdf".as_bytes());
+    raw.extend_from_slice(
+        concat!(
+            "\"\r\n",
+            "Content-Transfer-Encoding: base64\r\n",
+            "\r\n",
+            "JVBERi0xLjQKJeLjz9MKMSAwIG9iago8PC9UeXBlL0NhdGFsb2c+Pj4KZW5kb2JqCnhyZWYKMCAyCjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDA5IDAwMDAwIG4gCjAwMDAwMDAwNzQgMDAwMDAgbiAKdHJhaWxlcgo8PC9TaXplIDIvUm9vdCAxIDAgUgo+PgpzdGFydHhyZWYKOTIKJSVFT0YK\r\n",
+            "--b--\r\n",
+        )
+        .as_bytes(),
+    );
+
+    let p = parse_raw_message(&raw);
+    assert_eq!(
+        p.attachments.len(),
+        1,
+        "expected one attachment, got {:?}",
+        p.attachments
+    );
+    assert!(
+        p.attachments[0].filename.contains("March 2026"),
+        "filename={:?}",
+        p.attachments[0].filename
+    );
+    assert_eq!(p.attachments[0].mime_type, "application/pdf");
+}
+
+#[test]
+fn parse_message_attachment_pdf_no_filename_fallback() {
+    let raw = concat!(
+        "From: a@b.com\r\n",
+        "Subject: no fn\r\n",
+        "Date: Thu, 4 Jan 2024 10:00:00 +0000\r\n",
+        "Message-ID: <nofn@test>\r\n",
+        "MIME-Version: 1.0\r\n",
+        "Content-Type: multipart/mixed; boundary=b\r\n",
+        "\r\n",
+        "--b\r\n",
+        "Content-Type: text/plain\r\n",
+        "\r\n",
+        "Hi\r\n",
+        "--b\r\n",
+        "Content-Type: application/pdf\r\n",
+        "Content-Disposition: attachment\r\n",
+        "Content-Transfer-Encoding: base64\r\n",
+        "\r\n",
+        "JVBERi0xLjQK\r\n",
+        "--b--\r\n",
+    );
+    let p = parse_raw_message(raw.as_bytes());
+    assert_eq!(p.attachments.len(), 1, "{:?}", p.attachments);
+    assert!(
+        p.attachments[0].filename.ends_with(".pdf"),
+        "filename={:?}",
+        p.attachments[0].filename
+    );
+    assert_eq!(p.attachments[0].mime_type, "application/pdf");
 }
 
 #[test]

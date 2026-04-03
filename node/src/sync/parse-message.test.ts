@@ -313,6 +313,34 @@ test content
       expect(parsed.attachments[0].mimeType).toBe("application/pdf");
     });
 
+    it("uses fallback filename when attachment has no filename (BUG-036)", async () => {
+      const raw = Buffer.from(
+        `Message-ID: <test@example.com>
+From: sender@example.com
+To: recipient@example.com
+Subject: No filename
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary=b
+
+--b
+Content-Type: text/plain
+
+Hi
+--b
+Content-Type: application/pdf
+Content-Disposition: attachment
+Content-Transfer-Encoding: base64
+
+JVBERi0xLjQK
+--b--`
+      );
+
+      const parsed = await parseRawMessage(raw);
+      expect(parsed.attachments.length).toBe(1);
+      expect(parsed.attachments[0].filename).toMatch(/^attachment-1\.pdf$/);
+      expect(parsed.attachments[0].mimeType).toBe("application/pdf");
+    });
+
     it("filters related attachments without explicit disposition=attachment", async () => {
       const raw = Buffer.from(
         `Message-ID: <test@example.com>

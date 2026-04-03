@@ -4,11 +4,14 @@ use std::fs;
 use std::io::BufWriter;
 use std::path::PathBuf;
 
+use base64::Engine;
+use printpdf::*;
 use rust_xlsxwriter::Workbook;
 use tempfile::tempdir;
 use zmail::{
     extract_and_cache, extract_attachment, list_attachments_for_message, open_memory,
-    read_stored_file,
+    parse_raw_message_with_options, persist_attachments_from_parsed, persist_message,
+    read_attachment_bytes, read_attachment_text, read_stored_file, ParseMessageOptions,
 };
 
 fn fixture(name: &str) -> PathBuf {
@@ -256,4 +259,169 @@ fn read_attachment_caches_in_db() {
         )
         .unwrap();
     assert_eq!(cached, "x");
+}
+
+/// Legacy drift: `attachments.message_id` bare while `messages.message_id` is bracketed (FK off simulates old DBs / manual fixes).
+#[test]
+fn list_attachments_matches_when_attachment_message_id_bare_messages_bracketed() {
+    let conn = open_memory().unwrap();
+    conn.execute_batch("PRAGMA foreign_keys = OFF").unwrap();
+    conn.execute(
+        "INSERT INTO messages (message_id, thread_id, folder, uid, from_address, to_addresses, cc_addresses, subject, body_text, date, raw_path)
+         VALUES ('<match@x>', '<match@x>', 'f', 1, 'a@b', '[]', '[]', 's', 'b', 'd', 'p')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO attachments (message_id, filename, mime_type, size, stored_path) VALUES ('match@x', 'f.pdf', 'application/pdf', 3, '')",
+        [],
+    )
+    .unwrap();
+    conn.execute_batch("PRAGMA foreign_keys = ON").unwrap();
+    assert_eq!(
+        list_attachments_for_message(&conn, "match@x")
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(
+        list_attachments_for_message(&conn, "<match@x>")
+            .unwrap()
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn read_attachment_bytes_finds_legacy_maildir_attachments_file() {
+    let dir = tempdir().unwrap();
+    let data_dir = dir.path();
+    let mid = "<legacy@x>";
+    let sub = data_dir.join("maildir").join("attachments").join(mid);
+    fs::create_dir_all(&sub).unwrap();
+    let pdf_path = sub.join("doc.pdf");
+    fs::write(&pdf_path, b"%PDF-1.4 test").unwrap();
+
+    let conn = open_memory().unwrap();
+    conn.execute(
+        "INSERT INTO messages (message_id, thread_id, folder, uid, from_address, to_addresses, cc_addresses, subject, body_text, date, raw_path)
+         VALUES ('<legacy@x>', '<legacy@x>', 'f', 1, 'a@b', '[]', '[]', 's', 'b', 'd', 'p')",
+        [],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO attachments (message_id, filename, mime_type, size, stored_path) VALUES ('<legacy@x>', 'doc.pdf', 'application/pdf', 12, '')",
+        [],
+    )
+    .unwrap();
+    let id: i64 = conn
+        .query_row(
+            "SELECT id FROM attachments WHERE message_id = '<legacy@x>'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    let bytes = read_attachment_bytes(&conn, data_dir, id).unwrap();
+    assert_eq!(bytes, b"%PDF-1.4 test");
+    let stored: String = conn
+        .query_row(
+            "SELECT stored_path FROM attachments WHERE id = ?1",
+            [id],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert!(stored.contains("maildir/attachments"));
+    assert!(stored.ends_with("doc.pdf"));
+}
+
+/// BUG-036 / agent path: UTF-8 bytes in quoted `filename=` + PDF → index → `read_attachment_text` returns markdown with extractable body.
+#[test]
+fn utf8_pdf_filename_eml_read_attachment_text_markdown() {
+    let mut buf = BufWriter::new(Vec::new());
+    {
+        let (doc, page, layer) = PdfDocument::new("t", Mm(210.0), Mm(297.0), "L1");
+        let font = doc.add_builtin_font(BuiltinFont::Helvetica).unwrap();
+        let layer = doc.get_page(page).get_layer(layer);
+        layer.use_text(
+            "BROCHURE_PARTNERSHIP_TEXT",
+            12.0,
+            Mm(10.0),
+            Mm(280.0),
+            &font,
+        );
+        doc.save(&mut buf).unwrap();
+    }
+    let pdf_bytes = buf.into_inner().unwrap();
+    let b64 = base64::engine::general_purpose::STANDARD.encode(&pdf_bytes);
+
+    let mut raw: Vec<u8> = concat!(
+        "From: a@b.com\r\n",
+        "Subject: utf8 pdf\r\n",
+        "Date: Thu, 4 Jan 2024 10:00:00 +0000\r\n",
+        "Message-ID: <utf8pdf@test>\r\n",
+        "MIME-Version: 1.0\r\n",
+        "Content-Type: multipart/mixed; boundary=\"b\"\r\n",
+        "\r\n",
+        "--b\r\n",
+        "Content-Type: text/plain\r\n",
+        "\r\n",
+        "Hi\r\n",
+        "--b\r\n",
+        "Content-Disposition: attachment; filename=\"Bel",
+    )
+    .as_bytes()
+    .to_vec();
+    raw.extend_from_slice("óved Brochure.pdf".as_bytes());
+    raw.extend_from_slice(
+        concat!("\"\r\n", "Content-Type: application/pdf; name=\"Bel",).as_bytes(),
+    );
+    raw.extend_from_slice("óved Brochure.pdf".as_bytes());
+    raw.extend_from_slice(
+        concat!("\"\r\n", "Content-Transfer-Encoding: base64\r\n", "\r\n").as_bytes(),
+    );
+    raw.extend_from_slice(b64.as_bytes());
+    raw.extend_from_slice(b"\r\n--b--\r\n");
+
+    let p = parse_raw_message_with_options(
+        &raw,
+        ParseMessageOptions {
+            include_attachments: true,
+            include_attachment_bytes: true,
+        },
+    );
+    assert_eq!(p.attachments.len(), 1, "{:?}", p.attachments);
+    assert!(
+        p.attachments[0].filename.contains("Brochure"),
+        "filename={:?}",
+        p.attachments[0].filename
+    );
+
+    let dir = tempdir().unwrap();
+    let data_dir = dir.path();
+    let maildir_rel = "maildir/cur/utf8.eml";
+    let eml_path = data_dir.join(maildir_rel);
+    fs::create_dir_all(eml_path.parent().unwrap()).unwrap();
+    fs::write(&eml_path, &raw).unwrap();
+
+    let conn = open_memory().unwrap();
+    persist_message(&conn, &p, "INBOX", 1, "[]", maildir_rel).unwrap();
+    persist_attachments_from_parsed(&conn, &p.message_id, &p.attachments, data_dir).unwrap();
+
+    let id: i64 = conn
+        .query_row(
+            "SELECT id FROM attachments WHERE message_id = ?1",
+            [&p.message_id],
+            |r| r.get(0),
+        )
+        .unwrap();
+
+    let out = read_attachment_text(&conn, data_dir, id, false, false).unwrap();
+    assert!(
+        out.starts_with("## ") && out.contains("Brochure"),
+        "expected markdown heading with filename, got: {out:?}"
+    );
+    assert!(
+        out.contains("BROCHURE_PARTNERSHIP_TEXT"),
+        "expected PDF text in body, got: {out:?}"
+    );
 }

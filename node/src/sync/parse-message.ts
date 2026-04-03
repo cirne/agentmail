@@ -1,6 +1,38 @@
 import PostalMime from "postal-mime";
 import { htmlToMarkdown } from "~/lib/content-normalize";
 
+/** When MIME parts have `Content-Disposition: attachment` but no filename/name (BUG-036). */
+function fallbackAttachmentFilename(mimeType: string, index: number): string {
+  const sub = (mimeType.split("/")[1] || "octet-stream").toLowerCase();
+  const ext =
+    sub === "pdf"
+      ? "pdf"
+      : sub === "zip"
+        ? "zip"
+        : sub === "gzip"
+          ? "gz"
+          : sub === "msword"
+            ? "doc"
+            : sub === "vnd.openxmlformats-officedocument.wordprocessingml.document"
+              ? "docx"
+              : sub === "vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                ? "xlsx"
+                : sub === "vnd.openxmlformats-officedocument.presentationml.presentation"
+                  ? "pptx"
+                  : sub === "csv"
+                    ? "csv"
+                    : sub === "plain"
+                      ? "txt"
+                      : sub === "html"
+                        ? "html"
+                        : sub === "octet-stream"
+                          ? "bin"
+                          : /^[a-z0-9.-]{1,32}$/i.test(sub)
+                            ? sub.replace(/^\.+|\.+$/g, "") || "bin"
+                            : "bin";
+  return `attachment-${index + 1}.${ext}`;
+}
+
 export interface ParsedAttachment {
   filename: string;
   mimeType: string;
@@ -60,10 +92,11 @@ export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
       continue;
     }
 
-    // Skip if no filename (unlikely but handle gracefully)
-    if (!att.filename) {
-      continue;
-    }
+    // Prefer MIME filename; if missing (some clients omit it on attachment parts), still index the
+    // bytes so agents can read — same as Rust `collect_attachments` fallback (BUG-036).
+    const filename =
+      att.filename ||
+      fallbackAttachmentFilename(att.mimeType || "application/octet-stream", attachments.length);
 
     // Convert content to Buffer
     let content: Buffer;
@@ -81,8 +114,8 @@ export async function parseRawMessage(raw: Buffer): Promise<ParsedMessage> {
     }
 
     attachments.push({
-      filename: att.filename,
-      mimeType: att.mimeType,
+      filename,
+      mimeType: att.mimeType || "application/octet-stream",
       size: content.length,
       content,
     });

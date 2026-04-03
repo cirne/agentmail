@@ -9,8 +9,8 @@ use std::sync::mpsc::sync_channel;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use crate::db::message_persist::RebuildWriter;
-use crate::sync::{parse_index_message, parse_raw_message, ParsedMessage};
+use crate::db::message_persist::{persist_attachments_from_parsed, RebuildWriter};
+use crate::sync::{parse_raw_message, ParsedMessage};
 
 const DEFAULT_MAILBOX: &str = "[Gmail]/All Mail";
 const DEFAULT_QUEUE_MULTIPLIER: usize = 2;
@@ -93,9 +93,7 @@ pub fn rebuild_from_maildir(conn: &mut Connection, maildir_root: &Path) -> rusql
                 .into_par_iter()
                 .enumerate()
                 .for_each_with(tx_work, |sender, (ordinal, path)| {
-                    let parsed = fs::read(&path)
-                        .ok()
-                        .map(|bytes| parse_index_message(&bytes));
+                    let parsed = fs::read(&path).ok().map(|bytes| parse_raw_message(&bytes));
                     let _ = sender.send(ParsedWork {
                         ordinal,
                         path,
@@ -132,6 +130,12 @@ pub fn rebuild_from_maildir(conn: &mut Connection, maildir_root: &Path) -> rusql
                         "[]",
                         raw_s.as_ref(),
                     )? {
+                        persist_attachments_from_parsed(
+                            &tx,
+                            &parsed.message_id,
+                            &parsed.attachments,
+                            maildir_root,
+                        )?;
                         n += 1;
                     }
                     next_uid += 1;
@@ -174,6 +178,7 @@ pub fn rebuild_from_maildir_sequential(
         let p = parse_raw_message(&bytes);
         let raw_s = path.to_string_lossy();
         if writer.persist_message(&p, DEFAULT_MAILBOX, next_uid, "[]", raw_s.as_ref())? {
+            persist_attachments_from_parsed(&tx, &p.message_id, &p.attachments, maildir_root)?;
             n += 1;
         }
         next_uid += 1;

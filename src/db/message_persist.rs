@@ -1,7 +1,6 @@
 //! Insert messages / threads / attachments (mirrors `src/db/message-persistence.ts`).
 
-use std::fs::{create_dir_all, write};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use rusqlite::{params, CachedStatement, Connection, Transaction};
 
@@ -19,36 +18,6 @@ const SQL_UPSERT_THREAD: &str = "INSERT OR REPLACE INTO threads (thread_id, subj
 const SQL_INSERT_ATTACHMENT: &str =
     "INSERT INTO attachments (message_id, filename, mime_type, size, stored_path, extracted_text)
      VALUES (?1, ?2, ?3, ?4, ?5, NULL)";
-
-fn sanitize_filename(filename: &str) -> String {
-    filename
-        .chars()
-        .map(|c| {
-            if matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\0'..='\x1f') {
-                '_'
-            } else {
-                c
-            }
-        })
-        .collect::<String>()
-        .replace("..", "_")
-}
-
-fn ensure_unique_filename(dir: &Path, base_filename: &str) -> String {
-    let sanitized = sanitize_filename(base_filename);
-    let mut candidate = sanitized.clone();
-    let mut counter = 1u32;
-    while dir.join(&candidate).exists() {
-        let (stem, ext) = if let Some(i) = candidate.rfind('.') {
-            (candidate[..i].to_string(), candidate[i..].to_string())
-        } else {
-            (candidate.clone(), String::new())
-        };
-        candidate = format!("{stem}_{counter}{ext}");
-        counter += 1;
-    }
-    candidate
-}
 
 fn mime_from_ext(ext: &str) -> &'static str {
     match ext.to_lowercase().as_str() {
@@ -171,27 +140,19 @@ pub fn persist_message(
     Ok(true)
 }
 
-/// Write attachment bytes under `maildir_path/attachments/<message_id>/` and insert rows (sync path).
+/// Insert attachment metadata (`filename`, `mime_type`, `size`). Bytes stay in the raw `.eml`;
+/// [`crate::attachments::read_attachment_bytes`] loads them on demand (`stored_path` empty).
 pub fn persist_attachments_from_parsed(
     conn: &Connection,
     message_id: &str,
     attachments: &[ParsedAttachment],
-    maildir_path: &Path,
+    _maildir_path: &Path,
 ) -> rusqlite::Result<()> {
     if attachments.is_empty() {
         return Ok(());
     }
-    let attachments_dir: PathBuf = maildir_path.join("attachments").join(message_id);
-    create_dir_all(&attachments_dir)
-        .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-
     for att in attachments {
-        let unique = ensure_unique_filename(&attachments_dir, &att.filename);
-        let disk_path = attachments_dir.join(&unique);
-        write(&disk_path, &att.content)
-            .map_err(|e| rusqlite::Error::ToSqlConversionFailure(Box::new(e)))?;
-        let stored_path = format!("attachments/{message_id}/{unique}");
-        let ext = unique.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+        let ext = att.filename.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
         let mime = if !att.mime_type.is_empty() {
             att.mime_type.as_str()
         } else {
@@ -199,13 +160,7 @@ pub fn persist_attachments_from_parsed(
         };
         conn.execute(
             SQL_INSERT_ATTACHMENT,
-            params![
-                message_id,
-                att.filename.as_str(),
-                mime,
-                att.size as i64,
-                stored_path,
-            ],
+            params![message_id, att.filename.as_str(), mime, att.size as i64, "",],
         )?;
     }
     Ok(())

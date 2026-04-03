@@ -29,8 +29,8 @@ pub use ask_stub::{
     ask_rejects_old_explicit_year, ask_rejects_stale_date_range, draft_rewrite_stub,
 };
 pub use attachments::{
-    extract_and_cache, extract_attachment, list_attachments_for_message, read_attachment_text,
-    read_stored_file, AttachmentListRow,
+    extract_and_cache, extract_attachment, list_attachments_for_message, read_attachment_bytes,
+    read_attachment_text, read_stored_file, AttachmentListRow,
 };
 pub use config::{
     load_config, resolve_openai_api_key, resolve_smtp_settings, Config, ConfigJson,
@@ -41,8 +41,9 @@ pub use db::{
     apply_schema, journal_mode, list_user_tables, open_file, open_memory, DbError, SCHEMA_VERSION,
 };
 pub use ids::{
-    message_id_for_json_output, message_id_lookup_keys, normalize_message_id, resolve_message_id,
-    resolve_message_id_and_raw_path, resolve_message_id_thread_and_raw_path, resolve_thread_id,
+    attachment_message_id_lookup_keys, message_id_for_json_output, message_id_lookup_keys,
+    normalize_message_id, resolve_message_id, resolve_message_id_and_raw_path,
+    resolve_message_id_thread_and_raw_path, resolve_thread_id,
 };
 pub use inbox::{
     archive_messages_locally, inbox_candidate_prefetch_limit, preview_rule_impact,
