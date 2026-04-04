@@ -140,7 +140,7 @@ pub(crate) enum Commands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
-    /// LLM inbox triage over the local index (no IMAP sync; run `zmail refresh` when recency matters)
+    /// Inbox triage over the local index (deterministic rules; no IMAP sync; run `zmail refresh` when recency matters)
     Inbox(InboxArgs),
     /// Archive messages locally (`is_archived`); optional IMAP when mailboxManagement is enabled
     Archive {
@@ -173,7 +173,8 @@ pub(crate) enum Commands {
         #[command(subcommand)]
         sub: zmail::draft::DraftCmd,
     },
-    /// Manage inbox rules and context in ~/.zmail/rules.json
+    /// Manage inbox rules in ~/.zmail/rules.json
+    #[command(after_long_help = RULES_CMD_AFTER_LONG_HELP)]
     Rules {
         #[command(subcommand)]
         sub: RulesCmd,
@@ -215,7 +216,7 @@ pub(crate) struct InboxArgs {
     pub(crate) window: Option<String>,
     #[arg(long)]
     pub(crate) since: Option<String>,
-    /// Slow path: all categories; rerun LLM (bypass cache); include archived; ignore prior surfaced dedup
+    /// Slow path: all categories; recompute classifications (bypass cache); include archived; ignore prior surfaced dedup
     #[arg(long)]
     pub(crate) thorough: bool,
     #[arg(long, hide = true)]
@@ -230,38 +231,93 @@ pub(crate) struct InboxArgs {
     pub(crate) text: bool,
 }
 
+/// Appended to `zmail rules --help` (long help only).
+const RULES_CMD_AFTER_LONG_HELP: &str = "\
+Examples (add: at least one pattern; see zmail rules add --help):
+  zmail rules add --action ignore --from-pattern '@linkedin\\.com'
+  zmail rules add --action notify --subject-pattern '(?i)verification|security code'
+";
+
+/// Appended to `zmail rules add --help` (long help only).
+const RULES_ADD_AFTER_LONG_HELP: &str = "\
+Pass at least one of --subject-pattern, --body-pattern, --from-pattern (body = full messages.body_text, not inbox preview). Optional categoryPattern/fromDomainPattern in rules.json; zmail rules validate.
+Examples:
+  zmail rules add --action ignore --from-pattern '@linkedin\\.com'
+  zmail rules add --action inform --subject-pattern '(?i)flight|itinerary'
+  zmail rules add --action ignore --body-pattern '(?i)unsubscribe'
+  zmail rules add --action notify --from-pattern '^billing@bank\\.example$'
+Flags: --action <ACTION> --subject-pattern <RE> --body-pattern <RE> --from-pattern <RE> [--priority] [--description] [--no-preview] [--preview-window] [--text]
+";
+
 #[derive(Subcommand, Debug, Clone)]
 pub(crate) enum RulesCmd {
-    /// Show all rules and context
+    /// Validate ~/.zmail/rules.json (schema, regex compile)
+    Validate,
+    /// Replace rules.json with bundled defaults (renames existing file to rules.json.bak.<uuid>)
+    ResetDefaults {
+        /// Required: confirm destructive replace
+        #[arg(long)]
+        yes: bool,
+    },
+    /// Show all rules
     List {
         #[arg(long)]
         text: bool,
     },
-    /// Show a single rule or context entry by ID
+    /// Show a single rule by ID
     Show {
         id: String,
         #[arg(long)]
         text: bool,
     },
-    /// Add a new rule
+    /// Add a regex rule
+    #[command(
+        after_long_help = RULES_ADD_AFTER_LONG_HELP,
+        help_template = "\
+{about-with-newline}\
+{usage-heading} {usage}\
+{after-help}\
+\n\
+{all-args}\
+"
+    )]
     Add {
-        #[arg(long)]
+        #[arg(long, hide_long_help = true, help = "notify | inform | ignore")]
         action: String,
-        condition: String,
-        #[arg(long)]
+        #[arg(
+            long = "subject-pattern",
+            hide_long_help = true,
+            help = "regex on subject"
+        )]
+        subject_pattern: Option<String>,
+        #[arg(
+            long = "body-pattern",
+            hide_long_help = true,
+            help = "regex on messages.body_text"
+        )]
+        body_pattern: Option<String>,
+        #[arg(
+            long = "from-pattern",
+            hide_long_help = true,
+            help = "regex on from_address"
+        )]
+        from_pattern: Option<String>,
+        #[arg(long, hide_long_help = true, help = "sort priority (default 100)")]
+        priority: Option<i32>,
+        #[arg(long, hide_long_help = true, help = "note in rules.json")]
+        description: Option<String>,
+        #[arg(long, hide_long_help = true, help = "skip inbox preview")]
         no_preview: bool,
-        #[arg(long)]
+        #[arg(long, hide_long_help = true, help = "e.g. 7d")]
         preview_window: Option<String>,
-        #[arg(long)]
+        #[arg(long, hide_long_help = true, help = "text output")]
         text: bool,
     },
-    /// Edit an existing rule
+    /// Edit an existing rule (action only)
     Edit {
         id: String,
         #[arg(long)]
-        condition: Option<String>,
-        #[arg(long)]
-        action: Option<String>,
+        action: String,
         #[arg(long)]
         no_preview: bool,
         #[arg(long)]
@@ -275,11 +331,6 @@ pub(crate) enum RulesCmd {
         #[arg(long)]
         text: bool,
     },
-    /// Manage context entries
-    Context {
-        #[command(subcommand)]
-        sub: RulesContextCmd,
-    },
     /// Propose a rule from fuzzy feedback
     Feedback {
         feedback: String,
@@ -288,25 +339,75 @@ pub(crate) enum RulesCmd {
     },
 }
 
-#[derive(Subcommand, Debug, Clone)]
-pub(crate) enum RulesContextCmd {
-    Add {
-        text: String,
-        #[arg(long)]
-        text_mode: bool,
-    },
-    Remove {
-        id: String,
-        #[arg(long)]
-        text: bool,
-    },
-}
-
 #[cfg(test)]
 mod draft_cli_tests {
     use super::Cli;
+    use super::Commands;
+    use super::RulesCmd;
     use clap::Parser;
     use zmail::draft::DraftCmd;
+
+    #[test]
+    fn rules_add_parses_subject_pattern() {
+        let cli = Cli::try_parse_from([
+            "zmail",
+            "rules",
+            "add",
+            "--action",
+            "notify",
+            "--subject-pattern",
+            "(?i)list",
+        ])
+        .expect("parse");
+        match cli.command {
+            Commands::Rules { sub } => match sub {
+                RulesCmd::Add {
+                    action,
+                    subject_pattern,
+                    body_pattern,
+                    from_pattern,
+                    ..
+                } => {
+                    assert_eq!(action, "notify");
+                    assert_eq!(subject_pattern.as_deref(), Some("(?i)list"));
+                    assert!(body_pattern.is_none());
+                    assert!(from_pattern.is_none());
+                }
+                _ => panic!("expected rules add"),
+            },
+            _ => panic!("expected rules"),
+        }
+    }
+
+    #[test]
+    fn rules_add_parses_from_pattern() {
+        let cli = Cli::try_parse_from([
+            "zmail",
+            "rules",
+            "add",
+            "--action",
+            "ignore",
+            "--from-pattern",
+            "@widgets.example",
+        ])
+        .expect("parse");
+        match cli.command {
+            Commands::Rules { sub } => match sub {
+                RulesCmd::Add {
+                    action,
+                    from_pattern,
+                    subject_pattern,
+                    ..
+                } => {
+                    assert_eq!(action, "ignore");
+                    assert_eq!(from_pattern.as_deref(), Some("@widgets.example"));
+                    assert!(subject_pattern.is_none());
+                }
+                _ => panic!("expected rules add"),
+            },
+            _ => panic!("expected rules"),
+        }
+    }
 
     #[test]
     fn draft_list_accepts_json_flag_for_agents() {

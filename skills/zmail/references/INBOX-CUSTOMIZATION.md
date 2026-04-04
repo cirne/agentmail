@@ -2,9 +2,11 @@
 
 This companion to [`../SKILL.md`](../SKILL.md) explains how to make **`zmail inbox`** smarter over time by giving it **durable memory** about what matters to the mailbox owner.
 
-**Cadence (current behavior):** schedule **`zmail refresh`** so the local index stays current. Run **`zmail inbox`** on a cadence or when the user asks for triage—**`inbox`** reads the **already-indexed** unarchived window only; run **`zmail refresh`** first when **recency** matters. JSON carries **`requiresUserAction`**, **`actionSummary`**, **`counts.actionRequired`**, **`notify` / `inform` / `ignore`**, and optional **`hints`**. Use **`zmail inbox --diagnostics`** or **`--thorough`** when you need full rows or a complete rescan. **Prioritize rows with `requiresUserAction: true`** for actionable follow-up. Use **`zmail archive`** when mail no longer needs focused attention; **`search` / `read` / `ask`** still see archived mail. **Archive does not clear** the stored action-required flag—the flag reflects **what triage decided at classification time**; **open workload** is “unarchived,” so archived action mail drops out of **`inbox`** candidate sets but stays queryable. Full table: [Inbox workflow](../SKILL.md#inbox-workflow) in **`SKILL.md`**.
+**Deterministic triage (Rust inbox as shipped):** **`zmail inbox`** does **not** call an LLM. It applies **`~/.zmail/rules.json` v2** (**`kind: "regex"`** only: patterns on subject, body, from address, **`categoryPattern`**, **`fromDomainPattern`**), then a **local fallback** when nothing matches. **`ZMAIL_OPENAI_API_KEY`** is **not** required for inbox. OpenAI remains for **`zmail ask`**, **`draft edit`**, and setup/wizard paths.
 
-The core idea: do not force the agent to rediscover the same preferences on every pass. Keep a small, explicit ruleset plus a little background context so inbox triage gets better with use.
+**Cadence:** schedule **`zmail refresh`** so the local index stays current. Run **`zmail inbox`** when you want triage over the **already-indexed** unarchived window; run **`zmail refresh`** first when **recency** matters. JSON carries **`notify` / `inform` / `ignore`**, **`decisionSource`**, **`matchedRuleIds`**, optional **`hints`**, and (for forward compatibility) **`requiresUserAction`**, **`actionSummary`**, **`counts.actionRequired`**. In **v1 deterministic** mode, **`requiresUserAction`** stays **false** and **`actionSummary`** empty unless a future extension sets them. Use **`zmail inbox --diagnostics`** or **`--thorough`** when you need full rows or a complete rescan. Use **`zmail archive`** when mail no longer needs focused attention; **`search` / `read` / `ask`** still see archived mail. Full table: [Inbox workflow](../SKILL.md#inbox-workflow) in **`SKILL.md`**.
+
+The core idea: do not force the agent to rediscover the same preferences on every pass. Keep a small, explicit **typed** ruleset; optional **`context`** is for **agents** (human-readable facts), not for matching.
 
 ---
 
@@ -27,15 +29,15 @@ Use **three layers** plus one **orthogonal classifier output**:
 | ----- | ------- | ------- |
 | **Deterministic category** | Fast machine labeling from headers/provider labels | `promotional`, `social`, `list`, `spam` |
 | **Rules** | User preferences for action | "notify on bank security alerts" |
-| **Context** | Background facts that help classification | "Kirsten is my property manager" |
-| **Action required** (JSON) | Separate from **notify / inform / ignore**: “triage thinks the user should **do** something durable (reply, pay, confirm, schedule…).” Persisted as **`requiresUserAction`** + optional **`actionSummary`**. Set at classification time and **left unchanged on archive** so you can still reason about history; **working todos** = **unarchived** ∧ **`requiresUserAction`** in agent workflows. |
+| **Context** | Background facts for **you** (the agent); inbox matching **ignores** context today | "Kirsten is my property manager" |
+| **Action required** (JSON) | Reserved for future extensions; **v1 deterministic** inbox does not set these from rules | **`requiresUserAction`**, **`actionSummary`** — keep **`false` / empty** unless a later release defines typed signals |
 
 The agent should think of this as **mailbox memory**:
 
 - **Category** says what kind of email it is.
-- **Rules** say what the user wants done with it.
-- **Context** says what the user means when the rule is ambiguous.
-- **Action required** says whether this message implied a **task**, independent of whether it was **`notify`** (interrupt now) or **`inform`** (review soon).
+- **Rules** say what the user wants done with it (typed matchers only).
+- **Context** documents meaning for agents; it does **not** change classification until a future feature uses it.
+- **Action required** fields exist in JSON for compatibility; deterministic v1 does not populate them from triage.
 
 That combination is what makes `zmail` improve over time instead of acting like a stateless filter.
 
@@ -45,40 +47,46 @@ That combination is what makes `zmail` improve over time instead of acting like 
 
 When supported, keep inbox customization in **`~/.zmail/rules.json`** so it survives DB rebuilds and can be maintained by either a human or an agent.
 
-Typical shape:
+**Version 2** shape (each rule has **`kind`**: **`regex`**):
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "rules": [
     {
-      "id": "x9p4",
-      "condition": "security alerts from any financial institution",
-      "action": "notify"
+      "kind": "regex",
+      "id": "bank-domain",
+      "action": "notify",
+      "priority": 0,
+      "fromDomainPattern": "(?i)^mybank\\.example$",
+      "description": "Bank notifications"
     },
     {
-      "id": "w5j1",
-      "condition": "routine shipping and tracking updates unless delivery is today",
-      "action": "ignore"
+      "kind": "regex",
+      "id": "invoice-subject",
+      "action": "inform",
+      "priority": 10,
+      "subjectPattern": "(?i)invoice|payment due"
     },
     {
-      "id": "q2r6",
-      "condition": "personal mail from close friends that is usually worth mentioning but rarely urgent",
-      "action": "inform"
+      "kind": "regex",
+      "id": "noreply-from",
+      "action": "ignore",
+      "priority": 0,
+      "fromPattern": "(?i)^no-?reply@",
+      "description": "Noreply-style From (example; bundled defaults use a broader pattern)"
     }
   ],
   "context": [
     {
       "id": "d1g5",
       "text": "Kirsten is my property manager"
-    },
-    {
-      "id": "p7a3",
-      "text": "Currently closing on a house; mortgage and title emails are high priority until June 2026"
     }
   ]
 }
 ```
+
+Run **`zmail rules validate`** after edits. If the file is legacy v1, corrupt JSON, or missing **`kind`** on rules, the CLI prints a clear error and suggests **`zmail rules reset-defaults --yes`** (renames the current file to **`rules.json.bak.<uuid>`** and installs bundled v2 defaults) or manual / agent migration to typed rules. **`zmail rules add`** takes **`--action`** and at least one of **`--subject-pattern`** / **`--body-pattern`** / **`--from-pattern`** (regex on subject, stored body text, or sender address). Use **`--from-pattern`** for domains or full addresses (e.g. `@vendor\.com`). **`categoryPattern`** / **`fromDomainPattern`** are edited in **`rules.json`** (or come from bundled defaults). Optional **`--priority`**, **`--description`**, **`--no-preview`**, **`--preview-window`**. See **`zmail rules add --help`**.
 
 Keep entries:
 
@@ -93,7 +101,7 @@ Prefer one precise rule over a paragraph of prose.
 
 ## Actions to use
 
-Rules should map to a small action set (**notify / inform / ignore**). The model **also** emits **`requiresUserAction`** per message: that is **not** a fourth rule action—it is an extra boolean (plus **`actionSummary`**) for “does this imply a **user todo**?” Ephemeral **OTP / magic-link** mail is guided **not** to set **`requiresUserAction`** unless there is a separate durable task.
+Rules map to a small action set (**notify / inform / ignore**). **`requiresUserAction` / `actionSummary`** are **not** rule actions; deterministic v1 does not set them from classification. Ephemeral **OTP / magic-link** mail is often **`notify`** for visibility; agents still use **`search` + `read`** when the user asks for a code.
 
 | Action | Use when | Typical effect |
 | ------ | -------- | -------------- |
@@ -104,8 +112,7 @@ Rules should map to a small action set (**notify / inform / ignore**). The model
 Good examples:
 
 - **`notify`**: fraud alerts, password resets, urgent direct asks; **OTP codes** are often **`notify`** for visibility but **`requiresUserAction`** is usually **false** (read the code, then archive)—still use **`search` + `read`** when the user asks for a code.
-- **`inform`** + **`requiresUserAction`**: “please confirm by Friday,” invoice to pay, scheduling that needs a reply—shows in **`inbox`**; use **`actionSummary`** to brief the user.
-- **`inform`** without action: FYI threads, low-urgency updates.
+- **`inform`**: FYI threads, low-urgency updates, mail worth listing without treating as urgent.
 - **`ignore`**: newsletters, recruiting drip campaigns, social digests, routine shipping updates.
 
 Legacy CLI strings **`archive`** and **`suppress`** are accepted when adding rules and map to **`ignore`**.
@@ -114,45 +121,34 @@ Legacy CLI strings **`archive`** and **`suppress`** are accepted when adding rul
 
 ## Write good rules
 
-Prefer rules that describe **intent**, not a brittle implementation detail.
+Rules are **executable**, not prose: every row is **`kind: "regex"`** with one or more of **`subjectPattern`**, **`bodyPattern`**, **`fromPattern`**, **`categoryPattern`** (regex on sync **`category`**), **`fromDomainPattern`** (regex on the sender’s domain), or CLI **`--from-pattern`** / **`--body-pattern`** / **`--subject-pattern`**. Bundled defaults use **`categoryPattern`** (e.g. `^list$`) plus from/subject/body patterns — see **`src/rules/default_rules.v2.json`**.
 
 Good:
 
-- "security alerts from any financial institution"
-- "routine shipping and tracking updates unless delivery is today"
-- "mailing list traffic from Rust or Go communities"
+- **`categoryPattern`** / **`fromDomainPattern`** in **`rules.json`** for metadata routing without matching full body
+- **`fromPattern`** / **`zmail rules add --from-pattern`** for sender domains or specific addresses
+- A tight **`subjectPattern`** for recurring subject lines (invoices, security codes)
 
 Avoid:
 
-- "emails with subject line ending in 30% off"
-- "anything from `noreply@example.com`" when the real preference is broader
-- giant compound rules that mix unrelated concepts
-
-Good rule-writing habits:
-
-- Mention the **topic** or **meaning**, not just one sender.
-- Include the **exception** when one matters.
-- Split unrelated behaviors into separate rules.
-- Remove time-bound rules when the situation ends.
+- Overly broad regex that false-positive on personal mail
+- Duplicating the bundled defaults unless you need a different **`action`** or **`priority`**
+- Mixing many unrelated signals in one regex — prefer several rules with clear **`priority`**
 
 ---
 
-## Use context for facts, not actions
+## Use context for facts (agent-facing)
 
-Put stable background knowledge in **`context`**, not in rule text.
+Put stable background knowledge in **`context`** so **you** (the agent) remember user intent when proposing **new typed rules**. The inbox engine does **not** read context for matching today.
 
 Good context:
 
 - "Kirsten is my property manager"
 - "Ranch and Son Story refer to the same real estate project"
-- "I am job hunting through May 2026"
 
 Bad context:
 
-- "notify me about Kirsten"
-- "ignore LinkedIn digests" (put that in a **rule** instead)
-
-Rule of thumb: if the statement implies **what to do**, it is probably a rule. If it explains **why a message matters**, it is probably context.
+- "notify me about Kirsten" → translate into a **`regex`** rule instead. (use `zmail who` to find the precise regex)
 
 ---
 
@@ -209,11 +205,10 @@ When the installed version supports diagnostics, use them to answer:
 
 - Why was this message surfaced?
 - Which rule matched?
-- Was the decision from a rule, model, cache, or fallback?
-- What category did zmail assign?
-- Does triage mark **`requiresUserAction`**, and what **`actionSummary`** did the model give?
+- Was the decision from a **rule** (see **`matchedRuleIds`**) or **fallback**?
+- What category did zmail assign (provider labels)?
 
-Use **`counts.actionRequired`** in **`inbox`** JSON to see how many messages in the pass were flagged as needing user follow-up (across **`notify`**, **`inform`**, and **`ignore`** rows).
+**`counts.actionRequired`** may stay at **0** in deterministic v1; do not rely on it for triage todos until a future release defines how those fields are set.
 
 If the result surprises the user:
 

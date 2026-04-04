@@ -664,6 +664,20 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 ---
 
+### ADR-028: Deterministic Inbox — Typed Rules, No LLM Triage
+
+**Decision:** `zmail inbox` classifies messages using **only** **`kind: "regex"`** rules in **`~/.zmail/rules.json`** (version **2** — regex on subject/body/from, optional **`categoryPattern`** / **`fromDomainPattern`**) plus a documented **non-LLM fallback** for candidates that match no rule. It does **not** call OpenAI or any remote model. **OpenAI** remains for **`zmail ask`**, **`zmail draft edit`**, setup/wizard validation, and similar features.
+
+**Rationale:** Inbox triage must be **predictable**, **offline-capable**, and **cheap** at scale. Agents and humans maintain rules explicitly; there is no free-text “condition string” interpreted by a model on the inbox path. Optional **`context`** entries in `rules.json` are **for agents** (documentation / future use); the inbox matcher ignores them for classification.
+
+**Rules file:** On first use or setup, a **bundled default** rules pack is written if `rules.json` is missing (e.g. **`categoryPattern`** for provider categories, noreply/marketing-style regex, OTP-style regex → **notify**). **`zmail rules validate`** checks schema and constraints. **`rules_fingerprint`** hashes the normalized rule set (and context for cache invalidation semantics); inbox no longer depends on an LLM prompt version.
+
+**JSON contract:** Rows expose **`decisionSource`** (`rule`, `fallback`, etc.) and **`matchedRuleIds`** when applicable. **`requiresUserAction` / `actionSummary`:** v1 deterministic inbox leaves them **false** / empty unless extended later; columns remain for forward compatibility and cached rows.
+
+**See also:** [OPP-037](opportunities/OPP-037-typed-inbox-rules-eval-style.md), [ADR-027](#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump), [`skills/zmail/references/INBOX-CUSTOMIZATION.md`](../skills/zmail/references/INBOX-CUSTOMIZATION.md).
+
+---
+
 ## Open Questions
 
 - **Rust cutover packaging:** How end users install the Rust binary (and whether npm remains a thin wrapper or is retired) — tracked in [ADR-025](#adr-025-rust-port--parallel-implementation-pre-cutover), [RUST_PORT.md](RUST_PORT.md), and [OPP-030](opportunities/OPP-030-rust-port-cutover.md).

@@ -417,10 +417,9 @@ fn maybe_rebuild_stale_db(path: &Path) -> Result<(), DbError> {
             false,
         )) {
             Ok(s) => eprintln!(
-                "Inbox bootstrap: bulk-archived {} older messages; classified {} (LLM skipped: {})",
+                "Inbox bootstrap: bulk-archived {} older messages; classified {} candidates (deterministic rules)",
                 s.bulk_archived_older_than_cutoff,
-                s.inbox_candidates_classified,
-                s.llm_skipped_no_api_key
+                s.inbox_candidates_classified
             ),
             Err(e) => eprintln!("Inbox bootstrap failed: {e}"),
         }
@@ -939,10 +938,13 @@ mod tests {
             )
             .unwrap();
 
-        assert_eq!(scan_count, 0);
+        // Inbox bootstrap records a scan and repopulates decisions for classified candidates.
+        assert_eq!(scan_count, 1);
         assert_eq!(alert_count, 0);
-        assert_eq!(decision_count, 0);
-        assert_eq!(archived, 1);
+        assert_eq!(decision_count, 1);
+        // Bulk archive may mark old mail archived first; deterministic inbox then sets
+        // `is_archived = 0` for notify/inform (this fixture classifies as non-ignore).
+        assert_eq!(archived, 0);
     }
 
     #[test]

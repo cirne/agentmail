@@ -219,10 +219,9 @@ pub(crate) fn run_rebuild_index() -> CliResult {
     )) {
         Ok(s) => {
             eprintln!(
-                "Inbox bootstrap: bulk-archived {} older-than-window messages; classified {} candidates (LLM skipped: {})",
+                "Inbox bootstrap: bulk-archived {} older-than-window messages; classified {} candidates (deterministic rules)",
                 s.bulk_archived_older_than_cutoff,
-                s.inbox_candidates_classified,
-                s.llm_skipped_no_api_key
+                s.inbox_candidates_classified
             );
         }
         Err(e) => eprintln!("Inbox bootstrap failed: {e}"),

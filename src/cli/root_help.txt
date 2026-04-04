@@ -10,6 +10,7 @@ Monitor & manage inbox
   zmail refresh [--force] [--text]               # day-to-day: fetch new mail since last sync (forward sync)
   zmail ask "<question>" [--verbose]
   zmail inbox [<window>] [--since YYYY-MM-DD] [--thorough] [--text]
+  zmail rules validate|reset-defaults --yes|list|show <id>|add|edit <id>|remove <id>|feedback  (see zmail rules --help; ~/.zmail/rules.json)
   zmail archive <message_id> … [--undo]
 
 Search & read

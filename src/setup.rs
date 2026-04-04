@@ -164,6 +164,7 @@ pub fn write_zmail_config_and_env(p: &WriteZmailParams<'_>) -> io::Result<()> {
         dotenv.push_str(&format!("ZMAIL_OPENAI_API_KEY={k}\n"));
     }
     fs::write(p.home.join(".env"), dotenv)?;
+    crate::rules::ensure_default_rules_file(p.home).map_err(|e| io::Error::other(e.to_string()))?;
     Ok(())
 }
 

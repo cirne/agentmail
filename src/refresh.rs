@@ -277,12 +277,13 @@ pub fn inbox_json_hints(
     counts: &InboxDispositionCounts,
     candidates_scanned: usize,
     diagnostics: bool,
+    processed: Option<&[RefreshPreviewRow]>,
 ) -> Vec<String> {
     let mut hints = Vec::new();
     if surfaced.is_empty() {
         if counts.action_required > 0 {
             hints.push(format!(
-                "{} message(s) need your action — run `zmail inbox --diagnostics` for full rows (requiresUserAction / actionSummary). Archive when done.",
+                "{} message(s) flagged action-required — run `zmail inbox --diagnostics` for full rows. (Deterministic inbox v1 keeps these false unless extended later.) Archive when done.",
                 counts.action_required
             ));
         }
@@ -309,7 +310,7 @@ pub fn inbox_json_hints(
                 .map(|(a, _)| a)
                 .unwrap_or("");
             hints.push(format!(
-                "Most surfaced mail is from {top_sender}. Add a sender- or domain-scoped rule or context with `zmail rules`."
+                "Most surfaced mail is from {top_sender}. Add a sender- or domain-scoped rule with `zmail rules`."
             ));
         }
     }
@@ -331,7 +332,22 @@ pub fn inbox_json_hints(
 
     if !diagnostics {
         hints.push(
-            "Re-run with --diagnostics to see per-message decision source and matched rule ids."
+            "Re-run with --diagnostics for per-message decisionSource, matchedRuleIds, and notes."
+                .to_string(),
+        );
+    }
+
+    let fallback_like = processed
+        .map(|rows| {
+            rows.iter()
+                .filter(|r| r.decision_source.as_deref() == Some("fallback"))
+                .count()
+        })
+        .unwrap_or(0);
+    let proc_len = processed.map(|r| r.len()).unwrap_or(0);
+    if proc_len >= 8 && fallback_like * 100 / proc_len >= 60 {
+        hints.push(
+            "Many messages used fallback (no rule match). Consider adding domain, category, or regex rules in ~/.zmail/rules.json — see `zmail rules validate`."
                 .to_string(),
         );
     }
@@ -347,7 +363,7 @@ pub fn inbox_json_hints(
 
     if counts.action_required > 0 {
         hints.push(format!(
-            "{} message(s) need your action (see requiresUserAction / actionSummary in JSON); archive when done.",
+            "{} message(s) need follow-up when action-required is set; archive when done.",
             counts.action_required
         ));
     }
@@ -789,6 +805,7 @@ mod inbox_json_hints_tests {
             &InboxDispositionCounts::default(),
             0,
             false,
+            None,
         );
         assert!(hints.is_empty());
     }
@@ -806,9 +823,10 @@ mod inbox_json_hints_tests {
             },
             3,
             false,
+            None,
         );
         assert_eq!(hints.len(), 1);
-        assert!(hints[0].contains("need your action"));
+        assert!(hints[0].contains("action-required"));
         assert!(hints[0].contains("zmail inbox"));
     }
 
@@ -829,6 +847,7 @@ mod inbox_json_hints_tests {
             },
             50,
             true,
+            None,
         );
         assert!(
             hints.iter().any(|h| h.contains("bulk@corp.com")),
@@ -850,6 +869,7 @@ mod inbox_json_hints_tests {
             },
             1,
             false,
+            None,
         );
         assert!(hints.iter().any(|h| h.contains("--diagnostics")));
     }
@@ -868,6 +888,7 @@ mod inbox_json_hints_tests {
             },
             1,
             true,
+            None,
         );
         assert!(!hints.iter().any(|h| h.contains("--diagnostics")));
     }
@@ -883,6 +904,7 @@ mod inbox_json_hints_tests {
             &InboxDispositionCounts::default(),
             100,
             true,
+            None,
         );
         assert!(hints.iter().any(|h| h.contains("Large surfaced set")));
     }
@@ -981,9 +1003,36 @@ mod inbox_json_hints_tests {
             },
             1,
             true,
+            None,
+        );
+        assert!(hints.iter().any(|h| h.contains("follow-up")), "{hints:?}");
+    }
+
+    #[test]
+    fn fallback_heavy_hint_when_processed_is_mostly_fallback() {
+        let rows = vec![sample_row("a@b.com", "one")];
+        let processed: Vec<RefreshPreviewRow> = (0..10)
+            .map(|i| {
+                let mut r = sample_row(&format!("u{i}@x.com"), "x");
+                r.decision_source = Some("fallback".into());
+                r
+            })
+            .collect();
+        let hints = inbox_json_hints(
+            InboxSurfaceMode::Check,
+            &rows,
+            &InboxDispositionCounts {
+                notify: 1,
+                inform: 0,
+                ignore: 0,
+                action_required: 0,
+            },
+            1,
+            true,
+            Some(&processed),
         );
         assert!(
-            hints.iter().any(|h| h.contains("need your action")),
+            hints.iter().any(|h| h.contains("used fallback")),
             "{hints:?}"
         );
     }

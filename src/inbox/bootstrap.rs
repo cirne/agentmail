@@ -2,10 +2,10 @@
 
 use rusqlite::Connection;
 
-use crate::config::{resolve_openai_api_key, Config, LoadConfigOptions};
+use crate::config::Config;
+use crate::inbox::rule_match::DeterministicInboxClassifier;
 use crate::inbox::scan::{
-    run_inbox_scan, InboxOwnerContext, OpenAiInboxClassifier, RunInboxScanError,
-    RunInboxScanOptions,
+    run_inbox_scan, InboxOwnerContext, RunInboxScanError, RunInboxScanOptions,
 };
 use crate::inbox::state::{bulk_archive_messages_older_than, clear_inbox_tables, InboxSurfaceMode};
 use crate::inbox_window::parse_inbox_window_to_iso_cutoff;
@@ -16,7 +16,6 @@ use crate::rules::{load_rules_file, rules_fingerprint};
 pub struct PostRebuildBootstrapSummary {
     pub bulk_archived_older_than_cutoff: usize,
     pub inbox_candidates_classified: usize,
-    pub llm_skipped_no_api_key: bool,
 }
 
 fn zmail_home_from_cfg(cfg: &Config) -> std::path::PathBuf {
@@ -26,7 +25,7 @@ fn zmail_home_from_cfg(cfg: &Config) -> std::path::PathBuf {
         .unwrap_or_else(|| cfg.data_dir.clone())
 }
 
-/// Clear inbox tables, archive mail older than the rolling window, optionally classify unarchived mail and archive `ignore`.
+/// Clear inbox tables, archive mail older than the rolling window, classify unarchived mail and archive `ignore`.
 pub async fn run_post_rebuild_inbox_bootstrap(
     conn: &Connection,
     cfg: &Config,
@@ -46,18 +45,6 @@ pub async fn run_post_rebuild_inbox_bootstrap(
         bulk_archive_messages_older_than(conn, cutoff.as_str())?;
 
     let home = zmail_home_from_cfg(cfg);
-    let api_key = resolve_openai_api_key(&LoadConfigOptions {
-        home: Some(home.clone()),
-        env: None,
-    });
-    let Some(ref key) = api_key else {
-        summary.llm_skipped_no_api_key = true;
-        eprintln!("Inbox bootstrap: skipping recent-inbox categorization (no OpenAI API key).");
-        return Ok(summary);
-    };
-
-    eprintln!("Inbox bootstrap: categorizing recent inbox (LLM)…");
-
     let rules = load_rules_file(&home)?;
     let imap_user = cfg.imap_user.as_str();
     let owner = InboxOwnerContext::from_addresses(
@@ -65,7 +52,9 @@ pub async fn run_post_rebuild_inbox_bootstrap(
         &cfg.imap_aliases,
     );
     let fp = rules_fingerprint(&rules);
-    let mut classifier = OpenAiInboxClassifier::new(key, &rules, diagnostics, &owner);
+    let mut classifier = DeterministicInboxClassifier::new(&rules)?;
+
+    eprintln!("Inbox bootstrap: categorizing recent inbox (deterministic rules)…");
 
     let scan = run_inbox_scan(
         conn,

@@ -10,7 +10,7 @@ End-user **`/zmail`** skill detail. **Developing** zmail: use repo **`.cursor/sk
 2. **Always:** `zmail search …` — the code may **already** be indexed; **do not** assume it only appears in `refresh` output.
 3. **Then:** `zmail read <message_id>` on the best match(es) if the snippet is not enough (codes are often in the body).
 
-**Avoid for this task:** `zmail ask` and `zmail inbox` — they send mail-derived text to **OpenAI**; verification lookup is usually a **local** `search` + `read`.
+**Avoid for this task:** `zmail ask` — it can send mail-derived text to **OpenAI**; verification lookup is usually a **local** `search` + `read`. (`zmail inbox` is local/deterministic but **`search` + `read`** is still the straightest path for codes.)
 
 ---
 

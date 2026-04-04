@@ -4,13 +4,13 @@ description: >-
   Agent-native email: IMAP sync to local SQLite + FTS5—lightning-fast local search,
   structured JSON (no webmail UI). Assistants search, read, thread, attachments, draft, and send via CLI or MCP
   without leaving chat or terminal. Built for Claude Code, OpenClaw, Cursor, and any host with shell or MCP.
-  Local-first primitives keep mail on-device; OpenAI powers `zmail ask`, `zmail inbox`, setup/wizard, and `draft edit`.
+  Local-first primitives keep mail on-device; OpenAI powers `zmail ask`, setup/wizard, and `draft edit` (not `zmail inbox`, which is deterministic typed rules + local fallback).
   Requires `zmail` on PATH (install via install.sh from GitHub Releases — no Node), IMAP credentials, and an API key
-  for LLM paths. OTP/login codes: optional `refresh`, then `search` + `read` (skill § Login / OTP).
+  for LLM-backed commands. OTP/login codes: optional `refresh`, then `search` + `read` (skill § Login / OTP).
   Source: github.com/cirne/zmail.
 license: "Refer to https://github.com/cirne/zmail for project license and terms."
 compatibility: >-
-  `zmail` binary on PATH (from install.sh or cargo build). Network: IMAP, OpenAI (ask/inbox/setup),
+  `zmail` binary on PATH (from install.sh or cargo build). Network: IMAP, OpenAI (ask/setup/draft edit),
   optional enrich providers. Disk: ~/.zmail (SQLite + maildir).
 metadata:
   version: "0.2.6"
@@ -28,31 +28,31 @@ metadata:
 
 # /zmail — Email your agent can actually use
 
-**Tagline:** **Stay in agent / chat / zmail—skip the inbox tab.** Your mail is a **local SQLite + FTS5** index: **lightning-fast** search and reads over structured CLI/MCP output, not a mail website. Let **AI** handle triage, answers, and drafts (`zmail ask`, `zmail inbox`, `draft` …) so you **never have to stare at a traditional inbox** for routine work.
+**Tagline:** **Stay in agent / chat / zmail—skip the inbox tab.** Your mail is a **local SQLite + FTS5** index: **lightning-fast** search and reads over structured CLI/MCP output, not a mail website. Let **AI** handle answers and drafts (`zmail ask`, `draft` …) and **typed rules** handle inbox triage (`zmail inbox`) so you **never have to stare at a traditional inbox** for routine work.
 
 **What it is:** Not a human mail UI. **IMAP** sync, maildir-style storage, **FTS5** search, **SMTP send-as-user**. Same pipeline from **Claude Code**, **OpenClaw**, **Cursor**, or automation (see [Agent workflow: draft and send](#agent-workflow-draft-and-send)).
 
-**Why:** **Local-first** primitives (`search`, `read`, `thread`, …) stay on your machine; LLM-backed features (`ask`, `inbox`, `draft edit`, setup) call **OpenAI**—use when the mailbox owner accepts that tradeoff.
+**Why:** **Local-first** primitives (`search`, `read`, `thread`, …) stay on your machine; LLM-backed features (`ask`, `draft edit`, setup/wizard) call **OpenAI** when configured—use when the mailbox owner accepts that tradeoff. **`zmail inbox`** is **deterministic** (typed rules + local fallback) and does **not** need an API key.
 
-**Personalization:** To make **`zmail inbox`** smarter over time, keep durable inbox rules and user context in **`~/.zmail/rules.json`** and prefer **`zmail rules ...`** when the installed version exposes it. That gives the agent a stable memory for what to **notify**, **inform**, and **ignore** instead of relearning preferences every turn. The classifier also sets an orthogonal **action-required** signal (**`requiresUserAction`** + optional **`actionSummary`** in JSON) for “this message implied a durable todo (reply, pay, confirm…),” separate from urgency—see [Inbox workflow](#inbox-workflow). **`ignore`** may auto-archive locally when a rule matched, excluded category, no-reply sender, or unsubscribe text; other **`ignore`** rows stay in the working set. For mail that no longer needs focused attention, use **`zmail archive`** (or MCP **`archive_mail`**). Rules and maintenance: [references/INBOX-CUSTOMIZATION.md](references/INBOX-CUSTOMIZATION.md).
+**Personalization:** To make **`zmail inbox`** smarter over time, keep durable **typed** rules (and optional **context** for agents) in **`~/.zmail/rules.json`** and prefer **`zmail rules validate` / `zmail rules add`**. That gives stable **notify** / **inform** / **ignore** behavior instead of relearning preferences every turn. JSON may include **`requiresUserAction`** / **`actionSummary`** for forward compatibility; **v1** deterministic inbox leaves them **false** / empty. **`ignore`** may auto-archive locally when a rule matched, excluded category, no-reply sender, or unsubscribe text; other **`ignore`** rows stay in the working set. For mail that no longer needs focused attention, use **`zmail archive`** (or MCP **`archive_mail`**). Rules and maintenance: [references/INBOX-CUSTOMIZATION.md](references/INBOX-CUSTOMIZATION.md).
 
 ### Inbox workflow
 
 | Piece | Role |
 | ----- | ---- |
-| **Working inbox** | Messages that are **not** locally archived (`is_archived = 0`). **`zmail inbox`** only considers this set for LLM triage. |
+| **Working inbox** | Messages that are **not** locally archived (`is_archived = 0`). **`zmail inbox`** only considers this set for triage. |
 | **`zmail refresh`** | Pulls mail from IMAP into the local index (forward sync by default; **`--since`** for backfill / initial history). Run on a schedule or before work when **recency** matters. **Does not** call OpenAI. |
-| **`zmail inbox`** | LLM triage over **already-indexed** mail: **notify**, **inform**, and **ignore** for the unarchived window (positional/`--since` window or **`inbox.defaultWindow`**). JSON includes **`requiresUserAction`**, **`actionSummary`**, **`counts.actionRequired`**, and optional **`hints`**. Use **`--diagnostics`** or **`--thorough`** when you need full rows or a complete rescan. Run **`zmail refresh`** first when you need the latest server mail. |
-| **Action required** | Set **once** at classification time (sticky). **`zmail archive`** does **not** clear the flag—it removes the message from the **working inbox** so future **`inbox`** passes skip it. **Working todos** ≈ unarchived rows with **`requiresUserAction`**. |
+| **`zmail inbox`** | **Deterministic** triage over **already-indexed** mail (**typed rules** + **fallback**): **notify**, **inform**, and **ignore** for the unarchived window (positional/`--since` window or **`inbox.defaultWindow`**). JSON includes **`decisionSource`**, **`matchedRuleIds`**, optional **`hints`**, and (for compatibility) **`requiresUserAction`** / **`actionSummary`** / **`counts.actionRequired`** (v1 keeps action-required unset). Use **`--diagnostics`** or **`--thorough`** when you need full rows or a complete rescan. Run **`zmail refresh`** first when you need the latest server mail. |
+| **Action required** | Reserved in JSON; **`zmail archive`** still removes mail from the **working inbox** so future **`inbox`** passes skip it. Until a future extension sets action-required from triage, treat **open workload** as **unarchived** mail you care about from **`notify`/`inform`** output. |
 | **`zmail archive`** | Marks mail as handled for proactive triage. **Does not** delete server mail or hide mail from **`search` / `read` / `thread` / `ask`**. |
 
 #### Polling and review — best practices for agents
 
 1. **Fresh index:** Schedule **`zmail refresh`** (cron / heartbeat) so new mail is indexed without manual steps.
-2. **Triage:** Run **`zmail inbox`** on a cadence or when the user asks; after **`refresh`** if the index must be current. Scan JSON for **`requiresUserAction`** / **`actionSummary`** / **`counts.actionRequired`**; use **`zmail archive`** when a thread no longer needs a place in the working set.
-3. **Deep visibility:** Use **`--diagnostics`** (or **`--thorough`** where appropriate) when you need **every** candidate row, **`processed`**, rule ids, and notes—useful when **`actionRequired`** > 0 but the default surfaced list is short.
-4. **After archive:** Do not assume the **action-required** bit was cleared; assume the message **left the working set**. Use **`search` / `read` / `thread`** if you need it again.
-5. **OTP / one-shot codes:** The model is guided **not** to mark ephemeral codes as durable todos; still prefer **`search` + `read`** for codes when the user asks—see [Login / OTP](#login--otp--verification-codes).
+2. **Triage:** Run **`zmail inbox`** on a cadence or when the user asks; after **`refresh`** if the index must be current. Scan JSON for **`notify`/`inform`/`ignore`**, **`decisionSource`**, and **`hints`**; use **`zmail archive`** when a thread no longer needs a place in the working set.
+3. **Deep visibility:** Use **`--diagnostics`** (or **`--thorough`** where appropriate) when you need **every** candidate row, **`processed`**, rule ids, and notes.
+4. **After archive:** Assume the message **left the working set**. Use **`search` / `read` / `thread`** if you need it again.
+5. **OTP / one-shot codes:** Prefer **`search` + `read`** for codes when the user asks—see [Login / OTP](#login--otp--verification-codes).
 
 ## Transparency (registries & security review)
 
@@ -63,8 +63,8 @@ Use this block to keep **ClawHub / OpenClaw registry fields** aligned with the s
 | **Provenance** | Source and issues: **[github.com/cirne/zmail](https://github.com/cirne/zmail)** |
 | **Install** | **`curl -fsSL https://raw.githubusercontent.com/cirne/zmail/main/install.sh \| bash`** (prebuilt Rust binary from GitHub Releases). Prerelease: add **`--nightly`**. See repo **`AGENTS.md`**. Legacy npm **`@cirne/zmail`** exists for reference only. |
 | **On PATH** | Default install: **`~/.local/bin/zmail`** — ensure **`~/.local/bin`** is on **`PATH`**, or set **`INSTALL_PREFIX`**. |
-| **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, **`zmail inbox`**, and **`zmail draft edit`**. |
-| **Privacy / data leaving the device** | **`zmail ask`**, **`zmail inbox`**, and **`zmail draft edit`** (LLM revision) can send **email-derived or draft content** to **OpenAI**. Only use them if the **mailbox owner** accepts that tradeoff. Primitives **`search` / `read` / `thread` / `attachment`** and **`zmail draft rewrite`** (literal body replace, no LLM) are local only once mail is synced. |
+| **Required secrets (after setup)** | **`ZMAIL_EMAIL`**, **`ZMAIL_IMAP_PASSWORD`** (IMAP; e.g. Gmail app password). **`ZMAIL_OPENAI_API_KEY`** or **`OPENAI_API_KEY`** for setup wizard, **`zmail ask`**, and **`zmail draft edit`** (not required for **`zmail inbox`**). |
+| **Privacy / data leaving the device** | **`zmail ask`** and **`zmail draft edit`** (LLM revision) can send **email-derived or draft content** to **OpenAI**. **`zmail inbox`** does **not** call OpenAI. Only use LLM commands if the **mailbox owner** accepts that tradeoff. Primitives **`search` / `read` / `thread` / `attachment`** and **`zmail draft rewrite`** (literal body replace, no LLM) are local only once mail is synced. |
 | **Credentials on disk** | Secrets live under **`ZMAIL_HOME/.env`** (and non-secret settings in **`config.json`**). They are used only to talk to **your** IMAP host and (when configured) **OpenAI**—not to third-party analytics or the zmail project. Treat **`.env`** like any password file (permissions, backups, don’t paste into chats). |
 | **IMAP / send posture** | **SMTP send-as-user** via **`zmail send`** (including **`zmail send <draft-id>`**) and **`zmail draft …`** (and MCP `send_email` / `create_draft` / `send_draft` / `list_drafts`). Optional **`ZMAIL_SEND_TEST=1`** restricts recipients to **`lewiscirne+zmail@gmail.com`** for dev/test sends. Sync remains a **local cache** of server mail—deleting local data does not remove server-side mail. |
 | **MCP (optional)** | **`zmail mcp`** uses **stdio** JSON-RPC only (stdin/stdout)—**no** in-process HTTP server or listening TCP port for MCP. |
@@ -85,7 +85,7 @@ OpenClaw parses **`metadata.openclaw.requires`** per [Creating skills](https://d
 6. **Keep the index fresh:** **`search`**, **`read`**, **`thread`**, **`attachment`**, and **`ask`** only see mail already synced locally—run **`zmail refresh`** regularly (especially before mail work when **recency** matters), and recommend the user **schedule** **`zmail refresh`** (cron, launchd, or a host **heartbeat**) so new mail is indexed without manual steps ([Keeping mail fresh](#keeping-mail-fresh-indexed-and-searchable)).
 7. **Learn the CLI from the CLI** (use the **Rust** `zmail` from **`install.sh`** / releases): run **`zmail`**, **`zmail --help`**, **`zmail --version`** (**`install.sh`** reinstall/upgrade lines), and **`zmail <command> --help`** (e.g. **`zmail draft --help`** for compose, LLM **`draft edit`**, **`draft rewrite`**, **`--text`** output). Read any **`hint`** (and truncation fields) in **JSON** output—zmail uses them to disclose the next capability ([Canonical docs & discovery](references/CANONICAL-DOCS.md)).
 8. For questions over mail, prefer **`zmail ask`** first; use **`search` / `read` / `thread` / `who` / `attachment`** when you need fine control ([Ask vs primitives](#zmail-ask-vs-primitives)). To **reply or send**, follow **[Agent workflow: draft and send](#agent-workflow-draft-and-send)** (detail: [references/DRAFT-AND-SEND.md](references/DRAFT-AND-SEND.md)).
-9. **Inbox rhythm:** **`zmail refresh`** on a schedule keeps the index current; run **`zmail inbox`** for LLM triage over the unarchived window (**notify / inform / ignore**). Use JSON **`requiresUserAction`**, **`actionSummary`**, and **`counts.actionRequired`** for email todos. **`zmail archive`** removes mail from the working inbox; it does **not** clear the stored action-required flag—rely on **unarchived** filters for “open” work. Primitives still see **all** mail including archived—see [Inbox workflow](#inbox-workflow) and [Polling and review — best practices](#polling-and-review--best-practices-for-agents).
+9. **Inbox rhythm:** **`zmail refresh`** on a schedule keeps the index current; run **`zmail inbox`** for **deterministic** triage over the unarchived window (**notify / inform / ignore**). Maintain **`~/.zmail/rules.json`** so behavior stays aligned with the user. **`zmail archive`** removes mail from the working inbox. Primitives still see **all** mail including archived—see [Inbox workflow](#inbox-workflow) and [Polling and review — best practices](#polling-and-review--best-practices-for-agents).
 10. For recurring inbox triage, maintain durable rules/context so the agent can personalize **`zmail inbox`** over time instead of treating every pass as stateless. See [references/INBOX-CUSTOMIZATION.md](references/INBOX-CUSTOMIZATION.md).
 11. **Login / OTP / verification codes:** prefer **`refresh` (optional) → `search` → `read`** on the **local index**—do not assume the code only appears in **`refresh`** stdout; full steps: [Login / OTP / verification codes](#login--otp--verification-codes) and [references/AUTH-CODES.md](references/AUTH-CODES.md).
 12. Never paste secrets into chat logs; use env or flags in the **user’s** shell.
@@ -172,7 +172,7 @@ zmail setup
 
 If any required value is missing, `zmail setup` prints what’s missing and exits—fix env/flags and retry.
 
-**OpenAI key:** Required for **`zmail setup`** / **`zmail wizard`** as shipped. It is stored in **`~/.zmail/.env`**. Same key powers **`zmail ask`**, **`zmail inbox`**, **`zmail draft edit`** (natural-language revisions), and related features. Search/read/thread/who/attachment and **`zmail draft rewrite`** do **not** need the API for the core path once mail is indexed.
+**OpenAI key:** Required for **`zmail setup`** / **`zmail wizard`** as shipped. It is stored in **`~/.zmail/.env`**. Same key powers **`zmail ask`** and **`zmail draft edit`** (natural-language revisions). **`zmail inbox`** does **not** use it. Search/read/thread/who/attachment and **`zmail draft rewrite`** do **not** need the API for the core path once mail is indexed.
 
 ---
 
@@ -200,7 +200,7 @@ zmail treats **agents as the compose surface**: outbound mail is a **local draft
 | Secret / file | Required? | Purpose |
 |---------------|-----------|---------|
 | `ZMAIL_IMAP_PASSWORD` in **`.env`** | **Yes** (for sync) | IMAP login (Gmail app password). |
-| `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) in **`.env`** | **Yes** at setup; **yes** for `ask` / `inbox` / `draft edit` | LLM features (+ LLM draft revision). |
+| `ZMAIL_OPENAI_API_KEY` (or `OPENAI_API_KEY`) in **`.env`** | **Yes** at setup; **yes** for `ask` / `draft edit` | LLM features (+ LLM draft revision). Not used for **`inbox`**. |
 | **`config.json`** | **Yes** | Non-secret: IMAP host/port/user, sync defaults (no password in this file). |
 | **`ZMAIL_HOME`** | Optional | Override config root (default `~/.zmail`). |
 
@@ -214,7 +214,7 @@ zmail treats **agents as the compose surface**: outbound mail is a **local draft
 zmail refresh --since 30d  # initial backfill (often runs in background; note log path on stdout)
 zmail refresh              # fetch new mail since last sync
 zmail status              # local sync + index health
-zmail inbox               # LLM triage (local index); run zmail refresh first when recency matters
+zmail inbox               # deterministic triage (local index, rules.json); run zmail refresh first when recency matters
 zmail inbox 24h           # same with explicit rolling window
 zmail ask "your question" # one-shot NL answer (OpenAI); good default for agents
 zmail search 'query'      # FTS hits (JSON default; --text for tables)
@@ -232,7 +232,7 @@ zmail search 'query'      # FTS hits (JSON default; --text for tables)
 
 **Do not** rely on **`refresh`**’s new-mail preview alone—the code may **already** be in the local index from an earlier sync. **Source of truth:** **`zmail search`** (then **`zmail read`** on the best **`message_id`**s).
 
-**Default path (no OpenAI on the core path):** optional **`zmail refresh`** (see **`zmail refresh --help`**), then **`zmail search`** with a **recent window** and auth-ish keywords, then **`zmail read <message_id>`** for the body/snippet if needed. Prefer **primitives** over **`zmail ask`** / **`zmail inbox`** here—avoids sending mail content to an LLM for a simple lookup.
+**Default path (no OpenAI on the core path):** optional **`zmail refresh`** (see **`zmail refresh --help`**), then **`zmail search`** with a **recent window** and auth-ish keywords, then **`zmail read <message_id>`** for the body/snippet if needed. Prefer **primitives** over **`zmail ask`** here—avoids sending mail content to an LLM for a simple lookup. **`zmail inbox`** is local (no OpenAI) but **`search` + `read`** is usually simpler for codes.
 
 **Detail, search hints, MCP parity, and a short output template:** [references/AUTH-CODES.md](references/AUTH-CODES.md).
 
@@ -291,11 +291,11 @@ For **[OpenClaw](https://docs.openclaw.ai/)**, use a **heartbeat** (not a separa
 **Put zmail on the workspace `HEARTBEAT.md` checklist**, for example:
 
 1. **Ingest new mail:** run **`zmail refresh`** so the local index is current (schedule this on a tight loop if you need continuous freshness).
-2. **Triage pass:** run **`zmail inbox`** to survey the unarchived window (**notify / inform / ignore**). Parse **`counts.actionRequired`** and per-row **`requiresUserAction`** / **`actionSummary`**; use **`hints`** and **`zmail inbox --diagnostics`** when you need full rows.
+2. **Triage pass:** run **`zmail inbox`** to survey the unarchived window (**notify / inform / ignore**). Parse **`hints`**, **`decisionSource`**, and **`matchedRuleIds`**; use **`zmail inbox --diagnostics`** when you need full rows.
 3. **After handling:** use **`zmail archive`** for mail that no longer needs focus; archived mail drops out of future **`inbox`** candidate sets but stays visible to **`search` / `read` / `ask`**.
 4. **If nothing needs a human ping**, answer **`HEARTBEAT_OK`** so OpenClaw drops the turn quietly (per Heartbeat docs).
 
-**Cost / habit:** **`zmail refresh`** does **not** call OpenAI; **`zmail inbox`** does. Tune how often you run **`inbox`** to control token spend.
+**Cost / habit:** **`zmail refresh`** and **`zmail inbox`** do **not** call OpenAI; **`zmail ask`** and **`draft edit`** do when configured.
 
 ---
 

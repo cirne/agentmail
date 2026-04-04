@@ -47,10 +47,10 @@ pub use ids::{
 };
 pub use inbox::{
     archive_messages_locally, inbox_candidate_prefetch_limit, preview_rule_impact,
-    record_inbox_scan, run_inbox_scan, run_post_rebuild_inbox_bootstrap, InboxBatchClassifier,
-    InboxCandidate, InboxNotablePick, InboxOwnerContext, InboxSurfaceMode, MockInboxClassifier,
-    OpenAiInboxClassifier, PostRebuildBootstrapSummary, RuleImpactPreview, RunInboxScanError,
-    RunInboxScanOptions, RunInboxScanResult,
+    record_inbox_scan, run_inbox_scan, run_post_rebuild_inbox_bootstrap,
+    DeterministicInboxClassifier, InboxBatchClassifier, InboxCandidate, InboxNotablePick,
+    InboxOwnerContext, InboxSurfaceMode, MockInboxClassifier, PostRebuildBootstrapSummary,
+    RuleImpactPreview, RunInboxScanError, RunInboxScanOptions, RunInboxScanResult,
 };
 pub use inbox_window::parse_inbox_window_to_iso_cutoff;
 pub use mail_category::{
@@ -70,10 +70,10 @@ pub use refresh::{
     print_refresh_text, print_review_text, InboxDispositionCounts, RefreshPreviewRow,
 };
 pub use rules::{
-    add_context, add_rule, build_inbox_rules_prompt, edit_rule, load_rules_file, parse_rule_action,
-    propose_rule_from_feedback, remove_context, remove_rule, rules_fingerprint, rules_path,
-    ContextEntry, ProposedRule, RuleActionKind, RuleFeedbackProposal, RulesError, RulesFile,
-    UserRule,
+    add_regex_rule, add_rule_from_json, edit_rule, ensure_default_rules_file, load_rules_file,
+    parse_rule_action, propose_rule_from_feedback, remove_rule, reset_rules_to_bundled_defaults,
+    rules_fingerprint, rules_path, validate_rules_file, ContextEntry, ProposedRule, RuleActionKind,
+    RuleFeedbackProposal, RulesError, RulesFile, UserRule, MAX_REGEX_PATTERN_LEN,
 };
 pub use search::{
     canonical_first_name, contact_rank_simple, convert_to_or_query, escape_fts5_query,

@@ -1,5 +1,4 @@
 use regex::Regex;
-use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::cli::args::InboxArgs;
@@ -7,10 +6,9 @@ use crate::cli::util::zmail_home_path;
 use crate::cli::CliResult;
 use zmail::{
     build_review_json, connect_imap_session, db, inbox_json_hints, load_rules_file,
-    parse_inbox_window_to_iso_cutoff, print_review_text, resolve_openai_api_key,
-    resolve_sync_mailbox, resolve_sync_since_ymd, run_inbox_scan, InboxSurfaceMode,
-    LoadConfigOptions, OpenAiInboxClassifier, RunInboxScanOptions, SyncDirection, SyncFileLogger,
-    SyncOptions, SyncResult,
+    parse_inbox_window_to_iso_cutoff, print_review_text, resolve_sync_mailbox,
+    resolve_sync_since_ymd, run_inbox_scan, DeterministicInboxClassifier, InboxSurfaceMode,
+    RunInboxScanOptions, SyncDirection, SyncFileLogger, SyncOptions, SyncResult,
 };
 
 pub(crate) trait InboxCliArgs {
@@ -176,15 +174,6 @@ pub(crate) fn run_sync_foreground_refresh(
 }
 
 pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) -> CliResult {
-    let Some(api_key) = resolve_openai_api_key(&LoadConfigOptions {
-        home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
-        env: None,
-    }) else {
-        eprintln!("zmail inbox requires an LLM API key.");
-        eprintln!("Set ZMAIL_OPENAI_API_KEY or run 'zmail setup' with --openai-key.");
-        std::process::exit(1);
-    };
-
     let window_spec = resolve_inbox_window_spec(args.since(), args.window());
     let spec = window_spec.unwrap_or_else(|| cfg.inbox_default_window.clone());
     let cutoff_iso = match parse_inbox_window_to_iso_cutoff(&spec) {
@@ -202,6 +191,7 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
             &scan.counts,
             scan.candidates_scanned,
             args.diagnostics(),
+            Some(scan.processed.as_slice()),
         );
         let json = build_review_json(
             &scan.surfaced,
@@ -240,7 +230,7 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
         batch_size: None,
     };
 
-    let scan = run_triage_scan(cfg, args, &api_key, &opts)?;
+    let scan = run_triage_scan(cfg, args, &opts)?;
     print_scan(&scan)?;
 
     Ok(())
@@ -248,20 +238,17 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
 
 fn run_triage_scan(
     cfg: &zmail::Config,
-    args: &impl InboxCliArgs,
-    api_key: &str,
+    _args: &impl InboxCliArgs,
     opts: &RunInboxScanOptions,
 ) -> Result<zmail::RunInboxScanResult, Box<dyn std::error::Error>> {
     let conn = db::open_file(cfg.db_path())?;
     let owner = (!cfg.imap_user.trim().is_empty()).then(|| cfg.imap_user.clone());
-    let owner_ctx = zmail::InboxOwnerContext::from_addresses(owner.as_deref(), &cfg.imap_aliases);
     let rules = load_rules_file(&zmail_home_path())?;
     let mut scan_opts = opts.clone();
     scan_opts.rules_fingerprint = Some(zmail::rules_fingerprint(&rules));
     scan_opts.owner_address = owner;
 
-    let mut classifier =
-        OpenAiInboxClassifier::new(api_key, &rules, args.diagnostics(), &owner_ctx);
+    let mut classifier = DeterministicInboxClassifier::new(&rules)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let scan = runtime.block_on(run_inbox_scan(&conn, &scan_opts, &mut classifier))?;
     Ok(scan)

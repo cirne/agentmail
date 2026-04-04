@@ -1,13 +1,12 @@
-use crate::cli::args::{RulesCmd, RulesContextCmd};
+use crate::cli::args::RulesCmd;
 use crate::cli::util::{load_cfg, zmail_home_path};
 use crate::cli::CliResult;
-use std::path::PathBuf;
 use zmail::{
-    add_context, add_rule, db, edit_rule, load_rules_file, parse_inbox_window_to_iso_cutoff,
-    preview_rule_impact, print_review_text, propose_rule_from_feedback, remove_context,
-    remove_rule, resolve_openai_api_key, rules_fingerprint, rules_path, InboxDispositionCounts,
-    InboxOwnerContext, InboxSurfaceMode, LoadConfigOptions, OpenAiInboxClassifier,
-    RefreshPreviewRow, RuleImpactPreview, RunInboxScanOptions,
+    add_regex_rule, db, edit_rule, load_rules_file, parse_inbox_window_to_iso_cutoff,
+    preview_rule_impact, print_review_text, propose_rule_from_feedback, remove_rule,
+    reset_rules_to_bundled_defaults, rules_fingerprint, rules_path, validate_rules_file,
+    DeterministicInboxClassifier, InboxDispositionCounts, InboxSurfaceMode, RefreshPreviewRow,
+    RuleImpactPreview, RulesError, RunInboxScanOptions,
 };
 
 #[derive(serde::Serialize)]
@@ -52,14 +51,6 @@ fn build_rule_preview(
     preview_window: Option<&str>,
 ) -> Result<RulePreviewJson, Box<dyn std::error::Error>> {
     let cfg = load_cfg();
-    let Some(api_key) = resolve_openai_api_key(&LoadConfigOptions {
-        home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
-        env: None,
-    }) else {
-        return Ok(RulePreviewJson::unavailable(
-            "Preview skipped because no LLM API key is configured.",
-        ));
-    };
     let window = preview_window
         .map(str::trim)
         .filter(|s| !s.is_empty())
@@ -75,7 +66,6 @@ fn build_rule_preview(
     let conn = db::open_file(cfg.db_path())?;
     let rules = load_rules_file(home)?;
     let owner = (!cfg.imap_user.trim().is_empty()).then(|| cfg.imap_user.clone());
-    let owner_ctx = InboxOwnerContext::from_addresses(owner.as_deref(), &cfg.imap_aliases);
     let opts = RunInboxScanOptions {
         surface_mode: InboxSurfaceMode::Review,
         cutoff_iso,
@@ -90,7 +80,7 @@ fn build_rule_preview(
         notable_cap: None,
         batch_size: None,
     };
-    let mut classifier = OpenAiInboxClassifier::new(&api_key, &rules, true, &owner_ctx);
+    let mut classifier = DeterministicInboxClassifier::new(&rules)?;
     let runtime = tokio::runtime::Runtime::new()?;
     let preview = runtime.block_on(preview_rule_impact(&conn, &opts, &mut classifier, rule_id))?;
     Ok(RulePreviewJson::from_preview(preview))
@@ -125,7 +115,7 @@ fn print_rule_preview_text(preview: &RulePreviewJson) {
         "  matched {} of {} recent inbox candidates",
         preview.matched_count, preview.candidates_scanned
     );
-    println!("  LLM time: {} ms", preview.llm_duration_ms);
+    println!("  classify time: {} ms", preview.llm_duration_ms);
     if preview.matched.is_empty() {
         println!("  No recent messages matched this rule.");
         return;
@@ -137,17 +127,39 @@ fn print_rule_preview_text(preview: &RulePreviewJson) {
 pub(crate) fn run_rules(sub: RulesCmd) -> CliResult {
     let home = zmail_home_path();
     match sub {
+        RulesCmd::Validate => {
+            let rules = load_rules_file(&home)?;
+            validate_rules_file(&rules)?;
+            println!("OK: {} rule(s)", rules.rules.len());
+        }
+        RulesCmd::ResetDefaults { yes } => {
+            if !yes {
+                eprintln!(
+                    "This replaces {} with bundled default rules.\n\
+The current file will be renamed to rules.json.bak.<uuid> in the same directory.\n\
+Re-run with: zmail rules reset-defaults --yes",
+                    rules_path(&home).display()
+                );
+                std::process::exit(1);
+            }
+            match reset_rules_to_bundled_defaults(&home) {
+                Ok(Some(bak)) => {
+                    println!("Backed up previous rules to {}", bak.display());
+                    println!("Wrote bundled defaults to {}", rules_path(&home).display());
+                }
+                Ok(None) => {
+                    println!("Wrote bundled defaults to {}", rules_path(&home).display());
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
         RulesCmd::List { text } => {
             let rules = load_rules_file(&home)?;
             if text {
                 println!("Rules file: {}", rules_path(&home).display());
                 println!("Rules:");
                 for rule in rules.rules {
-                    println!("  [{}] {} -> {}", rule.id, rule.condition, rule.action);
-                }
-                println!("Context:");
-                for entry in rules.context {
-                    println!("  [{}] {}", entry.id, entry.text);
+                    println!("  {}", serde_json::to_string(&rule)?);
                 }
             } else {
                 println!("{}", serde_json::to_string_pretty(&rules)?);
@@ -155,9 +167,9 @@ pub(crate) fn run_rules(sub: RulesCmd) -> CliResult {
         }
         RulesCmd::Show { id, text } => {
             let rules = load_rules_file(&home)?;
-            if let Some(rule) = rules.rules.iter().find(|rule| rule.id == id) {
+            if let Some(rule) = rules.rules.iter().find(|rule| rule.id() == id) {
                 if text {
-                    println!("[{}] {} -> {}", rule.id, rule.condition, rule.action);
+                    println!("{}", serde_json::to_string_pretty(rule)?);
                 } else {
                     println!(
                         "{}",
@@ -167,38 +179,54 @@ pub(crate) fn run_rules(sub: RulesCmd) -> CliResult {
                         }))?
                     );
                 }
-            } else if let Some(entry) = rules.context.iter().find(|entry| entry.id == id) {
-                if text {
-                    println!("[{}] {}", entry.id, entry.text);
-                } else {
-                    println!(
-                        "{}",
-                        serde_json::to_string_pretty(&serde_json::json!({
-                            "type": "context",
-                            "value": entry
-                        }))?
-                    );
-                }
             } else {
-                eprintln!("Rule or context entry not found: {id}");
+                eprintln!("Rule not found: {id}");
                 std::process::exit(1);
             }
         }
         RulesCmd::Add {
             action,
-            condition,
+            subject_pattern,
+            body_pattern,
+            from_pattern,
+            priority,
+            description,
             no_preview,
             preview_window,
             text,
         } => {
-            let rule = add_rule(&home, &action, &condition)?;
+            let has_regex_input = subject_pattern
+                .as_ref()
+                .is_some_and(|s| !s.trim().is_empty())
+                || body_pattern.as_ref().is_some_and(|s| !s.trim().is_empty())
+                || from_pattern.as_ref().is_some_and(|s| !s.trim().is_empty());
+
+            let rule = if has_regex_input {
+                add_regex_rule(
+                    &home,
+                    &action,
+                    subject_pattern,
+                    body_pattern,
+                    from_pattern,
+                    None,
+                    None,
+                    description,
+                    priority,
+                )?
+            } else {
+                return Err(RulesError::InvalidRules(
+                    "add at least one regex pattern: --subject-pattern, --body-pattern, --from-pattern (category/fromDomain: edit rules.json)"
+                        .into(),
+                )
+                .into());
+            };
             let preview = if no_preview {
                 RulePreviewJson::unavailable("Preview skipped because --no-preview was set.")
             } else {
-                build_rule_preview(&home, &rule.id, preview_window.as_deref())?
+                build_rule_preview(&home, rule.id(), preview_window.as_deref())?
             };
             if text {
-                println!("[{}] {} -> {}", rule.id, rule.condition, rule.action);
+                println!("{}", serde_json::to_string_pretty(&rule)?);
                 print_rule_preview_text(&preview);
             } else {
                 println!(
@@ -212,23 +240,22 @@ pub(crate) fn run_rules(sub: RulesCmd) -> CliResult {
         }
         RulesCmd::Edit {
             id,
-            condition,
             action,
             no_preview,
             preview_window,
             text,
         } => {
-            let Some(rule) = edit_rule(&home, &id, condition.as_deref(), action.as_deref())? else {
+            let Some(rule) = edit_rule(&home, &id, Some(action.as_str()))? else {
                 eprintln!("Rule not found: {id}");
                 std::process::exit(1);
             };
             let preview = if no_preview {
                 RulePreviewJson::unavailable("Preview skipped because --no-preview was set.")
             } else {
-                build_rule_preview(&home, &rule.id, preview_window.as_deref())?
+                build_rule_preview(&home, rule.id(), preview_window.as_deref())?
             };
             if text {
-                println!("[{}] {} -> {}", rule.id, rule.condition, rule.action);
+                println!("{}", serde_json::to_string_pretty(&rule)?);
                 print_rule_preview_text(&preview);
             } else {
                 println!(
@@ -246,32 +273,11 @@ pub(crate) fn run_rules(sub: RulesCmd) -> CliResult {
                 std::process::exit(1);
             };
             if text {
-                println!("Removed [{}] {}", rule.id, rule.condition);
+                println!("Removed [{}]", rule.id());
             } else {
                 println!("{}", serde_json::to_string_pretty(&rule)?);
             }
         }
-        RulesCmd::Context { sub } => match sub {
-            RulesContextCmd::Add { text, text_mode } => {
-                let entry = add_context(&home, &text)?;
-                if text_mode {
-                    println!("[{}] {}", entry.id, entry.text);
-                } else {
-                    println!("{}", serde_json::to_string_pretty(&entry)?);
-                }
-            }
-            RulesContextCmd::Remove { id, text } => {
-                let Some(entry) = remove_context(&home, &id)? else {
-                    eprintln!("Context entry not found: {id}");
-                    std::process::exit(1);
-                };
-                if text {
-                    println!("Removed [{}] {}", entry.id, entry.text);
-                } else {
-                    println!("{}", serde_json::to_string_pretty(&entry)?);
-                }
-            }
-        },
         RulesCmd::Feedback { feedback, text } => {
             let proposal = propose_rule_from_feedback(&feedback);
             if text {

@@ -373,7 +373,7 @@ async fn includes_attachment_metadata_on_notable_rows() {
         r.surfaced[0]
             .note
             .as_deref()
-            .is_some_and(|n| n.contains("Model classified")),
+            .is_some_and(|n| n.contains("Classified as notify")),
         "{:?}",
         r.surfaced[0].note
     );

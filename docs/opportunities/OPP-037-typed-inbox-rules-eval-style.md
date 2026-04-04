@@ -1,67 +1,111 @@
-# OPP-037: Typed Inbox Rules — Deterministic Checks + LLM Rules (Eval-Style)
+# OPP-037: Deterministic Inbox Rules — Clean Slate (No LLM Triage)
 
-**Status:** Open. **Created:** 2026-04-04. **Tags:** inbox, rules, triage, llm, heuristics, testing, personalization
+**Status:** Open. **Created:** 2026-04-04. **Updated:** 2026-04-04 (scope decision). **Tags:** inbox, rules, triage, heuristics, testing, personalization, deterministic
 
-**Related:** [OPP-032](OPP-032-llm-rules-engine.md) (archived foundation: rules/context in prompt, durable decisions), [OPP-035](OPP-035-inbox-personal-context-layer.md) (facts vs action policy — complementary), [OPP-021](OPP-021-ask-spam-promo-awareness.md) (header/category signals), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox)
-
----
-
-## Problem
-
-Today, every entry in `rules.json` is **free text** folded into the inbox classifier **system prompt**. The model decides whether a rule “matches” and must emit `matchedRuleIds`.
-
-That works for fuzzy intent but produces predictable failure modes:
-
-- **Unstable rule ids** — the model can emit ids that are not in the file, or omit ids when the user would expect a match.
-- **No unit-testable matching** — “does this rule apply to this message?” is only observable through LLM calls or brittle prompt snapshots.
-- **Heuristic tension** — post-classification steps (e.g. stripper-style overrides) key off signals like “matched user rule” vs “model-only ignore”; when the model does not attach rule ids, behavior diverges from user intent.
-- **Redundant context** — users duplicate narrative hints in `context` and long `condition` strings because there is no structured, exact layer.
-
-The product already has **deterministic** signals (sync-time category, noreply/unsubscribe hints, parts of the stripper). User-facing **rules** are not yet first-class citizens in that same **typed** sense.
+**Related:** [OPP-032](OPP-032-llm-rules-engine.md) (historical: rules in LLM prompt — **superseded for inbox by this decision**), [OPP-035](OPP-035-inbox-personal-context-layer.md) (facts vs action policy), [OPP-021](OPP-021-ask-spam-promo-awareness.md) (header/category signals), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox)
 
 ---
 
-## Proposal (direction)
+## Decision (2026-04-04)
 
-Introduce **rule kinds** (similar in spirit to mixed eval suites: some checks are LLM-judged, some are exact), for example:
+**We are designing from zero.** Inbox triage **does not use an LLM batch** (`zmail inbox` does not call OpenAI for classification). Policy lives in **`rules.json`** as **typed, deterministic** rules only. A **calling agent or human** edits that file; there is **no `llm` rule kind** and no prose conditions interpreted at triage time.
+
+**Rationale:** Stable `matchedRuleIds`, full unit-testability, zero API cost/latency for inbox, no hallucinated rule ids. Start with a **strong default rule pack** (noreply, unsubscribe/snippet signals, list category, OTP/notify patterns, etc.), measure real-world gaps, then extend matchers or defaults — **simplify first**.
+
+**Out of scope for inbox:** `zmail ask`, setup/wizard LLM checks, `draft edit`, and other features keep using OpenAI where they already do; only **inbox classification** is deterministic.
+
+---
+
+## Problem (historical)
+
+Previously, every entry in `rules.json` was **free text** folded into the inbox classifier **system prompt**; the model decided matches and emitted `matchedRuleIds`. That caused unstable ids, no unit-testable matching, and tension with stripper/archive logic when the model omitted or invented ids.
+
+The codebase already had **deterministic** signals (`evaluate_fallback_heuristic`, category, noreply, unsubscribe word). The clean-slate approach makes **user-visible rules** the same kind of thing: **executable, typed rows** evaluated in Rust.
+
+---
+
+## Proposal
+
+### Rule kinds (inbox only — no LLM interpretation)
 
 | Kind | Role | Example |
 |------|------|---------|
-| **Predicate / template** | Match on indexed metadata | `from_domain == "theinformation.com"`, `list_id` matches, header present |
-| **Regex (bounded)** | Match on normalized subject / snippet / address | Carefully scoped patterns; clear pre/post conditions |
-| **Heuristic** | Reuse or expose existing internal checks as named, user-visible rules | Opt-in wrappers around category + safe predicates |
-| **LLM** | Current behavior | Natural-language `condition` + action; best for fuzzy policy |
+| **Predicate** | Match on indexed metadata | `fromDomain`, `category`, normalized `fromAddress` |
+| **Regex (bounded)** | Match on subject / full plain body / from | `subjectPattern`, `bodyPattern`, `fromPattern` |
+| **Heuristic** | Named internal signal | `noreply`, `excludedCategory`, `listCategory`, `unsubscribeWord`, marketing-style subject/snippet (aligned with today’s fallback helpers) |
 
-**Execution model (sketch):**
+Every rule has **`id`**, **`action`** (`notify` \| `inform` \| `ignore`), **`kind`**, and kind-specific fields. Optional **`priority`** (lower = earlier) and **`description`** (for humans/agents; not sent to any inbox model).
 
-1. Run **deterministic** rules first in a documented **precedence** order; record real `matchedRuleIds` from the file when a predicate fires (no hallucination).
-2. Pass remaining candidates (or all candidates with “already matched” hints) to the **LLM** batch with a shorter or split prompt: LLM rules only for what predicates did not settle.
-3. Unify **decision source** / diagnostics so JSON explains: `predicate`, `llm`, `stripper`, and conflicts if a deterministic rule and LLM disagree (policy TBD: deterministic wins, or user-configurable).
+### Execution model
 
-**CLI / file shape:** extend `rules.json` with a `kind` (or `type`) field and optional structured fields (`fromDomain`, `subjectRegex`, …) while keeping **backward compatibility** for entries that omit `kind` (treat as `llm`).
+1. **Load & compile** `rules.json` — validate kinds, compile regexes, reject duplicates and unsafe patterns.
+2. **Per-candidate evaluation** over [`InboxCandidate`](../../src/inbox/scan.rs) (message_id, from, subject, snippet, full `body_text`, category, …): run matchers in documented order; collect **matched rule ids** from the file only.
+3. **Resolve action** when one or more rules fire: e.g. **`notify` > `inform` > `ignore`** among matches, or **highest-priority** rule wins — pick one policy, document it, test it.
+4. **No rule matched:** apply a **single built-in fallback** (reuse / consolidate [`evaluate_fallback_heuristic`](../../src/inbox/scan.rs) behavior) so behavior stays predictable — e.g. default `inform` with `decision_source: fallback`.
+5. **Post-pass (keep):** self-mail heuristic, stripper-style overrule if still desired for `ignore`, [`ignore_should_apply_local_archive`](../../src/inbox/scan.rs) — but base classification inputs come from **rules + fallback**, not from OpenAI.
 
-**Testing:** predicate and regex matchers get **unit tests** with fixture headers/snippets; LLM rules keep eval-style or snapshot tests at the prompt boundary only.
+### `requiresUserAction` / `actionSummary`
+
+Today these are LLM outputs. For v1 deterministic inbox, **default both off** (`false` / empty) unless a later typed rule field adds them. Document in skill that “todo hints” may return in a future iteration.
+
+### `context` in `rules.json`
+
+Optional **narrative blobs for agents** reading the file — **not** consumed by inbox triage logic. Agents use `context` to remember user preferences when **authoring** rules.
+
+### Schema
+
+- **Breaking OK:** no legacy free-text-only rules. Version **`rules.json`** (e.g. `version: 2`).
+- **`zmail rules validate`** — load, compile, report errors.
+
+### Default rule pack (new users)
+
+Ship **bundled defaults** (noreply → ignore, list/excluded category → ignore, unsubscribe / marketing-style snippet or subject → ignore, OTP / verification / security-ish patterns → **notify**, etc.). Write **`~/.zmail/rules.json` only when missing**; never clobber user files. Optional `zmail rules reset-to-default --force`.
+
+### Inbox JSON hints (agent nudges)
+
+[`inbox_json_hints`](../../src/refresh.rs) already appends short strings to inbox JSON (large surfaced set, sender skew, scan vs surface gap, ignore-heavy outcomes, `--diagnostics`, archive reminders). **Deterministic inbox must refresh this layer:**
+
+- **Wording:** Drop or rewrite anything that assumes an LLM classifier (e.g. over-emphasizing `requiresUserAction` if v1 is always false); keep nudges toward **`zmail rules`** and typed rule shapes.
+- **New signals (optional v1):** e.g. many rows with `decision_source: fallback` and repetitive bulk-like senders → hint to add a **domain** or **regex** ignore rule; many `inform` for similar marketing snippets → suggest snippet/subject pattern. These are **heuristic, non-blocking** — same spirit as today’s “add explicit ignore rules so future runs stay stable.”
+- **Tests:** Extend [`inbox_json_hints_tests`](../../src/refresh.rs) when new branches or copy change.
 
 ---
 
-## Non-goals (for v1 of this opp)
+## Implementation plan (concise)
 
-- Replacing the entire inbox classifier with a rules engine.
+1. **Schema + validate + default JSON** — serde-tagged rules, no LLM kind; golden default file; seed from setup/wizard and/or first load.
+2. **Matcher engine** — pure `eval_rules(rules, candidate) -> { ids, action, note }` + unit tests per kind.
+3. **Replace inbox LLM path** — `run_inbox_scan` uses a **deterministic classifier** (implements `InboxBatchClassifier` or refactor trait usage) — **no API key** required for `zmail inbox`. Remove / stop calling [`OpenAiInboxClassifier`](../../src/inbox/scan.rs) and [`build_inbox_rules_prompt`](../../src/rules.rs) from the inbox command path; delete or repurpose dead prompt code as appropriate.
+4. **Fingerprint** — hash compiled rule set for `inbox_decisions` cache; bump when schema or defaults change.
+5. **Integration tests** — `tests/inbox_scan.rs`: default pack behavior, priority/severity, fallback when no rule matches, archive hints when rule ids present.
+6. **Inbox hints** — audit [`inbox_json_hints`](../../src/refresh.rs) for deterministic semantics; add/adjust hints that steer agents to **author rules** (spam-like clusters, fallback-heavy windows); update unit tests in `refresh.rs`.
+7. **Docs** — [INBOX-CUSTOMIZATION.md](../../skills/zmail/references/INBOX-CUSTOMIZATION.md), [ARCHITECTURE.md](../ARCHITECTURE.md) ADR snippet, skill: inbox is deterministic; agents maintain `rules.json`.
+
+---
+
+## Non-goals (v1)
+
+- LLM batch classification for `zmail inbox`.
+- `llm` or free-text **match** rules in `rules.json`.
 - Arbitrary code execution in rules.
-- Perfect internationalization for naive regex on raw headers (document tradeoffs; start with documented limitations).
+- Perfect i18n for naive regex (document limitations).
 
 ---
 
 ## Success criteria
 
-- User can define at least one **deterministic** ignore/notify/inform rule that **always** sets the correct stable `matchedRuleIds` when headers/metadata match.
-- Stripper and archive eligibility can **trust** “user rule matched” when ids are predicate-backed.
-- Docs and skill describe when to use **typed** vs **LLM** rules.
+- `zmail inbox` runs **without** `ZMAIL_OPENAI_API_KEY` (for classification).
+- Every `matchedRuleId` in output **exists** in `rules.json` (or is empty when only fallback applies).
+- Default pack gives reasonable **ignore** for bulk signals and **notify** for auth/code-style mail on synthetic fixtures.
+- “Does rule R match candidate C?” is **unit-testable** without network.
+- Docs and skill state clearly: **inbox = deterministic rules**; **agents edit rules** to improve behavior over time.
+- Inbox JSON **`hints`** stay **actionable** for agents (including nudges to add rules when the scan looks skewed or fallback-heavy).
 
 ---
 
 ## Open questions
 
-- Should predicates be **limited to sync-time fields** only, or allow optional body/snippet regex (cost + privacy)?
-- Single global ordering vs **priority** integer per rule?
-- Interaction with [OPP-035](OPP-035-inbox-personal-context-layer.md): keep narrative facts in a separate layer; typed rules stay mechanical.
+- Exact **action resolution** among multiple firing rules: strict severity vs priority-first.
+- Whether to **keep or simplify** stripper overrule when there is no model `ignore` to second-guess.
+- Regex **`bodyPattern`** matches full stored plain-text body (`messages.body_text`).
+- Reintroducing **semantic** triage later (optional LLM tier) if defaults + agent-edited rules prove insufficient — explicitly deferred, not part of this decision.

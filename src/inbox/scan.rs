@@ -1,4 +1,4 @@
-//! Notable-mail LLM scan (`src/inbox/scan.ts`).
+//! Notable-mail scan: deterministic `rules.json` v2 + fallback when no rule matches (`src/inbox/scan.ts`).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
@@ -6,26 +6,16 @@ use std::time::Instant;
 
 use regex::Regex;
 
-use async_openai::config::OpenAIConfig;
-use async_openai::types::{
-    ChatCompletionRequestMessage, ChatCompletionRequestSystemMessage,
-    ChatCompletionRequestSystemMessageContent, ChatCompletionRequestUserMessage,
-    ChatCompletionRequestUserMessageContent, CreateChatCompletionRequestArgs, ResponseFormat,
-};
-use async_openai::Client as OpenAiClient;
 use async_trait::async_trait;
 use rusqlite::Connection;
-use serde_json::json;
 
 use crate::attachments::{list_attachments_for_message, AttachmentListRow};
-use crate::ids::message_id_for_json_output;
 use crate::inbox::state::{
     already_surfaced_filter_sql, load_cached_inbox_decisions, persist_inbox_decisions,
     record_inbox_scan, InboxSurfaceMode,
 };
 use crate::mail_category::{is_default_excluded_category, CATEGORY_LIST};
 use crate::refresh::{InboxDispositionCounts, RefreshPreviewAttachment, RefreshPreviewRow};
-use crate::rules::{build_inbox_rules_prompt, rules_fingerprint, RulesFile};
 use crate::search::{
     infer_name_from_address, is_noreply, normalize_address, sort_rows_by_sender_contact_rank,
 };
@@ -35,8 +25,6 @@ const DEFAULT_NOTABLE_CAP: usize = 10;
 const DEFAULT_REVIEW_NOTABLE_CAP: usize = 30;
 const DEFAULT_BATCH_SIZE: usize = 40;
 const DEFAULT_INBOX_PREFETCH_CAP: usize = 200;
-
-const NANO_MODEL: &str = "gpt-4.1-nano";
 
 /// List-management boilerplate (word boundary; avoids accidental substrings).
 static UNSUBSCRIBE_WORD: LazyLock<Regex> =
@@ -58,7 +46,10 @@ pub struct InboxCandidate {
     pub to_addresses: Vec<String>,
     pub cc_addresses: Vec<String>,
     pub subject: String,
+    /// Short preview (prefix of plain body) for UI / heuristics.
     pub snippet: String,
+    /// Full stored plain-text body for regex rules (`bodyPattern`).
+    pub body_text: String,
     pub category: Option<String>,
     pub attachments: Vec<AttachmentListRow>,
 }
@@ -151,10 +142,6 @@ impl InboxOwnerContext {
 pub enum RunInboxScanError {
     #[error("SQLite: {0}")]
     Sqlite(#[from] rusqlite::Error),
-    #[error("OpenAI: {0}")]
-    OpenAI(#[from] async_openai::error::OpenAIError),
-    #[error("JSON: {0}")]
-    Json(#[from] serde_json::Error),
     #[error("Rules: {0}")]
     Rules(#[from] crate::rules::RulesError),
     #[error("Inbox window: {0}")]
@@ -169,111 +156,17 @@ pub trait InboxBatchClassifier: Send {
     ) -> Result<Vec<InboxNotablePick>, RunInboxScanError>;
 }
 
-/// Production classifier: `gpt-4.1-nano` with JSON object response.
-pub struct OpenAiInboxClassifier {
-    client: OpenAiClient<OpenAIConfig>,
-    system_prompt: String,
-}
-
-impl OpenAiInboxClassifier {
-    pub fn new(
-        api_key: &str,
-        rules: &RulesFile,
-        diagnostics: bool,
-        owner: &InboxOwnerContext,
-    ) -> Self {
-        let config = OpenAIConfig::new().with_api_key(api_key);
-        Self {
-            client: OpenAiClient::with_config(config),
-            system_prompt: build_inbox_rules_prompt(rules, diagnostics, owner),
-        }
-    }
-
-    pub fn rules_fingerprint(rules: &RulesFile) -> String {
-        rules_fingerprint(rules)
-    }
-}
-
-#[async_trait]
-impl InboxBatchClassifier for OpenAiInboxClassifier {
-    async fn classify_batch(
-        &mut self,
-        batch: Vec<InboxCandidate>,
-    ) -> Result<Vec<InboxNotablePick>, RunInboxScanError> {
-        if batch.is_empty() {
-            return Ok(Vec::new());
-        }
-        let payload: Vec<serde_json::Value> = batch
-            .iter()
-            .map(|c| {
-                let from_line = match &c.from_name {
-                    Some(n) if !n.is_empty() => format!("{} <{}>", n, c.from_address),
-                    _ => c.from_address.clone(),
-                };
-                let mut o = serde_json::Map::new();
-                o.insert(
-                    "messageId".into(),
-                    json!(message_id_for_json_output(&c.message_id)),
-                );
-                o.insert("date".into(), json!(c.date));
-                o.insert("fromAddress".into(), json!(c.from_address));
-                o.insert("fromName".into(), json!(c.from_name));
-                o.insert("from".into(), json!(from_line));
-                o.insert("to".into(), json!(c.to_addresses));
-                o.insert("cc".into(), json!(c.cc_addresses));
-                o.insert("subject".into(), json!(c.subject));
-                o.insert(
-                    "snippet".into(),
-                    json!(c.snippet.chars().take(400).collect::<String>()),
-                );
-                if let Some(category) = &c.category {
-                    o.insert("category".into(), json!(category));
-                }
-                if !c.attachments.is_empty() {
-                    let atts: Vec<serde_json::Value> = c
-                        .attachments
-                        .iter()
-                        .map(|a| {
-                            json!({
-                                "filename": a.filename,
-                                "mimeType": a.mime_type,
-                            })
-                        })
-                        .collect();
-                    o.insert("attachments".into(), serde_json::Value::Array(atts));
-                }
-                Ok::<serde_json::Value, serde_json::Error>(serde_json::Value::Object(o))
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let req = CreateChatCompletionRequestArgs::default()
-            .model(NANO_MODEL)
-            .messages(vec![
-                ChatCompletionRequestMessage::System(ChatCompletionRequestSystemMessage {
-                    content: ChatCompletionRequestSystemMessageContent::Text(
-                        self.system_prompt.clone(),
-                    ),
-                    name: None,
-                }),
-                ChatCompletionRequestMessage::User(ChatCompletionRequestUserMessage {
-                    content: ChatCompletionRequestUserMessageContent::Text(serde_json::to_string(
-                        &payload,
-                    )?),
-                    name: None,
-                }),
-            ])
-            .response_format(ResponseFormat::JsonObject)
-            .build()?;
-
-        let completion = self.client.chat().create(req).await?;
-        let text = completion
-            .choices
-            .into_iter()
-            .next()
-            .and_then(|c| c.message.content)
-            .unwrap_or_default();
-        let text = text.trim();
-        parse_notable_response(text, &batch)
+/// Fallback when no user rule matches (`decision_source: fallback`).
+pub(crate) fn inbox_fallback_pick(candidate: &InboxCandidate) -> InboxNotablePick {
+    let h = evaluate_fallback_heuristic(candidate);
+    InboxNotablePick {
+        message_id: candidate.message_id.clone(),
+        action: Some(h.action.to_string()),
+        matched_rule_ids: vec![],
+        note: Some(h.note.to_string()),
+        decision_source: Some("fallback".into()),
+        requires_user_action: false,
+        action_summary: None,
     }
 }
 
@@ -457,10 +350,6 @@ fn local_archive_signals_hint(
 
 fn synthesize_default_note(candidate: &InboxCandidate, row: &RefreshPreviewRow) -> String {
     match row.decision_source.as_deref() {
-        Some("model") => {
-            let a = row.action.as_deref().unwrap_or("inform");
-            format!("Model classified as {a} (no note).")
-        }
         Some("rule") => {
             if row.matched_rule_ids.is_empty() {
                 "Matched user rule.".to_string()
@@ -471,7 +360,7 @@ fn synthesize_default_note(candidate: &InboxCandidate, row: &RefreshPreviewRow) 
         Some("fallback") => evaluate_fallback_heuristic(candidate).note.to_string(),
         Some("stripper") => "Ignore overruled; not bulk.".to_string(),
         Some("cached") => "Cached decision from previous scan.".to_string(),
-        Some("heuristic") => "Heuristic classification (no note).".to_string(),
+        Some("from_self") => "Message from your own address (treated as ignore).".to_string(),
         _ => format!(
             "Classified as {}.",
             row.action.as_deref().unwrap_or("inform")
@@ -497,168 +386,6 @@ fn finalize_preview_note(
             row.note = Some(format!("{n} Local archive: {hint}."));
         }
     }
-}
-
-/// Map model `messageId` (bare or bracketed) to the candidate's canonical stored id.
-fn canonical_candidate_message_id<'a>(batch: &'a [InboxCandidate], mid: &str) -> Option<&'a str> {
-    let t = mid.trim();
-    for b in batch {
-        if b.message_id == t {
-            return Some(b.message_id.as_str());
-        }
-        if message_id_for_json_output(&b.message_id) == t {
-            return Some(b.message_id.as_str());
-        }
-    }
-    None
-}
-
-fn parse_requires_user_action(item: &serde_json::Value) -> bool {
-    match item.get("requiresUserAction") {
-        Some(serde_json::Value::Bool(b)) => *b,
-        Some(serde_json::Value::String(s)) => s.eq_ignore_ascii_case("true"),
-        Some(serde_json::Value::Number(n)) => n.as_i64() == Some(1),
-        _ => false,
-    }
-}
-
-fn parse_action_summary(item: &serde_json::Value) -> Option<String> {
-    item.get("actionSummary")
-        .and_then(|x| x.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .map(|s| s.to_string())
-}
-
-fn parse_notable_response(
-    text: &str,
-    batch: &[InboxCandidate],
-) -> Result<Vec<InboxNotablePick>, RunInboxScanError> {
-    let fallback_pick = |candidate: &InboxCandidate, note: &str| InboxNotablePick {
-        message_id: candidate.message_id.clone(),
-        action: Some(fallback_action(candidate).into()),
-        matched_rule_ids: vec![],
-        note: Some(note.into()),
-        decision_source: Some("fallback".into()),
-        requires_user_action: false,
-        action_summary: None,
-    };
-    let parsed: serde_json::Value = match serde_json::from_str(text) {
-        Ok(v) => v,
-        Err(_) => {
-            return Ok(batch
-                .iter()
-                .map(|candidate| {
-                    let h = evaluate_fallback_heuristic(candidate);
-                    fallback_pick(
-                        candidate,
-                        &format!("{} Fallback: model returned invalid JSON.", h.note),
-                    )
-                })
-                .collect())
-        }
-    };
-    let notable = match parsed.get("results") {
-        Some(n) => n,
-        None => {
-            return Ok(batch
-                .iter()
-                .map(|candidate| {
-                    let h = evaluate_fallback_heuristic(candidate);
-                    fallback_pick(
-                        candidate,
-                        &format!("{} Fallback: model omitted results.", h.note),
-                    )
-                })
-                .collect())
-        }
-    };
-    let arr = match notable.as_array() {
-        Some(a) => a,
-        None => {
-            return Ok(batch
-                .iter()
-                .map(|candidate| {
-                    let h = evaluate_fallback_heuristic(candidate);
-                    fallback_pick(
-                        candidate,
-                        &format!(
-                            "{} Fallback: model returned a malformed results payload.",
-                            h.note
-                        ),
-                    )
-                })
-                .collect())
-        }
-    };
-    let mut out = Vec::new();
-    for item in arr {
-        let mid = item.get("messageId").and_then(|x| x.as_str());
-        let Some(mid) = mid else { continue };
-        let Some(canonical_mid) = canonical_candidate_message_id(batch, mid) else {
-            continue;
-        };
-        let action = item
-            .get("action")
-            .and_then(|x| x.as_str())
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        let matched_rule_ids = item
-            .get("matchedRuleIds")
-            .and_then(|x| x.as_array())
-            .map(|arr| {
-                arr.iter()
-                    .filter_map(|value| value.as_str())
-                    .map(str::trim)
-                    .filter(|s| !s.is_empty())
-                    .map(|s| s.to_string())
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let note = item
-            .get("note")
-            .and_then(|x| x.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(|s| s.to_string());
-        let decision_source = if matched_rule_ids.is_empty() {
-            Some("model".to_string())
-        } else {
-            Some("rule".to_string())
-        };
-        let requires_user_action = parse_requires_user_action(item);
-        let action_summary = if requires_user_action {
-            parse_action_summary(item)
-        } else {
-            None
-        };
-        out.push(InboxNotablePick {
-            message_id: canonical_mid.to_string(),
-            action,
-            matched_rule_ids,
-            note,
-            decision_source,
-            requires_user_action,
-            action_summary,
-        });
-    }
-    let seen: HashSet<String> = out.iter().map(|item| item.message_id.clone()).collect();
-    for candidate in batch {
-        if seen.contains(&candidate.message_id) {
-            continue;
-        }
-        let h = evaluate_fallback_heuristic(candidate);
-        out.push(InboxNotablePick {
-            message_id: candidate.message_id.clone(),
-            action: Some(h.action.into()),
-            matched_rule_ids: vec![],
-            note: Some(format!("{} Model response omitted this message.", h.note)),
-            decision_source: Some("fallback".into()),
-            requires_user_action: false,
-            action_summary: None,
-        });
-    }
-    Ok(out)
 }
 
 fn list_to_preview_attachments(rows: Vec<AttachmentListRow>) -> Vec<RefreshPreviewAttachment> {
@@ -695,7 +422,7 @@ fn surface_matches(mode: InboxSurfaceMode, action: &str) -> bool {
     }
 }
 
-/// Whether an LLM `ignore` should set local `is_archived`.
+/// Whether an `ignore` disposition should set local `is_archived`.
 ///
 /// Conservative: honor explicit user rules, provider category (sync metadata), noreply-style
 /// senders, unsubscribe boilerplate, or mail sent from the user's own address — not long
@@ -736,7 +463,7 @@ fn to_preview_row(
     let mut action = normalize_action(pick.action.as_deref()).to_string();
     let mut decision_source = pick.decision_source;
     let mut note = pick.note;
-    // Stripper overrule does not infer user-action todo; keep model `requiresUserAction` as returned.
+    // Stripper overrule does not infer user-action todo.
     let mut requires_user_action = pick.requires_user_action;
     let mut action_summary = pick.action_summary.clone();
 
@@ -758,10 +485,10 @@ fn to_preview_row(
 
     if is_from_owner(&candidate.from_address, owner_address, owner_aliases) {
         action = "ignore".into();
-        decision_source = Some("heuristic".into());
+        decision_source = Some("from_self".into());
         requires_user_action = false;
         action_summary = None;
-        let self_note = "Heuristic: message sent from your address; treating as ignore.";
+        let self_note = "Message sent from your address; treating as ignore.";
         note = Some(match note {
             Some(n) if !n.trim().is_empty() => format!("{n} ({self_note})"),
             _ => self_note.to_string(),
@@ -813,6 +540,7 @@ fn load_inbox_candidates(
         "SELECT message_id, from_address, from_name, to_addresses, cc_addresses, subject, date,
          COALESCE(TRIM(SUBSTR(body_text, 1, 200)), '') ||
          CASE WHEN LENGTH(TRIM(body_text)) > 200 THEN '…' ELSE '' END AS snippet,
+         COALESCE(body_text, '') AS body_text,
          category
          FROM messages
          WHERE date >= ?1
@@ -834,7 +562,8 @@ fn load_inbox_candidates(
                 row.get::<_, String>(5)?,
                 row.get::<_, String>(6)?,
                 row.get::<_, String>(7)?,
-                row.get::<_, Option<String>>(8)?,
+                row.get::<_, String>(8)?,
+                row.get::<_, Option<String>>(9)?,
             ))
         },
     )?;
@@ -850,6 +579,7 @@ fn load_inbox_candidates(
             subject,
             date,
             snippet,
+            body_text,
             category,
         ) = r?;
         let attachments = list_attachments_for_message(conn, &message_id)?;
@@ -862,6 +592,7 @@ fn load_inbox_candidates(
             cc_addresses: serde_json::from_str(&cc_json).unwrap_or_default(),
             subject,
             snippet: strip_snippet_html(&snippet),
+            body_text,
             category,
             attachments,
         });
@@ -1219,6 +950,7 @@ mod tests {
             cc_addresses: vec![],
             subject: "Re: test".into(),
             snippet: "body".into(),
+            body_text: "body".into(),
             category: None,
             attachments: vec![],
         };
@@ -1228,8 +960,8 @@ mod tests {
                 message_id: "m1".into(),
                 action: Some("inform".into()),
                 matched_rule_ids: vec![],
-                note: Some("model liked it".into()),
-                decision_source: Some("model".into()),
+                note: Some("rule matched".into()),
+                decision_source: Some("rule".into()),
                 requires_user_action: true,
                 action_summary: Some("Reply to Alice".into()),
             },
@@ -1237,7 +969,7 @@ mod tests {
             &[],
         );
         assert_eq!(row.action.as_deref(), Some("ignore"));
-        assert_eq!(row.decision_source.as_deref(), Some("heuristic"));
+        assert_eq!(row.decision_source.as_deref(), Some("from_self"));
         assert!(!row.requires_user_action);
         assert!(row.action_summary.is_none());
         assert!(
@@ -1250,8 +982,8 @@ mod tests {
     }
 
     #[test]
-    fn parse_notable_invalid_json_fallback_prefers_inform_for_ambiguous_mail() {
-        let batch = vec![InboxCandidate {
+    fn inbox_fallback_inform_for_ambiguous_mail() {
+        let c = InboxCandidate {
             message_id: "m1".into(),
             date: "2025-01-01".into(),
             from_address: "a@b.com".into(),
@@ -1260,112 +992,20 @@ mod tests {
             cc_addresses: vec![],
             subject: "s".into(),
             snippet: "x".into(),
+            body_text: "x".into(),
             category: None,
             attachments: vec![],
-        }];
-        let r = parse_notable_response("not json", &batch).unwrap();
-        assert_eq!(r.len(), 1);
-        assert_eq!(r[0].action.as_deref(), Some("inform"));
-        assert_eq!(r[0].decision_source.as_deref(), Some("fallback"));
-        let n = r[0].note.as_deref().unwrap();
-        assert!(n.contains("Heuristic:"), "{n}");
-        assert!(n.contains("Fallback: model returned invalid JSON."), "{n}");
+        };
+        let p = inbox_fallback_pick(&c);
+        assert_eq!(p.action.as_deref(), Some("inform"));
+        assert_eq!(p.decision_source.as_deref(), Some("fallback"));
+        assert!(p.matched_rule_ids.is_empty());
+        assert!(p.note.as_deref().is_some_and(|n| n.contains("Heuristic:")));
     }
 
     #[test]
-    fn parse_notable_reads_requires_user_action_and_summary() {
-        let batch = vec![InboxCandidate {
-            message_id: "m1".into(),
-            date: "2025-01-01".into(),
-            from_address: "a@b.com".into(),
-            from_name: None,
-            to_addresses: vec![],
-            cc_addresses: vec![],
-            subject: "s".into(),
-            snippet: "x".into(),
-            category: None,
-            attachments: vec![],
-        }];
-        let j = r#"{"results":[{"messageId":"m1","action":"inform","matchedRuleIds":[],"requiresUserAction":true,"actionSummary":"  Confirm attendance  "}]}"#;
-        let r = parse_notable_response(j, &batch).unwrap();
-        assert_eq!(r.len(), 1);
-        assert!(r[0].requires_user_action);
-        assert_eq!(r[0].action_summary.as_deref(), Some("Confirm attendance"));
-    }
-
-    #[test]
-    fn parse_notable_false_requires_user_action_drops_summary() {
-        let batch = vec![InboxCandidate {
-            message_id: "m1".into(),
-            date: "2025-01-01".into(),
-            from_address: "a@b.com".into(),
-            from_name: None,
-            to_addresses: vec![],
-            cc_addresses: vec![],
-            subject: "s".into(),
-            snippet: "x".into(),
-            category: None,
-            attachments: vec![],
-        }];
-        let j = r#"{"results":[{"messageId":"m1","action":"inform","matchedRuleIds":[],"requiresUserAction":false,"actionSummary":"ignored"}]}"#;
-        let r = parse_notable_response(j, &batch).unwrap();
-        assert!(!r[0].requires_user_action);
-        assert!(r[0].action_summary.is_none());
-    }
-
-    #[test]
-    fn parse_notable_invalid_requires_user_action_type_defaults_false() {
-        let batch = vec![InboxCandidate {
-            message_id: "m1".into(),
-            date: "2025-01-01".into(),
-            from_address: "a@b.com".into(),
-            from_name: None,
-            to_addresses: vec![],
-            cc_addresses: vec![],
-            subject: "s".into(),
-            snippet: "x".into(),
-            category: None,
-            attachments: vec![],
-        }];
-        let j = r#"{"results":[{"messageId":"m1","action":"inform","matchedRuleIds":[],"requiresUserAction":"maybe","actionSummary":"x"}]}"#;
-        let r = parse_notable_response(j, &batch).unwrap();
-        assert!(!r[0].requires_user_action);
-        assert!(r[0].action_summary.is_none());
-    }
-
-    #[test]
-    fn parse_notable_filters_unknown_ids() {
-        let batch = vec![InboxCandidate {
-            message_id: "m1".into(),
-            date: "2025-01-01".into(),
-            from_address: "a@b.com".into(),
-            from_name: None,
-            to_addresses: vec![],
-            cc_addresses: vec![],
-            subject: "s".into(),
-            snippet: "x".into(),
-            category: None,
-            attachments: vec![],
-        }];
-        let j = r#"{"results":[{"messageId":"other","note":"n"},{"messageId":"m1","action":"notify","matchedRuleIds":[],"note":"  hi  "} ]}"#;
-        let r = parse_notable_response(j, &batch).unwrap();
-        assert_eq!(r.len(), 1);
-        assert_eq!(r[0].message_id, "m1");
-        assert_eq!(r[0].note.as_deref(), Some("hi"));
-        assert_eq!(r[0].action.as_deref(), Some("notify"));
-        assert_eq!(r[0].decision_source.as_deref(), Some("model"));
-    }
-
-    #[test]
-    fn parse_notable_missing_results_defaults_empty_batch() {
-        let batch: Vec<InboxCandidate> = vec![];
-        let r = parse_notable_response(r#"{"foo":[]}"#, &batch).unwrap();
-        assert!(r.is_empty());
-    }
-
-    #[test]
-    fn fallback_suppresses_list_mail() {
-        let batch = vec![InboxCandidate {
+    fn inbox_fallback_ignore_list_category() {
+        let c = InboxCandidate {
             message_id: "m1".into(),
             date: "2025-01-01".into(),
             from_address: "notifications-noreply@linkedin.com".into(),
@@ -1374,12 +1014,13 @@ mod tests {
             cc_addresses: vec![],
             subject: "You have 1 new invitation".into(),
             snippet: "body".into(),
+            body_text: "body".into(),
             category: Some("list".into()),
             attachments: vec![],
-        }];
-        let r = parse_notable_response("not json", &batch).unwrap();
-        assert_eq!(r[0].action.as_deref(), Some("ignore"));
-        let n = r[0].note.as_deref().unwrap();
+        };
+        let p = inbox_fallback_pick(&c);
+        assert_eq!(p.action.as_deref(), Some("ignore"));
+        let n = p.note.as_deref().unwrap();
         assert!(n.contains("list") || n.contains("excluded"), "{n}");
     }
 
