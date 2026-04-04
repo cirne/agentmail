@@ -650,6 +650,26 @@ mod tests {
         assert_eq!(summ.as_deref(), Some("Pay invoice"));
     }
 
+    #[test]
+    fn inbox_decisions_has_action_columns_requires_both_names() {
+        let conn = open_memory().unwrap();
+        assert!(
+            inbox_decisions_has_action_columns(&conn).unwrap(),
+            "current schema should expose both action columns"
+        );
+
+        conn.execute_batch(
+            "PRAGMA foreign_keys=OFF;
+             ALTER TABLE inbox_decisions DROP COLUMN action_summary;
+             PRAGMA foreign_keys=ON;",
+        )
+        .unwrap();
+        assert!(
+            !inbox_decisions_has_action_columns(&conn).unwrap(),
+            "partial column set must use legacy snapshot SELECT (v16-style drift)"
+        );
+    }
+
     /// Stale DBs (e.g. user_version 16) may have `inbox_decisions` without action columns; drift rebuild must still snapshot.
     #[test]
     fn inbox_snapshot_loads_legacy_decisions_without_action_columns() {
@@ -683,6 +703,74 @@ mod tests {
         assert_eq!(snap.decisions[0].message_id, "<legacy@test>");
         assert_eq!(snap.decisions[0].requires_user_action, 0);
         assert!(snap.decisions[0].action_summary.is_none());
+    }
+
+    /// Regression: v16 (or any DB whose `inbox_decisions` lacks `requires_user_action` /
+    /// `action_summary`) must snapshot successfully during schema drift. Previously
+    /// `load_inbox_state_snapshot` always selected those columns and failed with
+    /// "no such column", blocking `open_file` / `rebuild-index` upgrades.
+    #[test]
+    fn open_file_drift_rebuild_succeeds_with_legacy_inbox_decisions_table() {
+        let dir = tempfile::tempdir().unwrap();
+        let data_dir = dir.path().join("data");
+        let maildir = data_dir.join("maildir/cur");
+        std::fs::create_dir_all(&maildir).unwrap();
+        std::fs::write(
+            maildir.join("msg1.eml"),
+            b"From: a@b.com\r\nSubject: Legacy drift\r\nMessage-ID: <legacy-drift@test>\r\nDate: Mon, 1 Jan 2024 12:00:00 +0000\r\nMIME-Version: 1.0\r\nContent-Type: text/plain\r\n\r\nBody",
+        )
+        .unwrap();
+
+        let db_path = data_dir.join("zmail.db");
+        let stale = Connection::open(&db_path).unwrap();
+        apply_connection_pragmas(&stale).unwrap();
+        apply_schema(&stale).unwrap();
+
+        stale
+            .execute_batch(
+                "INSERT INTO messages (message_id, thread_id, folder, uid, labels, category, from_address, from_name, to_addresses, cc_addresses, subject, date, body_text, raw_path, is_archived)
+                 VALUES ('<legacy-drift@test>', 't1', 'INBOX', 1, '[]', NULL, 'a@b.com', NULL, '[]', '[]', 'Legacy drift', '2024-01-01T12:00:00.000Z', 'Body', 'cur/msg1.eml', 0);
+                 INSERT INTO inbox_scans (scan_id, mode, cutoff_iso, scanned_at, notable_count, candidates_scanned)
+                 VALUES ('legacy-scan', 'check', '2024-01-01T00:00:00Z', '2026-04-01 18:00:00', 0, 1);",
+            )
+            .unwrap();
+
+        stale
+            .execute_batch(
+                "PRAGMA foreign_keys=OFF;
+                 ALTER TABLE inbox_decisions DROP COLUMN requires_user_action;
+                 ALTER TABLE inbox_decisions DROP COLUMN action_summary;
+                 PRAGMA foreign_keys=ON;",
+            )
+            .unwrap();
+
+        stale
+            .execute(
+                "INSERT INTO inbox_decisions
+                 (message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at)
+                 VALUES ('<legacy-drift@test>', 'fp-legacy', 'inform', '[]', NULL, 'model', '2026-04-01 18:00:00')",
+                [],
+            )
+            .unwrap();
+
+        stale
+            .pragma_update(None, "user_version", SCHEMA_VERSION - 1)
+            .unwrap();
+        drop(stale);
+
+        let conn = open_file(&db_path).unwrap();
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM messages WHERE message_id = '<legacy-drift@test>'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count, 1);
     }
 
     #[test]
