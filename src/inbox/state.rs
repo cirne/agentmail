@@ -3,6 +3,7 @@
 use rusqlite::{params, Connection};
 use uuid::Uuid;
 
+use crate::ids::resolve_message_id;
 use crate::refresh::RefreshPreviewRow;
 
 fn new_scan_id() -> String {
@@ -75,6 +76,8 @@ pub fn record_inbox_scan(
 }
 
 /// Set or clear `is_archived` for each message id. Returns how many ids existed.
+///
+/// Resolves each id the same way as `zmail read` / search JSON (bare or bracketed Message-ID).
 pub fn archive_messages_locally(
     conn: &Connection,
     message_ids: &[String],
@@ -83,18 +86,14 @@ pub fn archive_messages_locally(
     let v = if archived { 1 } else { 0 };
     let mut n = 0usize;
     for mid in message_ids {
-        let exists = conn.query_row(
-            "SELECT EXISTS(SELECT 1 FROM messages WHERE message_id = ?1)",
-            [mid.as_str()],
-            |row| row.get::<_, i64>(0),
-        )? == 1;
-        if exists {
-            n += 1;
-            conn.execute(
-                "UPDATE messages SET is_archived = ?1 WHERE message_id = ?2",
-                params![v, mid.as_str()],
-            )?;
-        }
+        let Some(canonical) = resolve_message_id(conn, mid.as_str())? else {
+            continue;
+        };
+        n += 1;
+        conn.execute(
+            "UPDATE messages SET is_archived = ?1 WHERE message_id = ?2",
+            params![v, canonical.as_str()],
+        )?;
     }
     Ok(n)
 }

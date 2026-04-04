@@ -10,7 +10,6 @@ Monitor & manage inbox
   zmail refresh [--force] [--text]               # day-to-day: fetch new mail since last sync (forward sync)
   zmail ask "<question>" [--verbose]
   zmail inbox [<window>] [--since YYYY-MM-DD] [--thorough] [--text]
-    # LLM triage over mail already in the local index (requires API key). Run zmail refresh first when recency matters.
   zmail archive <message_id> … [--undo]
 
 Search & read

@@ -4,6 +4,7 @@ use imap::Session;
 use rusqlite::Connection;
 
 use crate::config::Config;
+use crate::ids::resolve_message_id;
 use crate::sync::transport::connect_imap_session;
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -49,10 +50,28 @@ pub fn provider_archive_message(
         };
     }
 
+    let canonical_id = match resolve_message_id(conn, message_id) {
+        Ok(Some(id)) => id,
+        Ok(None) => {
+            return ProviderArchiveOutcome {
+                attempted: true,
+                ok: false,
+                error: Some("Message not found in index".into()),
+            };
+        }
+        Err(e) => {
+            return ProviderArchiveOutcome {
+                attempted: true,
+                ok: false,
+                error: Some(e.to_string()),
+            };
+        }
+    };
+
     let row: Option<(String, i64)> = conn
         .query_row(
             "SELECT folder, uid FROM messages WHERE message_id = ?1",
-            [message_id],
+            [&canonical_id],
             |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .ok();

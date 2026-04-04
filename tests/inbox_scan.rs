@@ -241,6 +241,90 @@ async fn archive_preserves_inbox_decision_action_flag_and_excludes_from_scan() {
     assert_eq!(r2.candidates_scanned, 0);
 }
 
+/// Regression: inbox JSON shows `messageId` without angle brackets; `zmail archive` with that string
+/// must set `is_archived` so the next inbox scan drops the message from candidates.
+#[tokio::test]
+async fn archive_with_bare_json_style_message_id_excludes_from_subsequent_inbox_scan() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::hours(2)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<bare-archive-inbox@test>",
+        "a@b.com",
+        "Subject",
+        "body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339();
+    let fp = "fp-bare-archive-inbox";
+    let mut mock = MockInboxClassifier::new(|batch| {
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("inform".into()),
+                matched_rule_ids: vec![],
+                note: Some("note".into()),
+                decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
+            })
+            .collect()
+    });
+    let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Review,
+        cutoff_iso: cutoff.clone(),
+        include_all: true,
+        replay: false,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some(fp.into()),
+        owner_address: None,
+        owner_aliases: vec![],
+        candidate_cap: None,
+        notable_cap: None,
+        batch_size: None,
+    };
+    let r1 = run_inbox_scan(&conn, &opts, &mut mock).await.unwrap();
+    assert_eq!(r1.candidates_scanned, 1);
+    assert!(
+        r1.surfaced
+            .iter()
+            .any(|r| r.message_id == "<bare-archive-inbox@test>"),
+        "first inbox run should surface the message"
+    );
+
+    // Simulates: user copies `messageId` from JSON (stripped form), not the bracketed DB key.
+    archive_messages_locally(&conn, &["bare-archive-inbox@test".into()], true).unwrap();
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<bare-archive-inbox@test>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 1, "bare id must resolve to the indexed row");
+
+    let mut mock_skip = MockInboxClassifier::new(|batch| {
+        assert!(
+            batch.is_empty(),
+            "archived message must not be an inbox candidate after bare-id archive"
+        );
+        vec![]
+    });
+    let r2 = run_inbox_scan(&conn, &opts, &mut mock_skip).await.unwrap();
+    assert_eq!(r2.candidates_scanned, 0);
+    assert!(
+        !r2.surfaced
+            .iter()
+            .any(|r| r.message_id == "<bare-archive-inbox@test>"),
+        "second inbox run must not surface the archived message"
+    );
+}
+
 #[tokio::test]
 async fn includes_attachment_metadata_on_notable_rows() {
     let conn = open_memory().unwrap();
@@ -1017,6 +1101,35 @@ fn archive_messages_locally_toggles_is_archived_idempotently() {
         )
         .unwrap();
     assert_eq!(archived, 0);
+}
+
+/// Inbox/search JSON uses `message_id_for_json_output` (no angle brackets); archive must still match DB rows.
+#[test]
+fn archive_messages_locally_resolves_bare_message_id() {
+    let conn = open_memory().unwrap();
+    insert_msg(
+        &conn,
+        "<bare-json@test>",
+        "a@b.com",
+        "hi",
+        "body",
+        "2026-01-01T00:00:00Z",
+        1,
+        None,
+        "[]",
+    );
+    assert_eq!(
+        archive_messages_locally(&conn, &["bare-json@test".into()], true).unwrap(),
+        1
+    );
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<bare-json@test>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 1);
 }
 
 #[tokio::test]

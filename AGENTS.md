@@ -155,7 +155,7 @@ zmail thread <thread_id> [--json] [--text]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
 zmail refresh [--since <window>] [--foreground] [--force] [--text]  # sync local mail; --since backfills; use --foreground when blocking on backfill
 zmail inbox [<window>] [--since YYYY-MM-DD] [--thorough] [--text]  # LLM triage over the local index (no IMAP); run refresh first when recency matters
-zmail archive <message_id>... [--undo]  # local is_archived; optional IMAP when mailboxManagement enabled; JSON stdout
+zmail archive <message_id>... [--undo]  # Message-ID as in search/inbox JSON (bare or <...>); local is_archived; optional IMAP when mailboxManagement enabled; JSON stdout
 zmail status [--json] [--imap]
 zmail stats [--json]
 zmail rebuild-index              # Wipe SQLite and reindex from local maildir (dev/test; same as schema bump)
