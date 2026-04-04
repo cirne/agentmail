@@ -4,7 +4,7 @@
 
 **Problem:** zmail exposes two tiers of interface: primitives (search, read, thread, who, attachment) and the answer engine (`ask`). Primitives are slower (3-4 rounds × 15-25s = 60-100s), more expensive (~$0.10-0.20/query vs ~$0.003-0.01), harder to use correctly (agents must learn 6+ commands with different flags), and more bug-prone (BUG-021: `read` crashes while `ask` works fine). The answer engine delivers 5-10x faster, cheaper answers by design. Maintaining both interfaces doubles the surface area without doubling value.
 
-**Proposed direction:** Remove `search`, `read`, `thread`, `who`, and `attachment` from both CLI and MCP. Make `ask` the sole query interface. Keep infrastructure commands (`sync`, `refresh`, `status`, `stats`, `setup`, `wizard`, `mcp`). The internal search/read/who functions remain as library code — `ask` calls them internally — but they are no longer exposed to users or agents.
+**Proposed direction:** Remove `search`, `read`, `thread`, `who`, and `attachment` from both CLI and MCP. Make `ask` the sole query interface. Keep infrastructure commands (`refresh`, `inbox`, `rules`, `archive`, `status`, `stats`, `setup`, `wizard`, `mcp`). The internal search/read/who functions remain as library code — `ask` calls them internally — but they are no longer exposed to users or agents.
 
 ---
 
@@ -50,7 +50,8 @@
 | Command/Tool | Why |
 |-------------|-----|
 | `zmail ask` / MCP `ask_email` | The primary query interface |
-| `zmail update` | Data ingestion — not a query |
+| `zmail refresh` | Data ingestion (IMAP → local index) — not a query |
+| `zmail inbox` / `zmail rules` / `zmail archive` | Inbox workflow — not the “ask” query path |
 | `zmail status` / MCP `get_status` | Operational — not a query |
 | `zmail stats` / MCP `get_stats` | Operational — not a query |
 | `zmail setup` / `zmail wizard` | Onboarding — not a query |
@@ -142,7 +143,7 @@ Before removing anything, add `ask` as an MCP tool so MCP consumers have the rep
 
 ## What success looks like
 
-- **CLI surface:** `zmail ask`, `zmail update`, `zmail check`, `zmail review`, `zmail status`, `zmail stats`, `zmail setup`, `zmail wizard`, `zmail mcp`. That's it.
+- **CLI surface (if this opp ships):** `zmail ask` plus infrastructure only — today that includes **`zmail refresh`**, **`zmail inbox`**, **`zmail rules`**, **`zmail archive`**, **`zmail status`**, **`zmail stats`**, **`zmail setup`**, **`zmail wizard`**, **`zmail mcp`** (exact set may change; do not assume legacy **`update`/`check`/`review`**).
 - **MCP surface:** `ask_email`, `get_status`, `get_stats`. Three tools.
 - **Agent experience:** One tool call answers any email question. No multi-step orchestration, no flag guessing, no ID format confusion.
 - **Maintenance:** ~50% less CLI code, ~70% fewer MCP tool definitions, proportionally fewer tests and docs.

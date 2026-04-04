@@ -2,7 +2,7 @@
 
 **Status:** Archived — historical context only (2026-04-02). **Created:** 2026-04-01. **Updated:** 2026-04-02. **Tags:** imap, archive, write, safety, config, inbox
 
-**Superseded by:** [OPP-036](../OPP-036-inbox-triage-orthogonal-archive.md) — all active design and phasing for triage vs archive, explicit `zmail archive`, and opt-in IMAP mailbox management **must be tracked in OPP-036**. This file remains as background for readonly-default, config gating, partial-success reporting, and provider-specific archive semantics.
+**Implemented design:** [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md) (**archived 2026-04-04**) — triage vs archive, explicit **`zmail archive`**, opt-in IMAP mailbox management; inbox triage is **deterministic** per [OPP-037](OPP-037-typed-inbox-rules-eval-style.md). **This file** stays as **historical** background for readonly-default, config gating, partial-success reporting, and provider-specific archive semantics.
 
 **Related:** [OPP-032](../OPP-032-llm-rules-engine.md) (stateful inbox, local archive semantics), [ADR-005](../../ARCHITECTURE.md#adr-005-dual-agent-interface--native-cli--mcp-server) (agent-first CLI + MCP), [ADR-011](../../ARCHITECTURE.md#adr-011-email-provider--imap-first-gmail-as-priority-target) (IMAP-first architecture), [ADR-027](../../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox decisions)
 
@@ -10,7 +10,7 @@
 
 ## Problem
 
-**Historical note (was “keep open”):** zmail updates local archive/handled state; provider-side IMAP mutation semantics, config gating, and mutation-result reporting were explored here and are **continued in OPP-036**.
+**Historical note (was “keep open”):** provider-side IMAP mutation semantics, config gating, and mutation-result reporting were explored here; the shipped contract is summarized in **[OPP-036](OPP-036-inbox-triage-orthogonal-archive.md)** (implemented).
 
 Today zmail is effectively read-only with respect to the provider mailbox. It syncs, indexes, searches, classifies, drafts, and sends outbound mail, but it does **not** mutate existing IMAP messages on the server.
 
@@ -53,14 +53,9 @@ When enabled, zmail enters a new operational mode: email management. In that mod
 
 ### Archive is the first IMAP write action
 
-The first write action should be archive, because it is the clearest extension of the stateful inbox model:
+The first write action should be archive, because it is the clearest extension of the stateful inbox model.
 
-- `zmail review dismiss <message_id>` archives locally by default in [OPP-032](../OPP-032-llm-rules-engine.md)
-- when mailbox management is enabled, the same action should also archive at the provider via IMAP
-
-This makes dismiss/archive the bridge from local inbox triage to real mailbox management.
-
-**OPP-036 note:** Prefer attaching provider archive to explicit **`zmail archive`** (and `--undo`) rather than only `review dismiss`; see OPP-036 for the unified story.
+**Shipped (2026-04):** use **`zmail archive <message_id> …`** / **`--undo`**; optional provider IMAP when **`mailboxManagement`** is enabled — see [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md). **Historical:** this doc originally discussed **`zmail review dismiss`**; that command was removed in favor of explicit archive.
 
 ### Scope this broadly, not as a one-off
 
@@ -87,28 +82,27 @@ The architecture should therefore establish:
 
 ### CLI semantics
 
-Readonly mode:
+Readonly mode (conceptual — **CLI:** `zmail archive`):
 
 ```text
-zmail review dismiss <message_id>
+zmail archive <message_id>
 ```
 
 Behavior:
 
-- records surfaced/handled state locally
-- sets `is_archived = 1` locally unless `--no-archive`
+- sets `is_archived = 1` locally
 - does **not** mutate the provider mailbox
 - response should indicate `providerMutation: skipped (readonly mode)`
 
 Mailbox management enabled:
 
 ```text
-zmail review dismiss <message_id>
+zmail archive <message_id>
 ```
 
 Behavior:
 
-- does the same local state update
+- sets local `is_archived` as above
 - attempts provider-side archive via IMAP
 - reports success/failure explicitly
 
@@ -209,7 +203,7 @@ This is a product and safety question, not just a transport question.
 4. **Add observability.** Return structured mutation results to CLI/MCP callers.
 5. **Expand cautiously.** Consider unarchive, mark read/unread, move, and labels only after archive is proven safe.
 
-**Active phasing:** See [OPP-036](../OPP-036-inbox-triage-orthogonal-archive.md).
+**Phasing (shipped):** See [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md).
 
 ---
 
@@ -219,20 +213,20 @@ This is a product and safety question, not just a transport question.
 - **Unit:** Provider capability mapping for archive action (Gmail vs generic IMAP behavior).
 - **Unit:** Command behavior when readonly mode is active (`providerMutation.attempted = false`).
 - **Unit:** Partial-failure handling when local archive succeeds and IMAP mutation fails.
-- **Integration:** `zmail review dismiss <id>` in readonly mode updates local state only.
-- **Integration:** `zmail review dismiss <id>` with mailbox management enabled performs local update plus IMAP archive.
+- **Integration:** `zmail archive <id>` in readonly mode updates local `is_archived` only.
+- **Integration:** `zmail archive <id>` with mailbox management enabled performs local update plus IMAP archive when configured.
 - **Integration:** CLI/MCP JSON output reports provider mutation status clearly.
 - **Edge:** Archive target/folder unavailable on provider.
 - **Edge:** Re-running archive on an already archived message is idempotent or safely reported.
 - **Edge:** Provider disconnect during mutation leaves state understandable and recoverable.
 
-**Active test strategy:** See [OPP-036](../OPP-036-inbox-triage-orthogonal-archive.md).
+**Test strategy (see also OPP-036):** [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md).
 
 ---
 
 ## References
 
-- [OPP-036](../OPP-036-inbox-triage-orthogonal-archive.md) — **active tracker** for this initiative
+- [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md) — **implemented** (archived); optional IMAP polish may still be filed as narrow bugs/opps
 - [OPP-032](../OPP-032-llm-rules-engine.md) — local inbox triage, dedup, rules, and local archive semantics
 - [ADR-005](../../ARCHITECTURE.md#adr-005-dual-agent-interface--native-cli--mcp-server) — CLI/MCP agent interfaces
 - [ADR-011](../../ARCHITECTURE.md#adr-011-email-provider--imap-first-gmail-as-priority-target) — IMAP-first provider model

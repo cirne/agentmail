@@ -1,4 +1,4 @@
-//! Post-rebuild inbox bootstrap (OPP-036): clean slate, age-based archive, classify recent mail, archive `ignore`.
+//! Post-rebuild inbox bootstrap ([OPP-036 archived](../../docs/opportunities/archive/OPP-036-inbox-triage-orthogonal-archive.md)): clean slate, age-based archive, classify recent mail, archive `ignore`.
 
 use rusqlite::Connection;
 

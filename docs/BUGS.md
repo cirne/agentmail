@@ -2,7 +2,7 @@
 
 When an agent or user hits a failure, we document it here. Root cause and "agent-intuitive" implications matter: **is the CLI intuitive enough for the LLM?** See [VISION.md](./VISION.md) (agent-first, agent-intuitive interfaces).
 
-**Distribution:** Unless a report says otherwise, **active bugs refer to the published Node/npm CLI** (`@cirne/zmail`). The in-repo **Rust** workspace at the **repository root** targets the same behavior; after cutover ([ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover), [OPP-030](opportunities/OPP-030-rust-port-cutover.md)), re-verify or re-file if a fix only landed on one implementation.
+**Distribution:** **Rust** at the repo root is the **primary** implementation and CLI (`cargo build` / prebuilt binary). The **`node/`** tree is reference / npm parity ([ADR-025](ARCHITECTURE.md#adr-025-rust-port--parallel-implementation-pre-cutover), [OPP-030](opportunities/OPP-030-rust-port-cutover.md)). Unless a bug explicitly says **Node-only**, assume the Rust CLI and re-file if a fix landed on only one side.
 
 ---
 
@@ -26,7 +26,7 @@ Fixed bugs are kept for context in [bugs/archive/](bugs/archive/).
 
 | ID | Title | Summary |
 |---|---|---|
-| [BUG-024](bugs/archive/BUG-024-inbox-scan-over-filters-misses-important-mail.md) | `zmail check` / inbox scan Over-Filters — Misses Important Mail | **Closed — verified (2026-04-03).** Same as fixed resolution, plus stripper overrule for non-bulk ops (e.g. same-day NetJets → `inform`). |
+| [BUG-024](bugs/archive/BUG-024-inbox-scan-over-filters-misses-important-mail.md) | Inbox scan over-filters — misses important mail (was `zmail check`; now `zmail inbox`) | **Closed — verified (2026-04-03).** LLM-inbox era: prompt + stripper fixes. **Follow-up:** inbox is **deterministic** ([OPP-037 archived](opportunities/archive/OPP-037-typed-inbox-rules-eval-style.md)); tune **`rules.json`** / defaults if similar recall issues appear. |
 | [BUG-035](bugs/archive/BUG-035-read-omits-to-cc-bcc-and-threading-headers.md) | `zmail read` Omits To/CC/BCC and Related Headers | Fixed (Rust 2026-04-01): `zmail read` default text prints From/To/Cc/Bcc/Reply-To/Date/Subject/Message-ID/In-Reply-To/References + body; `zmail read --json` emits structured `to`/`cc`/`bcc` (`name`+`address`), `replyTo`, threading, `recipientsDisclosed`, `body`; MCP `get_message` includes the same envelope fields. |
 | [BUG-036](bugs/archive/BUG-036-pdf-attachments-non-ascii-filename-mime-parse.md) | PDF / Attachments Missing When Filename Has Non-ASCII (MIME parse) | Fixed (2026-04-03): UTF-8 in quoted `filename=` tolerated; `parse_raw_message` + attachment fallback names; regression tests in `tests/attachments_extract.rs`, `tests/sync_parse_maildir.rs`; Node parity in `parse-message.ts`. |
 | [BUG-001](bugs/archive/BUG-001-attachment-and-read-agent-friction.md) | Attachment and Read/Thread Friction — Agent-Reported | Read/thread ID handling, attachment read argument order, extract vs download (`--raw`), PDF in binary. Fixed (PDF via OPP-007; other items addressed or documented). |

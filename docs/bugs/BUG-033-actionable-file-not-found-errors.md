@@ -9,7 +9,7 @@
 ## Summary
 
 - **Observed:** Commands such as `zmail read` and reply `zmail send <draft-id>` surface raw file-not-found errors or low-level path failures.
-- **Expected:** Errors should classify the failure, explain it in domain language ("message not in local cache", "source message missing for reply threading"), and suggest a likely next step such as `zmail sync`.
+- **Expected:** Errors should classify the failure, explain it in domain language ("message not in local cache", "source message missing for reply threading"), and suggest a likely next step such as **`zmail refresh`** (fetch mail into the local index).
 - **Impact:** Agents must pattern-match raw stderr strings like `Os { code: 2 }` or embedded `No such file or directory` text, which increases retries and makes recovery logic brittle.
 
 ---
@@ -52,14 +52,14 @@ The result is an uneven error contract: some missing-resource failures are actio
 
 **Published skill mitigation:** **Partial.**
 
-A strong published skill can teach agents likely recovery patterns, such as "if a message appears missing locally, run `zmail sync` and retry," which reduces wasted retries. But the skill cannot make low-level errors self-explanatory or reliably machine-readable; the interface still needs a better error contract.
+A strong published skill can teach agents likely recovery patterns, such as "if a message appears missing locally, run **`zmail refresh`** and retry," which reduces wasted retries. But the skill cannot make low-level errors self-explanatory or reliably machine-readable; the interface still needs a better error contract.
 
 ---
 
 ## Recommendations
 
 1. **Implementation:** Introduce a shared error-mapping layer for common local-file failures (`message_not_cached`, `source_message_missing`, `draft_not_found`, etc.).
-2. **Interface:** Include a short human-readable suggestion with each mapped error, such as `Run zmail sync to fetch recent messages`.
+2. **Interface:** Include a short human-readable suggestion with each mapped error, such as `Run zmail refresh to fetch recent messages`.
 3. **Interface:** Where practical, expose a stable machine-readable error code in JSON mode or structured MCP errors, so agents do not rely on string matching.
 4. **Implementation:** Add regression tests for representative read/send missing-file scenarios to verify both message text and suggested action.
 5. **Skill/docs:** Update the published skill with a small recovery table for common failure classes (`sync`-then-retry, missing draft, malformed ID, etc.) while the interface is being improved.

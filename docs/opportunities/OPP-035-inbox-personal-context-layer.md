@@ -2,13 +2,15 @@
 
 **Status:** Open. **Created:** 2026-04-01. **Tags:** inbox, personalization, context, rules, review, inform, llm
 
-**Related:** [OPP-001](OPP-001-personalization.md) (personalization for search), [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox foundation), [OPP-034](OPP-034-simplified-inbox-cli-check-review.md) (review/check product contract), [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md) (triage vs explicit archive + optional IMAP)
+**Related:** [OPP-001](OPP-001-personalization.md) (personalization for search), [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox foundation), [OPP-034](OPP-034-simplified-inbox-cli-check-review.md) (archived — superseded CLI sketch), [OPP-036 archived](archive/OPP-036-inbox-triage-orthogonal-archive.md) (triage vs archive — implemented), [OPP-037 archived](archive/OPP-037-typed-inbox-rules-eval-style.md) (deterministic rules)
 
 ---
 
 ## Problem
 
-`zmail review` currently has too little durable context about the user's world.
+**CLI note:** Surfacing runs through **`zmail inbox`** (and **`zmail rules`** for policy), not the archived **`zmail review`** name.
+
+`zmail inbox` / agents still have too little **durable personal context** about the user's world.
 
 That creates a predictable failure mode:
 

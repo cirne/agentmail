@@ -1,14 +1,16 @@
 # OPP-032: Stateful Inbox Foundation — Categories, Decisions, and Local Handling State
 
-**Status:** Archived. **Created:** 2026-04-01. **Updated:** 2026-04-01. **Tags:** inbox, state, rules, llm, category, archive, diagnostics, dedup
+**Status:** Archived. **Created:** 2026-04-01. **Updated:** 2026-04-04. **Tags:** inbox, state, rules, llm, category, archive, diagnostics, dedup
 
-**Related:** [OPP-034](OPP-034-simplified-inbox-cli-check-review.md) (clean-slate user-facing CLI built on top of this foundation), [OPP-001](OPP-001-personalization.md) (user context and personalization), [OPP-021](OPP-021-ask-spam-promo-awareness.md) (promotional/newsletter awareness), [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md) (triage vs archive, explicit `zmail archive`, opt-in IMAP; historical: [archive/OPP-033](archive/OPP-033-imap-write-operations-and-readonly-mode.md)), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox without daemon)
+**Archived (this file):** Inbox **classification** is no longer LLM-driven. See **[OPP-037 archived](archive/OPP-037-typed-inbox-rules-eval-style.md)** (deterministic `rules.json` v2) and **[OPP-036 archived](archive/OPP-036-inbox-triage-orthogonal-archive.md)** (triage vs **`zmail archive`**). This doc remains as history for durable decisions / fingerprint / surfaced state.
+
+**Related:** [OPP-034](OPP-034-simplified-inbox-cli-check-review.md) (archived CLI sketch — superseded), [OPP-001](OPP-001-personalization.md), [OPP-021](OPP-021-ask-spam-promo-awareness.md), [archive/OPP-033](archive/OPP-033-imap-write-operations-and-readonly-mode.md), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump)
 
 ---
 
 ## Problem
 
-**Archived note:** The core stateful inbox substrate described here is now in the codebase: durable inbox decisions, a 4-way action model, local handled/archive state, separate alert vs review surfaced state, rules/context persistence, and diagnostics/provenance. Keep this document as historical design context. Follow-on work should be tracked in narrower opportunities such as personalization/context quality and provider-side mailbox writes.
+**Archived note:** The core stateful inbox substrate described here is in the codebase: durable inbox decisions, surfaced-state tables, **`rules.json`** persistence, diagnostics. **Inbox classification** is **deterministic** ([OPP-037 archived](archive/OPP-037-typed-inbox-rules-eval-style.md)), not LLM batch. Keep this document as historical design context; follow-on work: [OPP-035](OPP-035-inbox-personal-context-layer.md), narrow IMAP polish.
 
 Even with a better user-facing CLI, zmail still needs a lower-level inbox foundation:
 
@@ -110,7 +112,7 @@ That should remain a local archive/handled concept:
 
 - setting local `is_archived = 1`
 - excluding archived mail from active inbox-oriented workflows by default
-- keeping provider-side IMAP writes out of scope here; track them in [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md) (historical notes: [archive/OPP-033](archive/OPP-033-imap-write-operations-and-readonly-mode.md))
+- provider-side IMAP writes: [OPP-036 archived](archive/OPP-036-inbox-triage-orthogonal-archive.md); historical: [archive/OPP-033](archive/OPP-033-imap-write-operations-and-readonly-mode.md)
 
 ### Alert-state vs review-state
 
@@ -244,15 +246,11 @@ This should be first-class in the data model even if it is not always shown in t
 
 ---
 
-## Relationship to OPP-034
+## Relationship to OPP-034 (historical)
 
-[OPP-034](OPP-034-simplified-inbox-cli-check-review.md) defines the clean-slate user-facing workflows:
+[OPP-034](OPP-034-simplified-inbox-cli-check-review.md) sketched **`update` / `check` / `review`** — **superseded** by **`zmail refresh`**, **`zmail inbox`**, **`zmail rules`**, **`zmail archive`** (see OPP-034 header). OPP-032’s **state model** (decisions, surfaced state, rules file) still applies; **command names** in older OPP-034 text are wrong for the shipped CLI.
 
-- `zmail update`
-- `zmail check`
-- `zmail review`
-
-OPP-032 defines the lower-level machinery that those workflows depend on:
+OPP-032 defines the lower-level machinery that inbox workflows depend on:
 
 - categories
 - decisions
@@ -263,7 +261,7 @@ OPP-032 defines the lower-level machinery that those workflows depend on:
 
 In short:
 
-- **OPP-034** is the UX/product contract
+- **OPP-034** is an **archived** UX sketch (superseded CLI)
 - **OPP-032** is the state model and persistence foundation
 
 ---

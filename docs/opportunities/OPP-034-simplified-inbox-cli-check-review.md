@@ -1,14 +1,16 @@
 # OPP-034: Simplified Inbox CLI — `update`, `check`, and `review`
 
-**Status:** Archived. **Created:** 2026-04-01. **Updated:** 2026-04-01. **Tags:** cli, inbox, agent, review, check, notify, inform, workflow
+**Status:** Archived. **Created:** 2026-04-01. **Updated:** 2026-04-04. **Tags:** cli, inbox, agent, review, check, notify, inform, workflow
 
-**Related:** [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox foundation), [OPP-021](OPP-021-ask-spam-promo-awareness.md) (promotional/newsletter awareness), [OPP-036](OPP-036-inbox-triage-orthogonal-archive.md) (triage vs archive + IMAP; historical: [archive/OPP-033](archive/OPP-033-imap-write-operations-and-readonly-mode.md)), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump) (stateful inbox without daemon)
+**Superseded (2026-04-04):** The **`update` / `check` / `review`** shape described below was **not** the final CLI. Shipped surface: **`zmail refresh`** (fetch/backfill), **`zmail inbox`** (deterministic triage), **`zmail rules`**, **`zmail archive`**. See [OPP-036 archived](archive/OPP-036-inbox-triage-orthogonal-archive.md) and [OPP-037 archived](archive/OPP-037-typed-inbox-rules-eval-style.md).
+
+**Related:** [OPP-032](OPP-032-llm-rules-engine.md) (stateful inbox foundation), [OPP-021](OPP-021-ask-spam-promo-awareness.md), [OPP-036 archived](archive/OPP-036-inbox-triage-orthogonal-archive.md), [archive/OPP-033](archive/OPP-033-imap-write-operations-and-readonly-mode.md), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump)
 
 ---
 
 ## Problem
 
-**Archived note:** The command-surface redesign in this opportunity has effectively landed: `update`, `check`, and `review` are now the top-level inbox workflow commands, the 4-way action model exists, and alert vs review surfaced state is split. Remaining problems are no longer primarily about command shape; they are about quality and personalization of `inform`/review behavior. Track those in narrower opportunities and bugs rather than keeping this broad CLI redesign open.
+**Archived note:** This document is **historical product fiction** after the smart-inbox merge. It captured an intermediate redesign (`update`/`check`/`review`) that was **replaced** by **`refresh`+`inbox`+`rules`+`archive`** and **deterministic** inbox classification. Personalization and review quality work lives in [OPP-035](OPP-035-inbox-personal-context-layer.md) and bugs, not in resurrecting these command names.
 
 The current inbox CLI is trying to serve too many distinct workflows at once.
 

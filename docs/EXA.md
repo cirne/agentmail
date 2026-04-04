@@ -2,6 +2,8 @@
 
 > This document explores how Exa.ai (or a similar neural web search API) could enhance zmail's search and indexing, specifically focusing on what Exa *inside* zmail does that an agent calling Exa *separately* cannot.
 
+**Stale diagram (below):** zmail is **FTS-only** today (no LanceDB/embeddings worker). Use **`zmail refresh`** wherever this doc says **`zmail sync`**.
+
 ## Core Insight
 
 zmail has **corpus-level context** the agent doesn't have at query time. The agent knows what it's asking; zmail knows what's in 500K emails. Exa has **web-scale context** zmail doesn't have. The integration point is where those two contexts meet.
@@ -126,10 +128,10 @@ The rule: if the query doesn't benefit from corpus context or pre-indexed enrich
 Fits the existing two-worker model (ADR-020) by adding a third concurrent worker:
 
 ```
-zmail sync
+zmail refresh   # (historical docs may say "sync")
 ├── Sync worker:    IMAP → maildir + SQLite           (bandwidth-bound)
-├── Index worker:   SQLite → OpenAI → LanceDB         (API-rate-bound)
-└── Enrich worker:  URLs/contacts → Exa → SQLite      (API-rate-bound, new)
+├── Index worker:   (historical) embeddings pipeline — not in current product
+└── Enrich worker:  URLs/contacts → Exa → SQLite      (API-rate-bound, hypothetical)
 ```
 
 The enrich worker follows the same pattern: concurrent but independent, runs during sync, advisory-locked, progressive availability. Messages are searchable via FTS5 immediately; enriched link content and contact data become available as the enrich worker catches up.

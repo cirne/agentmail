@@ -674,7 +674,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **JSON contract:** Rows expose **`decisionSource`** (`rule`, `fallback`, etc.) and **`matchedRuleIds`** when applicable. **`requiresUserAction` / `actionSummary`:** v1 deterministic inbox leaves them **false** / empty unless extended later; columns remain for forward compatibility and cached rows.
 
-**See also:** [OPP-037](opportunities/OPP-037-typed-inbox-rules-eval-style.md), [ADR-027](#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump), [`skills/zmail/references/INBOX-CUSTOMIZATION.md`](../skills/zmail/references/INBOX-CUSTOMIZATION.md).
+**See also:** [OPP-037 archived](opportunities/archive/OPP-037-typed-inbox-rules-eval-style.md), [ADR-027](#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump), [`skills/zmail/references/INBOX-CUSTOMIZATION.md`](../skills/zmail/references/INBOX-CUSTOMIZATION.md).
 
 ---
 
