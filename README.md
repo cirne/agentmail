@@ -145,6 +145,8 @@ cargo run -- ask "summarize invoices from last week" --verbose
 
 Unit tests live in `src/` under `#[cfg(test)] mod tests { ... }` next to the code they exercise. Integration tests are one crate per file under `tests/` (e.g. `search_fts`, `mcp_stdio`) and exercise the public CLI end-to-end. After changing a module, a fast check is `cargo test --lib <filter>`; run full `cargo test` before merging.
 
+**`cargo test` and CPU cores:** By default, Cargo uses one parallel `rustc` job per logical CPU for builds (`cargo test` included). The Rust test harness also runs tests in parallel across logical CPUs when `RUST_TEST_THREADS` is unset. This is documented in [`.cargo/config.toml`](.cargo/config.toml) (we do not cap jobs). To force serial tests (e.g. clearer logs), run `RUST_TEST_THREADS=1 cargo test`.
+
 **Install:** prebuilt binary via `install.sh` (above) or `cargo build --release`; local prefix install with `cargo install-local` (see [`AGENTS.md`](AGENTS.md)). Copy-only after a build: `cp target/release/zmail "$INSTALL_PREFIX/zmail" && chmod 755 "$INSTALL_PREFIX/zmail"`. The `@cirne/zmail` npm package under `node/` remains for parity and legacy use ([OPP-030](docs/opportunities/OPP-030-rust-port-cutover.md)).
 
 ## Status

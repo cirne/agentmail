@@ -57,6 +57,84 @@ fn rules_add_persists_file_and_show_reads_it() {
 }
 
 #[test]
+fn rules_move_reorders_list() {
+    let dir = tempdir().unwrap();
+    let bin = env!("CARGO_BIN_EXE_zmail");
+    let add1 = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args([
+            "rules",
+            "add",
+            "--action",
+            "ignore",
+            "--from-pattern",
+            r"@a\.test",
+            "--no-preview",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        add1.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add1.stderr)
+    );
+    let add2 = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args([
+            "rules",
+            "add",
+            "--action",
+            "ignore",
+            "--from-pattern",
+            r"@b\.test",
+            "--no-preview",
+        ])
+        .output()
+        .unwrap();
+    assert!(
+        add2.status.success(),
+        "{}",
+        String::from_utf8_lossy(&add2.stderr)
+    );
+    let j1: serde_json::Value = serde_json::from_slice(&add1.stdout).unwrap();
+    let id1 = j1["rule"]["id"].as_str().unwrap();
+    let j2: serde_json::Value = serde_json::from_slice(&add2.stdout).unwrap();
+    let id2 = j2["rule"]["id"].as_str().unwrap();
+    let mv = Command::new(bin)
+        .env("ZMAIL_HOME", dir.path())
+        .args(["rules", "move", id2, "--before", id1])
+        .output()
+        .unwrap();
+    assert!(
+        mv.status.success(),
+        "{}",
+        String::from_utf8_lossy(&mv.stderr)
+    );
+    let mv_json: serde_json::Value = serde_json::from_slice(&mv.stdout).unwrap();
+    assert_eq!(mv_json["moved"].as_str().unwrap(), id2);
+    let order = mv_json["rules"].as_array().unwrap();
+    assert!(order.len() >= 2);
+    assert!(order
+        .iter()
+        .all(|r| r.get("id").is_some() && r.get("action").is_some()));
+    let raw = fs::read_to_string(dir.path().join("rules.json")).unwrap();
+    let parsed: serde_json::Value = serde_json::from_str(&raw).unwrap();
+    let rules = parsed["rules"].as_array().unwrap();
+    let idx1 = rules
+        .iter()
+        .position(|r| r["id"].as_str() == Some(id1))
+        .unwrap();
+    let idx2 = rules
+        .iter()
+        .position(|r| r["id"].as_str() == Some(id2))
+        .unwrap();
+    assert!(
+        idx2 < idx1,
+        "moved rule should appear before anchor; idx2={idx2} idx1={idx1}"
+    );
+}
+
+#[test]
 fn rules_add_requires_at_least_one_pattern() {
     let dir = tempdir().unwrap();
     let bin = env!("CARGO_BIN_EXE_zmail");

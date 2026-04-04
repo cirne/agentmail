@@ -2,12 +2,37 @@ use crate::cli::args::RulesCmd;
 use crate::cli::util::{load_cfg, zmail_home_path};
 use crate::cli::CliResult;
 use zmail::{
-    add_regex_rule, db, edit_rule, load_rules_file, parse_inbox_window_to_iso_cutoff,
+    add_regex_rule, db, edit_rule, load_rules_file, move_rule, parse_inbox_window_to_iso_cutoff,
     preview_rule_impact, print_review_text, propose_rule_from_feedback, remove_rule,
     reset_rules_to_bundled_defaults, rules_fingerprint, rules_path, validate_rules_file,
     DeterministicInboxClassifier, InboxDispositionCounts, InboxSurfaceMode, RefreshPreviewRow,
-    RuleImpactPreview, RulesError, RunInboxScanOptions,
+    RuleImpactPreview, RulesError, RulesFile, RunInboxScanOptions,
 };
+
+fn compact_rules_move_json(rules: &RulesFile, moved_id: &str) -> serde_json::Value {
+    let entries: Vec<serde_json::Value> = rules
+        .rules
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id(),
+                "action": r.action_str(),
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "moved": moved_id,
+        "rules": entries,
+    })
+}
+
+fn print_compact_rules_move_text(rules: &RulesFile, moved_id: &str) {
+    println!("moved: {moved_id}");
+    println!("rulesOrder (first = highest precedence):");
+    for (i, r) in rules.rules.iter().enumerate() {
+        println!("  {:>3}  {}  {}", i, r.id(), r.action_str());
+    }
+}
 
 #[derive(serde::Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -189,7 +214,7 @@ Re-run with: zmail rules reset-defaults --yes",
             subject_pattern,
             body_pattern,
             from_pattern,
-            priority,
+            insert_before,
             description,
             no_preview,
             preview_window,
@@ -211,7 +236,7 @@ Re-run with: zmail rules reset-defaults --yes",
                     None,
                     None,
                     description,
-                    priority,
+                    insert_before.as_deref(),
                 )?
             } else {
                 return Err(RulesError::InvalidRules(
@@ -276,6 +301,24 @@ Re-run with: zmail rules reset-defaults --yes",
                 println!("Removed [{}]", rule.id());
             } else {
                 println!("{}", serde_json::to_string_pretty(&rule)?);
+            }
+        }
+        RulesCmd::Move {
+            id,
+            before,
+            after,
+            text,
+        } => {
+            if move_rule(&home, &id, before.as_deref(), after.as_deref())?.is_none() {
+                eprintln!("Rule not found: {id}");
+                std::process::exit(1);
+            }
+            let rules = load_rules_file(&home)?;
+            if text {
+                print_compact_rules_move_text(&rules, &id);
+            } else {
+                let v = compact_rules_move_json(&rules, &id);
+                println!("{}", serde_json::to_string_pretty(&v)?);
             }
         }
         RulesCmd::Feedback { feedback, text } => {

@@ -670,7 +670,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Rationale:** Inbox triage must be **predictable**, **offline-capable**, and **cheap** at scale. Agents and humans maintain rules explicitly; there is no free-text “condition string” interpreted by a model on the inbox path. Optional **`context`** entries in `rules.json` are **for agents** (documentation / future use); the inbox matcher ignores them for classification.
 
-**Rules file:** On first use or setup, a **bundled default** rules pack is written if `rules.json` is missing (e.g. **`categoryPattern`** for provider categories, noreply/marketing-style regex, OTP-style regex → **notify**). **`zmail rules validate`** checks schema and constraints. **`rules_fingerprint`** hashes the normalized rule set (and context for cache invalidation semantics); inbox no longer depends on an LLM prompt version.
+**Rules file:** On first use or setup, a **bundled default** rules pack is written if `rules.json` is missing (e.g. **`categoryPattern`** for provider categories, noreply/marketing-style regex, OTP-style regex → **notify**). **`zmail rules validate`** checks schema and constraints. **`rules_fingerprint`** hashes the **`rules` array in file order** (and sorted **context** for stable cache invalidation); inbox no longer depends on an LLM prompt version. **Precedence** is **list order**: earlier rules win when multiple match.
 
 **JSON contract:** Rows expose **`decisionSource`** (`rule`, `fallback`, etc.) and **`matchedRuleIds`** when applicable. **`requiresUserAction` / `actionSummary`:** v1 deterministic inbox leaves them **false** / empty unless extended later; columns remain for forward compatibility and cached rows.
 

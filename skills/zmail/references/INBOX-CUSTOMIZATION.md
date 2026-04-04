@@ -19,7 +19,7 @@ The core idea: **preferences live in explicit regex rules** so neither you nor t
 Treat the installed **`zmail`** binary as the source of truth:
 
 1. Run **`zmail inbox --help`** and **`zmail rules --help`** to see supported flags in this version.
-2. Prefer **`zmail rules validate`**, **`zmail rules add`**, **`zmail rules edit`**, **`zmail rules remove`** over hand-editing when possible.
+2. Prefer **`zmail rules validate`**, **`zmail rules add`**, **`zmail rules edit`**, **`zmail rules remove`**, **`zmail rules move`** over hand-editing when possible.
 3. Keep **`~/.zmail/rules.json`** small, explicit, and auditable — every rule is **`kind: "regex"`**.
 
 ---
@@ -28,7 +28,7 @@ Treat the installed **`zmail`** binary as the source of truth:
 
 | Piece | Role |
 | ----- | ---- |
-| **Regex rules** (`rules.json`) | The only way to express **what should match** and **notify / inform / ignore**. Each rule has one or more of **`subjectPattern`**, **`bodyPattern`**, **`fromPattern`**, **`categoryPattern`**, **`fromDomainPattern`**, plus **`priority`** and **`action`**. |
+| **Regex rules** (`rules.json`) | The only way to express **what should match** and **notify / inform / ignore**. Each rule has one or more of **`subjectPattern`**, **`bodyPattern`**, **`fromPattern`**, **`categoryPattern`**, **`fromDomainPattern`**, plus **`action`**. Rules are an **ordered list**: **earlier rules take precedence** over later ones when multiple rules match (the **first** matching rule picks the action; **`matchedRuleIds`** lists all matches in file order). |
 | **Sync category** | Metadata from the provider/sync pipeline (e.g. list, promotional). Rules reference it with **`categoryPattern`** — it is **not** a separate “smart” classifier; it is **input** to your regex rules. |
 | **No rule match** | **`decisionSource: "fallback"`** — zmail still assigns an action so output is complete. This path is **deterministic and not LLM-based**; for predictable behavior on specific mail, **add a regex rule** (or adjust bundled defaults). |
 | **JSON compatibility fields** | **`requiresUserAction`**, **`actionSummary`** — reserved; current deterministic inbox does not populate them from triage. |
@@ -51,7 +51,6 @@ Keep customization in **`~/.zmail/rules.json`** so it survives DB rebuilds and c
       "kind": "regex",
       "id": "bank-domain",
       "action": "notify",
-      "priority": 0,
       "fromDomainPattern": "(?i)^mybank\\.example$",
       "description": "Bank notifications"
     },
@@ -59,14 +58,12 @@ Keep customization in **`~/.zmail/rules.json`** so it survives DB rebuilds and c
       "kind": "regex",
       "id": "invoice-subject",
       "action": "inform",
-      "priority": 10,
       "subjectPattern": "(?i)invoice|payment due"
     },
     {
       "kind": "regex",
       "id": "noreply-from",
       "action": "ignore",
-      "priority": 0,
       "fromPattern": "(?i)^no-?reply@",
       "description": "Noreply-style From (example; bundled defaults use a broader pattern)"
     }
@@ -78,7 +75,9 @@ Do **not** add a **`context`** block for inbox behavior — it is not consulted 
 
 Run **`zmail rules validate`** after edits. If the file is legacy v1, corrupt JSON, or rules lack **`kind`**, the CLI reports an error and may suggest **`zmail rules reset-defaults --yes`** (renames the current file to **`rules.json.bak.<uuid>`** and installs bundled v2 defaults).
 
-**`zmail rules add`** requires **`--action`** and at least one of **`--subject-pattern`**, **`--body-pattern`**, **`--from-pattern`** (regex on subject, stored body text, or sender). **`categoryPattern`** and **`fromDomainPattern`** are edited in **`rules.json`** (or come from bundled defaults). Optional **`--priority`**, **`--description`**, **`--no-preview`**, **`--preview-window`**. See **`zmail rules add --help`**.
+**`zmail rules add`** requires **`--action`** and at least one of **`--subject-pattern`**, **`--body-pattern`**, **`--from-pattern`** (regex on subject, stored body text, or sender). **`categoryPattern`** and **`fromDomainPattern`** are edited in **`rules.json`** (or come from bundled defaults). New rules **append** to the end (lowest precedence) unless you pass **`--insert-before <rule-id>`** to place the rule before an existing id. Optional **`--description`**, **`--no-preview`**, **`--preview-window`**. See **`zmail rules add --help`**.
+
+**`zmail rules move <rule-id> --before <other-id>`** or **`--after <other-id>`** reorders an existing rule (exactly one of **`--before`** / **`--after`**). Output is a **compact full list** after the move (`moved` plus every rule’s **`id`** and **`action`** in order; **`--text`** prints the same as lines). See **`zmail rules move --help`**.
 
 Keep each rule:
 
@@ -99,7 +98,7 @@ Rules map to **notify / inform / ignore**. **`requiresUserAction` / `actionSumma
 | ------ | -------- | -------------- |
 | **`notify`** | Missing this right now would be costly | High-attention in **`inbox`** output and briefings |
 | **`inform`** | Worth mentioning, not interrupting for | Listed in **`inbox`** output |
-| **`ignore`** | Routine noise or mail you do not want in proactive triage | Classifier deprioritizes surfacing. **Local auto-archive** may apply when **`ignore`** came from a **matched rule** (including bundled defaults) or from **fixed signals** (excluded provider category, noreply-style sender, **unsubscribe** in subject/snippet, mail from your own address) — mail remains **searchable**. Use **`zmail archive`** for **notify** / **inform** mail once handled |
+| **`ignore`** | Routine noise or mail you do not want in proactive triage | Classifier deprioritizes surfacing. **Local auto-archive** may apply when **`ignore`** came from a **matched rule** (including bundled defaults) or from **fixed signals** (excluded provider category, noreply-style sender, **unsubscribe** in subject or short preview, mail from your own address) — mail remains **searchable**. In **`rules.json`**, match body text with **`bodyPattern`** only (no `snippetPattern`). Use **`zmail archive`** for **notify** / **inform** mail once handled |
 
 Legacy CLI strings **`archive`** and **`suppress`** are accepted when adding rules and map to **`ignore`**.
 
@@ -118,8 +117,8 @@ Good:
 Avoid:
 
 - Overly broad regex that false-positives on personal mail
-- Duplicating bundled defaults unless you need a different **`action`** or **`priority`**
-- One giant regex that mixes unrelated ideas — prefer several rules with clear **`priority`**
+- Duplicating bundled defaults unless you need a different **`action`** or **order** in the list
+- One giant regex that mixes unrelated ideas — prefer several rules and use **array order** (or **`--insert-before`**) so specific rules run before broad ones
 
 Encode “facts” as **matchers**, not prose: e.g. property manager → **`fromPattern`** for their address; project aliases → **`subjectPattern`** or **`bodyPattern`**. Use **`zmail who`** to discover exact addresses for regex.
 
@@ -131,7 +130,7 @@ Use a small write loop instead of ad hoc memory:
 
 1. Run **`refresh`** (when needed) then **`inbox`** / **`search`**.
 2. Notice repeated user preferences or misfires.
-3. Propose a **regex rule** (or edit priority / action).
+3. Propose a **regex rule** (or edit **order** / **action** in **`rules.json`**).
 4. Get confirmation before changing **`rules.json`**.
 5. Apply with **`zmail rules add`** / **`edit`** / hand-edit + **`validate`**.
 6. Re-run **`inbox`** to confirm.

@@ -11,7 +11,6 @@ use crate::rules::{parse_rule_action, RuleActionKind, RulesError, RulesFile, Use
 struct CompiledRegexRule {
     id: String,
     action: RuleActionKind,
-    priority: i32,
     subject: Option<Regex>,
     body: Option<Regex>,
     from_pat: Option<Regex>,
@@ -19,7 +18,7 @@ struct CompiledRegexRule {
     from_domain: Option<Regex>,
 }
 
-/// Compiled rules, sorted by priority then id.
+/// Compiled rules in **`rules.json` array order** (earlier = higher precedence).
 pub struct CompiledRules {
     entries: Vec<CompiledRegexRule>,
 }
@@ -31,7 +30,6 @@ impl CompiledRules {
             let UserRule::Regex {
                 id,
                 action,
-                priority,
                 subject_pattern,
                 body_pattern,
                 from_pattern,
@@ -93,7 +91,6 @@ impl CompiledRules {
             entries.push(CompiledRegexRule {
                 id: id.clone(),
                 action,
-                priority: *priority,
                 subject,
                 body,
                 from_pat,
@@ -101,27 +98,24 @@ impl CompiledRules {
                 from_domain,
             });
         }
-        entries.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.id.cmp(&b.id)));
         Ok(Self { entries })
     }
 
     pub fn classify_one(&self, candidate: &InboxCandidate) -> InboxNotablePick {
         let mut matched_ids: Vec<String> = Vec::new();
-        let mut best_action: Option<RuleActionKind> = None;
+        let mut first_action: Option<RuleActionKind> = None;
         for e in &self.entries {
             if regex_rule_matches(e, candidate) {
                 matched_ids.push(e.id.clone());
-                let a = e.action;
-                best_action = Some(match best_action {
-                    None => a,
-                    Some(cur) => stronger_action(cur, a),
-                });
+                if first_action.is_none() {
+                    first_action = Some(e.action);
+                }
             }
         }
         if matched_ids.is_empty() {
             return inbox_fallback_pick(candidate);
         }
-        let action = best_action.unwrap_or(RuleActionKind::Inform);
+        let action = first_action.unwrap_or(RuleActionKind::Inform);
         let action_s = match action {
             RuleActionKind::Notify => "notify",
             RuleActionKind::Inform => "inform",
@@ -136,21 +130,6 @@ impl CompiledRules {
             requires_user_action: false,
             action_summary: None,
         }
-    }
-}
-
-fn stronger_action(a: RuleActionKind, b: RuleActionKind) -> RuleActionKind {
-    fn rank(x: RuleActionKind) -> u8 {
-        match x {
-            RuleActionKind::Notify => 3,
-            RuleActionKind::Inform => 2,
-            RuleActionKind::Ignore => 1,
-        }
-    }
-    if rank(b) > rank(a) {
-        b
-    } else {
-        a
     }
 }
 
@@ -260,7 +239,6 @@ mod tests {
             rules: vec![UserRule::Regex {
                 id: id.into(),
                 action: "notify".into(),
-                priority: 0,
                 subject_pattern: None,
                 body_pattern: None,
                 from_pattern: Some(pat.into()),
@@ -273,13 +251,48 @@ mod tests {
     }
 
     #[test]
+    fn earlier_rule_wins_when_both_match() {
+        let rules = RulesFile {
+            version: 2,
+            rules: vec![
+                UserRule::Regex {
+                    id: "first".into(),
+                    action: "ignore".into(),
+                    subject_pattern: Some("(?i)hello".into()),
+                    body_pattern: None,
+                    from_pattern: None,
+                    category_pattern: None,
+                    from_domain_pattern: None,
+                    description: None,
+                },
+                UserRule::Regex {
+                    id: "second".into(),
+                    action: "notify".into(),
+                    subject_pattern: Some("(?i)hello".into()),
+                    body_pattern: None,
+                    from_pattern: None,
+                    category_pattern: None,
+                    from_domain_pattern: None,
+                    description: None,
+                },
+            ],
+            context: vec![],
+        };
+        validate_rules_file(&rules).unwrap();
+        let mut c = candidate("b", "s");
+        c.subject = "hello there".into();
+        let pick = classify_candidate(&rules, &c).unwrap();
+        assert_eq!(pick.action.as_deref(), Some("ignore"));
+        assert_eq!(pick.matched_rule_ids, vec!["first", "second"]);
+    }
+
+    #[test]
     fn body_regex_matches_full_body_not_snippet_prefix_only() {
         let rules = RulesFile {
             version: 2,
             rules: vec![UserRule::Regex {
                 id: "r1".into(),
                 action: "notify".into(),
-                priority: 0,
                 subject_pattern: None,
                 body_pattern: Some("deep".into()),
                 from_pattern: None,
@@ -357,7 +370,6 @@ mod tests {
             rules: vec![UserRule::Regex {
                 id: "cat1".into(),
                 action: "ignore".into(),
-                priority: 0,
                 subject_pattern: None,
                 body_pattern: None,
                 from_pattern: None,
