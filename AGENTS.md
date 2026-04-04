@@ -179,6 +179,7 @@ zmail attachment list  [--text]
 zmail attachment read  | [--raw] [--no-cache]
 zmail send [--to addr --subject s] []   # SMTP; saved draft under data/drafts/ (.md optional); optional ZMAIL_SEND_TEST=1 for dev/test allowlist
 zmail draft new|reply|forward|list|view|edit|rewrite [--help]   # Local drafts (data/drafts/); list JSON: slim/full like search (--result-format); bodyPreview when full; edit = LLM instruction, rewrite = replace body
+zmail rules validate|reset-defaults --yes|list|show <id>|add|edit <id>|remove <id>|move <id>|feedback   # ~/.zmail/rules.json; ordered list precedence; move prints compact full id+action order (see zmail rules --help)
 zmail mcp  # Start MCP server (stdio)
 
 ```

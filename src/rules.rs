@@ -71,8 +71,6 @@ pub enum UserRule {
     Regex {
         id: String,
         action: String,
-        #[serde(default)]
-        priority: i32,
         #[serde(
             default,
             skip_serializing_if = "Option::is_none",
@@ -118,12 +116,6 @@ impl UserRule {
     pub fn action_str(&self) -> &str {
         match self {
             UserRule::Regex { action, .. } => action.as_str(),
-        }
-    }
-
-    pub fn priority(&self) -> i32 {
-        match self {
-            UserRule::Regex { priority, .. } => *priority,
         }
     }
 }
@@ -440,7 +432,8 @@ fn trim_opt_owned(s: Option<String>) -> Option<String> {
     })
 }
 
-/// Append a rule (at least one of subject/body/from/categoryPattern/fromDomainPattern).
+/// Append a rule (at least one of subject/body/from/categoryPattern/fromDomainPattern), or insert
+/// before an existing rule id when `insert_before` is set.
 #[allow(clippy::too_many_arguments)]
 pub fn add_regex_rule(
     home: &Path,
@@ -451,7 +444,7 @@ pub fn add_regex_rule(
     category_pattern: Option<String>,
     from_domain_pattern: Option<String>,
     description: Option<String>,
-    priority: Option<i32>,
+    insert_before: Option<&str>,
 ) -> Result<UserRule, RulesError> {
     parse_rule_action(action)?;
     let subject_pattern = trim_opt_owned(subject_pattern);
@@ -471,7 +464,6 @@ pub fn add_regex_rule(
                 .into(),
         ));
     }
-    let priority = priority.unwrap_or(100);
     with_locked_rules_file(home, |file| {
         file.version = file.version.max(default_rules_version());
         let id = generate_id(
@@ -483,7 +475,6 @@ pub fn add_regex_rule(
         let rule = UserRule::Regex {
             id,
             action: action.trim().to_string(),
-            priority,
             subject_pattern,
             body_pattern,
             from_pattern,
@@ -491,12 +482,25 @@ pub fn add_regex_rule(
             from_domain_pattern,
             description,
         };
-        file.rules.push(rule.clone());
+        if let Some(before_id) = insert_before.map(str::trim).filter(|s| !s.is_empty()) {
+            let Some(idx) = file.rules.iter().position(|r| r.id() == before_id) else {
+                return Err(RulesError::InvalidRules(format!(
+                    "insert-before: no rule with id {before_id:?}"
+                )));
+            };
+            file.rules.insert(idx, rule.clone());
+        } else {
+            file.rules.push(rule.clone());
+        }
         Ok(rule)
     })
 }
 
-pub fn add_rule_from_json(home: &Path, json_rule: &str) -> Result<UserRule, RulesError> {
+pub fn add_rule_from_json(
+    home: &Path,
+    json_rule: &str,
+    insert_before: Option<&str>,
+) -> Result<UserRule, RulesError> {
     let v: serde_json::Value = serde_json::from_str(json_rule)
         .map_err(|e| RulesError::InvalidRules(format!("invalid rule JSON: {e}")))?;
     if v.get("snippetPattern").is_some() {
@@ -517,7 +521,16 @@ pub fn add_rule_from_json(home: &Path, json_rule: &str) -> Result<UserRule, Rule
         let UserRule::Regex { id: rid, .. } = &mut rule;
         rid.clear();
         rid.push_str(&id);
-        file.rules.push(rule.clone());
+        if let Some(before_id) = insert_before.map(str::trim).filter(|s| !s.is_empty()) {
+            let Some(idx) = file.rules.iter().position(|r| r.id() == before_id) else {
+                return Err(RulesError::InvalidRules(format!(
+                    "insert-before: no rule with id {before_id:?}"
+                )));
+            };
+            file.rules.insert(idx, rule.clone());
+        } else {
+            file.rules.push(rule.clone());
+        }
         Ok(rule)
     })
 }
@@ -554,13 +567,66 @@ pub fn remove_rule(home: &Path, id: &str) -> Result<Option<UserRule>, RulesError
     })
 }
 
+/// Move rule `id` relative to another rule: exactly one of `insert_before` / `insert_after` must be set
+/// (the other `None`). Higher precedence = earlier in the list.
+pub fn move_rule(
+    home: &Path,
+    id: &str,
+    insert_before: Option<&str>,
+    insert_after: Option<&str>,
+) -> Result<Option<UserRule>, RulesError> {
+    let before = insert_before.map(str::trim).filter(|s| !s.is_empty());
+    let after = insert_after.map(str::trim).filter(|s| !s.is_empty());
+    let (anchor_id, place_before) = match (before, after) {
+        (None, None) => {
+            return Err(RulesError::InvalidRules(
+                "move rule: pass exactly one of --before or --after".into(),
+            ));
+        }
+        (Some(_), Some(_)) => {
+            return Err(RulesError::InvalidRules(
+                "move rule: pass only one of --before or --after".into(),
+            ));
+        }
+        (Some(b), None) => (b, true),
+        (None, Some(a)) => (a, false),
+    };
+
+    with_locked_rules_file(home, |file| {
+        let Some(from_idx) = file.rules.iter().position(|r| r.id() == id) else {
+            return Ok(None);
+        };
+        if anchor_id == id {
+            return Err(RulesError::InvalidRules(
+                "move rule: cannot move relative to itself".into(),
+            ));
+        }
+        let Some(anchor_idx) = file.rules.iter().position(|r| r.id() == anchor_id) else {
+            return Err(RulesError::InvalidRules(format!(
+                "move rule: no rule with id {anchor_id:?}"
+            )));
+        };
+        let rule = file.rules.remove(from_idx);
+        let mut anchor_idx_after = anchor_idx;
+        if from_idx < anchor_idx {
+            anchor_idx_after -= 1;
+        }
+        let insert_idx = if place_before {
+            anchor_idx_after
+        } else {
+            anchor_idx_after + 1
+        };
+        file.rules.insert(insert_idx, rule);
+        Ok(Some(file.rules[insert_idx].clone()))
+    })
+}
+
 pub fn rules_fingerprint(file: &RulesFile) -> String {
-    let mut rules_json: Vec<serde_json::Value> = file
+    let rules_json: Vec<serde_json::Value> = file
         .rules
         .iter()
         .map(|r| serde_json::to_value(r).unwrap_or(serde_json::Value::Null))
         .collect();
-    rules_json.sort_by_key(|a| a.to_string());
     let mut context = file.context.clone();
     context.sort_by(|a, b| a.id.cmp(&b.id).then_with(|| a.text.cmp(&b.text)));
     let normalized = serde_json::json!({
@@ -670,7 +736,7 @@ mod tests {
     #[test]
     fn rules_json_snippet_pattern_rejected() {
         use std::fs;
-        let json = r#"{"version":2,"rules":[{"kind":"regex","id":"x","action":"ignore","priority":0,"snippetPattern":"(?i)foo"}],"context":[]}"#;
+        let json = r#"{"version":2,"rules":[{"kind":"regex","id":"x","action":"ignore","snippetPattern":"(?i)foo"}],"context":[]}"#;
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path()).unwrap();
         let path = rules_path(dir.path());
@@ -694,11 +760,11 @@ mod tests {
     }
 
     #[test]
-    fn rules_fingerprint_is_stable_for_reordered_entries() {
+    fn rules_fingerprint_changes_when_rule_order_changes() {
         let a: RulesFile = serde_json::from_str(DEFAULT_RULES_JSON).unwrap();
         let mut b = a.clone();
         b.rules.reverse();
-        assert_eq!(rules_fingerprint(&a), rules_fingerprint(&b));
+        assert_ne!(rules_fingerprint(&a), rules_fingerprint(&b));
     }
 
     #[test]
@@ -732,7 +798,6 @@ mod tests {
         )
         .unwrap();
         assert_eq!(rule.action_str(), "inform");
-        assert_eq!(rule.priority(), 100);
         let loaded = load_rules_file_from_path(&rules_path(dir.path())).unwrap();
         assert!(loaded.rules.iter().any(|r| {
             matches!(r, UserRule::Regex { category_pattern, .. } if category_pattern.as_deref() == Some("(?i)^promotions$"))
@@ -783,6 +848,93 @@ mod tests {
         assert!(loaded.rules.iter().any(|r| {
             matches!(r, UserRule::Regex { from_pattern, .. } if from_pattern.as_deref() == Some(r"@acme\.test"))
         }));
+    }
+
+    #[test]
+    fn add_regex_rule_insert_before_places_rule_first() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = load_rules_file(dir.path()).unwrap();
+        let loaded_before = load_rules_file_from_path(&rules_path(dir.path())).unwrap();
+        let first_id = loaded_before.rules[0].id().to_string();
+        let rule = add_regex_rule(
+            dir.path(),
+            "inform",
+            Some(r"(?i)insert-test".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&first_id),
+        )
+        .unwrap();
+        let loaded = load_rules_file_from_path(&rules_path(dir.path())).unwrap();
+        assert_eq!(loaded.rules[0].id(), rule.id());
+        assert_eq!(loaded.rules[1].id(), first_id.as_str());
+    }
+
+    #[test]
+    fn add_regex_rule_insert_before_unknown_id_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = load_rules_file(dir.path()).unwrap();
+        let err = add_regex_rule(
+            dir.path(),
+            "inform",
+            Some(r"(?i)x".into()),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("no-such-id"),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("insert-before"));
+    }
+
+    #[test]
+    fn move_rule_before_works() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = load_rules_file(dir.path()).unwrap();
+        let loaded = load_rules_file_from_path(&rules_path(dir.path())).unwrap();
+        let a = loaded.rules[0].id().to_string();
+        let b = loaded.rules[1].id().to_string();
+        move_rule(dir.path(), &b, Some(&a), None).unwrap();
+        let loaded = load_rules_file_from_path(&rules_path(dir.path())).unwrap();
+        assert_eq!(loaded.rules[0].id(), b);
+        assert_eq!(loaded.rules[1].id(), a);
+    }
+
+    #[test]
+    fn move_rule_after_last_appends() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = load_rules_file(dir.path()).unwrap();
+        let loaded = load_rules_file_from_path(&rules_path(dir.path())).unwrap();
+        let n = loaded.rules.len();
+        let first = loaded.rules[0].id().to_string();
+        let last = loaded.rules[n - 1].id().to_string();
+        move_rule(dir.path(), &first, None, Some(&last)).unwrap();
+        let loaded = load_rules_file_from_path(&rules_path(dir.path())).unwrap();
+        assert_eq!(loaded.rules[n - 1].id(), first);
+    }
+
+    #[test]
+    fn move_rule_requires_before_or_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = load_rules_file(dir.path()).unwrap();
+        let err = move_rule(dir.path(), "x", None, None).unwrap_err();
+        assert!(err.to_string().contains("exactly one"));
+    }
+
+    #[test]
+    fn move_rule_rejects_both_before_and_after() {
+        let dir = tempfile::tempdir().unwrap();
+        let _ = load_rules_file(dir.path()).unwrap();
+        let loaded = load_rules_file_from_path(&rules_path(dir.path())).unwrap();
+        let a = loaded.rules[0].id().to_string();
+        let b = loaded.rules[1].id().to_string();
+        let err = move_rule(dir.path(), &a, Some(&b), Some(&b)).unwrap_err();
+        assert!(err.to_string().contains("only one"));
     }
 
     #[test]

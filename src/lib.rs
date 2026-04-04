@@ -71,9 +71,10 @@ pub use refresh::{
 };
 pub use rules::{
     add_regex_rule, add_rule_from_json, edit_rule, ensure_default_rules_file, load_rules_file,
-    parse_rule_action, propose_rule_from_feedback, remove_rule, reset_rules_to_bundled_defaults,
-    rules_fingerprint, rules_path, validate_rules_file, ContextEntry, ProposedRule, RuleActionKind,
-    RuleFeedbackProposal, RulesError, RulesFile, UserRule, MAX_REGEX_PATTERN_LEN,
+    move_rule, parse_rule_action, propose_rule_from_feedback, remove_rule,
+    reset_rules_to_bundled_defaults, rules_fingerprint, rules_path, validate_rules_file,
+    ContextEntry, ProposedRule, RuleActionKind, RuleFeedbackProposal, RulesError, RulesFile,
+    UserRule, MAX_REGEX_PATTERN_LEN,
 };
 pub use search::{
     canonical_first_name, contact_rank_simple, convert_to_or_query, escape_fts5_query,

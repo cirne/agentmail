@@ -5,21 +5,18 @@
       "kind": "regex",
       "id": "def-otp-subject",
       "action": "notify",
-      "priority": -50,
       "subjectPattern": "(?i)(verification\\s*code|one[-\\s]?time|security\\s*code|login\\s*code|2\\s*fa|two[-\\s]factor|authenticat|password\\s*reset|sign[-\\s]in\\s*code|your\\s*code\\s*is)"
     },
     {
       "kind": "regex",
-      "id": "def-otp-snippet",
+      "id": "def-otp-body",
       "action": "notify",
-      "priority": -50,
       "bodyPattern": "(?i)(verification\\s*code|one[-\\s]?time\\s*password|your\\s*code\\s*is|\\botp\\b|\\b2fa\\b)"
     },
     {
       "kind": "regex",
       "id": "def-cat-list",
       "action": "ignore",
-      "priority": 0,
       "categoryPattern": "^list$",
       "description": "Mailing-list category (sync metadata)"
     },
@@ -27,7 +24,6 @@
       "kind": "regex",
       "id": "def-cat-promotional",
       "action": "ignore",
-      "priority": 0,
       "categoryPattern": "^promotional$",
       "description": "Promotional category (provider label)"
     },
@@ -35,7 +31,6 @@
       "kind": "regex",
       "id": "def-cat-social",
       "action": "ignore",
-      "priority": 0,
       "categoryPattern": "^social$",
       "description": "Social category (provider label)"
     },
@@ -43,7 +38,6 @@
       "kind": "regex",
       "id": "def-cat-forum",
       "action": "ignore",
-      "priority": 0,
       "categoryPattern": "^forum$",
       "description": "Forum category (provider label)"
     },
@@ -51,7 +45,6 @@
       "kind": "regex",
       "id": "def-cat-bulk",
       "action": "ignore",
-      "priority": 0,
       "categoryPattern": "^bulk$",
       "description": "Bulk category (provider label)"
     },
@@ -59,7 +52,6 @@
       "kind": "regex",
       "id": "def-cat-spam",
       "action": "ignore",
-      "priority": 0,
       "categoryPattern": "^spam$",
       "description": "Spam/junk category (provider label)"
     },
@@ -67,7 +59,6 @@
       "kind": "regex",
       "id": "def-cat-automated",
       "action": "ignore",
-      "priority": 0,
       "categoryPattern": "^automated$",
       "description": "Automated category (sync metadata)"
     },
@@ -75,7 +66,6 @@
       "kind": "regex",
       "id": "def-noreply",
       "action": "ignore",
-      "priority": 10,
       "fromPattern": "(?i)^(?:no-?reply@|mailer-daemon@|postmaster@|notifications?@|donotreply@|bounce|news(?:letter)?@|alerts?@)",
       "description": "Noreply-style From local part (aligned with search/noreply patterns)"
     },
@@ -83,7 +73,6 @@
       "kind": "regex",
       "id": "def-newsletter-from",
       "action": "ignore",
-      "priority": 20,
       "fromPattern": "(?i)newsletter",
       "description": "Sender address suggests newsletter traffic"
     },
@@ -91,7 +80,6 @@
       "kind": "regex",
       "id": "def-linkedin",
       "action": "ignore",
-      "priority": 20,
       "fromPattern": "(?i)linkedin",
       "description": "LinkedIn notification traffic"
     },
@@ -99,7 +87,6 @@
       "kind": "regex",
       "id": "def-mkt-subject",
       "action": "ignore",
-      "priority": 30,
       "subjectPattern": "(?i)(?:newsletter|digest|sale|deal alert|invitation|invitations|sitewide|membership|available|document\\(s\\) available)",
       "description": "Subject line suggests marketing or bulk"
     },
@@ -107,7 +94,6 @@
       "kind": "regex",
       "id": "def-mkt-body",
       "action": "ignore",
-      "priority": 30,
       "bodyPattern": "(?i)(?:view in browser|unsubscribe|manage preferences)",
       "description": "Body suggests list mail (unsubscribe, view in browser); uses full body_text"
     },
@@ -115,7 +101,6 @@
       "kind": "regex",
       "id": "def-unsubscribe-subject",
       "action": "ignore",
-      "priority": 40,
       "subjectPattern": "(?i)\\bunsubscribe\\b",
       "description": "Unsubscribe word in subject"
     },
@@ -123,7 +108,6 @@
       "kind": "regex",
       "id": "def-unsubscribe-body",
       "action": "ignore",
-      "priority": 40,
       "bodyPattern": "(?i)\\bunsubscribe\\b",
       "description": "Unsubscribe word in body"
     }

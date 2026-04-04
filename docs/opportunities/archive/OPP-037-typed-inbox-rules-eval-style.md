@@ -2,7 +2,7 @@
 
 **Status:** Archived — **implemented** (2026-04-04). **Created:** 2026-04-04. **Updated:** 2026-04-04. **Tags:** inbox, rules, triage, heuristics, testing, personalization, deterministic
 
-**Supersedes:** Inbox **batch LLM** classification and free-text rule “conditions” folded into a model prompt. Inbox policy is now **deterministic Rust** over **`rules.json` version 2** (`kind: "regex"` rules with subject/body/from/snippet/category/domain pattern fields — see [`src/rules.rs`](../../../src/rules.rs) and bundled defaults). **`zmail ask`** / **draft LLM** paths are unchanged.
+**Supersedes:** Inbox **batch LLM** classification and free-text rule “conditions” folded into a model prompt. Inbox policy is now **deterministic Rust** over **`rules.json` version 2** (`kind: "regex"` rules with subject/body/from/category/domain pattern fields — see [`src/rules.rs`](../../../src/rules.rs) and bundled defaults). There is **no** `snippetPattern` in rules; body text uses **`bodyPattern`**. **`zmail ask`** / **draft LLM** paths are unchanged.
 
 **Related:** [OPP-032](../OPP-032-llm-rules-engine.md) (stateful inbox substrate; archived), [OPP-035](../OPP-035-inbox-personal-context-layer.md) (facts vs action policy), [OPP-021](../OPP-021-ask-spam-promo-awareness.md), [ADR-027](../ARCHITECTURE.md#adr-027-stateful-inbox--no-daemon-soft-state-on-schema-bump), [ADR-028](../ARCHITECTURE.md#adr-028-deterministic-inbox--typed-rules-no-llm-triage)
 
@@ -12,7 +12,7 @@
 
 **We are designing from zero.** Inbox triage **does not use an LLM batch** (`zmail inbox` does not call OpenAI for classification). Policy lives in **`rules.json`** as **typed, deterministic** rules only. A **calling agent or human** edits that file; there is **no `llm` rule kind** and no prose conditions interpreted at triage time.
 
-**Rationale:** Stable `matchedRuleIds`, full unit-testability, zero API cost/latency for inbox, no hallucinated rule ids. Start with a **strong default rule pack** (noreply, unsubscribe/snippet signals, list category, OTP/notify patterns, etc.), measure real-world gaps, then extend matchers or defaults — **simplify first**.
+**Rationale:** Stable `matchedRuleIds`, full unit-testability, zero API cost/latency for inbox, no hallucinated rule ids. Start with a **strong default rule pack** (noreply, unsubscribe/body patterns, list category, OTP/notify patterns, etc.), measure real-world gaps, then extend matchers or defaults — **simplify first**.
 
 **Out of scope for inbox:** `zmail ask`, setup/wizard LLM checks, `draft edit`, and other features keep using OpenAI where they already do; only **inbox classification** is deterministic.
 
@@ -38,7 +38,7 @@ The sections below record the **design intent**; behavior is implemented as desc
 
 ### Rule kinds (inbox only — no LLM interpretation)
 
-v2 **`rules.json`** uses **`"kind": "regex"`** per rule with pattern fields (`subjectPattern`, `bodyPattern`, `fromPattern`, `snippetPattern`, `categoryPattern`, `fromDomainPattern`, etc.) — one serde variant, multiple match surfaces. Heuristics and fallbacks live in Rust (`evaluate_fallback_heuristic`, stripper overrule), not as a separate `kind` in the file.
+v2 **`rules.json`** uses **`"kind": "regex"`** per rule with pattern fields (`subjectPattern`, `bodyPattern`, `fromPattern`, `categoryPattern`, `fromDomainPattern`, etc.) — one serde variant, multiple match surfaces. **`snippetPattern` is not supported** (use **`bodyPattern`** on full stored body). Heuristics and fallbacks live in Rust (`evaluate_fallback_heuristic`, stripper overrule), not as a separate `kind` in the file.
 
 ### Execution model
 

@@ -236,6 +236,7 @@ const RULES_CMD_AFTER_LONG_HELP: &str = "\
 Examples (add: at least one pattern; see zmail rules add --help):
   zmail rules add --action ignore --from-pattern '@linkedin\\.com'
   zmail rules add --action notify --subject-pattern '(?i)verification|security code'
+  zmail rules move def-linkedin --before def-cat-list   # see zmail rules move --help; prints compact full order
 ";
 
 /// Appended to `zmail rules add --help` (long help only).
@@ -246,7 +247,16 @@ Examples:
   zmail rules add --action inform --subject-pattern '(?i)flight|itinerary'
   zmail rules add --action ignore --body-pattern '(?i)unsubscribe'
   zmail rules add --action notify --from-pattern '^billing@bank\\.example$'
-Flags: --action <ACTION> --subject-pattern <RE> --body-pattern <RE> --from-pattern <RE> [--priority] [--description] [--no-preview] [--preview-window] [--text]
+Flags: --action <ACTION> --subject-pattern <RE> --body-pattern <RE> --from-pattern <RE> [--insert-before <RULE_ID>] [--description] [--no-preview] [--preview-window] [--text]
+";
+
+/// Appended to `zmail rules move --help` (long help only).
+const RULES_MOVE_AFTER_LONG_HELP: &str = "\
+Pass exactly one of --before or --after (another rule id). Precedence is list order (earlier = higher).
+JSON stdout: { \"moved\": \"<id>\", \"rules\": [ { \"id\", \"action\" }, ... ] } for the full order after the move. --text: numbered lines (index, id, action).
+Examples:
+  zmail rules move def-linkedin --before def-cat-list
+  zmail rules move abc1 --after def-noreply --text
 ";
 
 #[derive(Subcommand, Debug, Clone)]
@@ -302,8 +312,12 @@ pub(crate) enum RulesCmd {
             help = "regex on from_address"
         )]
         from_pattern: Option<String>,
-        #[arg(long, hide_long_help = true, help = "sort priority (default 100)")]
-        priority: Option<i32>,
+        #[arg(
+            long = "insert-before",
+            hide_long_help = true,
+            help = "place new rule before this rule id (default: append)"
+        )]
+        insert_before: Option<String>,
         #[arg(long, hide_long_help = true, help = "note in rules.json")]
         description: Option<String>,
         #[arg(long, hide_long_help = true, help = "skip inbox preview")]
@@ -328,6 +342,27 @@ pub(crate) enum RulesCmd {
     /// Remove a rule by ID
     Remove {
         id: String,
+        #[arg(long)]
+        text: bool,
+    },
+    /// Move a rule to a new position (ordered list precedence)
+    #[command(
+        after_long_help = RULES_MOVE_AFTER_LONG_HELP,
+        help_template = "\
+{about-with-newline}\
+{usage-heading} {usage}\
+{after-help}\
+\n\
+{all-args}\
+"
+    )]
+    Move {
+        /// Rule id to move
+        id: String,
+        #[arg(long, help = "place this rule before the given rule id")]
+        before: Option<String>,
+        #[arg(long, help = "place this rule after the given rule id")]
+        after: Option<String>,
         #[arg(long)]
         text: bool,
     },
@@ -404,6 +439,62 @@ mod draft_cli_tests {
                     assert!(subject_pattern.is_none());
                 }
                 _ => panic!("expected rules add"),
+            },
+            _ => panic!("expected rules"),
+        }
+    }
+
+    #[test]
+    fn rules_add_parses_insert_before() {
+        let cli = Cli::try_parse_from([
+            "zmail",
+            "rules",
+            "add",
+            "--action",
+            "notify",
+            "--subject-pattern",
+            "(?i)foo",
+            "--insert-before",
+            "def-otp-subject",
+        ])
+        .expect("parse");
+        match cli.command {
+            Commands::Rules { sub } => match sub {
+                RulesCmd::Add {
+                    insert_before,
+                    subject_pattern,
+                    ..
+                } => {
+                    assert_eq!(insert_before.as_deref(), Some("def-otp-subject"));
+                    assert_eq!(subject_pattern.as_deref(), Some("(?i)foo"));
+                }
+                _ => panic!("expected rules add"),
+            },
+            _ => panic!("expected rules"),
+        }
+    }
+
+    #[test]
+    fn rules_move_parses_before() {
+        let cli = Cli::try_parse_from([
+            "zmail",
+            "rules",
+            "move",
+            "abc1",
+            "--before",
+            "def-otp-subject",
+        ])
+        .expect("parse");
+        match cli.command {
+            Commands::Rules { sub } => match sub {
+                RulesCmd::Move {
+                    id, before, after, ..
+                } => {
+                    assert_eq!(id, "abc1");
+                    assert_eq!(before.as_deref(), Some("def-otp-subject"));
+                    assert!(after.is_none());
+                }
+                _ => panic!("expected rules move"),
             },
             _ => panic!("expected rules"),
         }
