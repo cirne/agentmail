@@ -134,6 +134,19 @@ fn query_table_exists(conn: &Connection, table_name: &str) -> Result<bool, DbErr
     Ok(exists)
 }
 
+/// True when `inbox_decisions` has v17+ columns (schema drift rebuild reads a stale DB).
+fn inbox_decisions_has_action_columns(conn: &Connection) -> Result<bool, DbError> {
+    if !query_table_exists(conn, "inbox_decisions")? {
+        return Ok(false);
+    }
+    let n: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM pragma_table_info('inbox_decisions') WHERE name IN ('requires_user_action', 'action_summary')",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok(n >= 2)
+}
+
 fn load_surfaced_rows(
     conn: &Connection,
     table_name: &str,
@@ -183,28 +196,52 @@ fn load_inbox_state_snapshot(conn: &Connection) -> Result<InboxStateSnapshot, Db
     let reviews = load_surfaced_rows(conn, "inbox_reviews")?;
 
     let decisions = if query_table_exists(conn, "inbox_decisions")? {
-        let mut decisions_stmt = conn.prepare(
-            "SELECT message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at,
-                    requires_user_action, action_summary
-             FROM inbox_decisions
-             ORDER BY message_id, rules_fingerprint",
-        )?;
-        let rows = decisions_stmt
-            .query_map([], |row| {
-                Ok(InboxDecisionRow {
-                    message_id: row.get(0)?,
-                    rules_fingerprint: row.get(1)?,
-                    action: row.get(2)?,
-                    matched_rule_ids: row.get(3)?,
-                    note: row.get(4)?,
-                    decision_source: row.get(5)?,
-                    decided_at: row.get(6)?,
-                    requires_user_action: row.get(7)?,
-                    action_summary: row.get(8)?,
-                })
-            })?
-            .collect::<Result<Vec<_>, _>>()?;
-        rows
+        if inbox_decisions_has_action_columns(conn)? {
+            let mut decisions_stmt = conn.prepare(
+                "SELECT message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at,
+                        requires_user_action, action_summary
+                 FROM inbox_decisions
+                 ORDER BY message_id, rules_fingerprint",
+            )?;
+            let rows = decisions_stmt
+                .query_map([], |row| {
+                    Ok(InboxDecisionRow {
+                        message_id: row.get(0)?,
+                        rules_fingerprint: row.get(1)?,
+                        action: row.get(2)?,
+                        matched_rule_ids: row.get(3)?,
+                        note: row.get(4)?,
+                        decision_source: row.get(5)?,
+                        decided_at: row.get(6)?,
+                        requires_user_action: row.get(7)?,
+                        action_summary: row.get(8)?,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        } else {
+            let mut decisions_stmt = conn.prepare(
+                "SELECT message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at
+                 FROM inbox_decisions
+                 ORDER BY message_id, rules_fingerprint",
+            )?;
+            let rows = decisions_stmt
+                .query_map([], |row| {
+                    Ok(InboxDecisionRow {
+                        message_id: row.get(0)?,
+                        rules_fingerprint: row.get(1)?,
+                        action: row.get(2)?,
+                        matched_rule_ids: row.get(3)?,
+                        note: row.get(4)?,
+                        decision_source: row.get(5)?,
+                        decided_at: row.get(6)?,
+                        requires_user_action: 0,
+                        action_summary: None,
+                    })
+                })?
+                .collect::<Result<Vec<_>, _>>()?;
+            rows
+        }
     } else {
         Vec::new()
     };
@@ -611,6 +648,41 @@ mod tests {
             .unwrap();
         assert_eq!(rua, 1);
         assert_eq!(summ.as_deref(), Some("Pay invoice"));
+    }
+
+    /// Stale DBs (e.g. user_version 16) may have `inbox_decisions` without action columns; drift rebuild must still snapshot.
+    #[test]
+    fn inbox_snapshot_loads_legacy_decisions_without_action_columns() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE inbox_scans (
+                scan_id TEXT PRIMARY KEY,
+                mode TEXT NOT NULL,
+                cutoff_iso TEXT NOT NULL,
+                scanned_at TEXT NOT NULL,
+                notable_count INTEGER NOT NULL DEFAULT 0,
+                candidates_scanned INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE inbox_decisions (
+                message_id TEXT NOT NULL,
+                rules_fingerprint TEXT NOT NULL,
+                action TEXT NOT NULL,
+                matched_rule_ids TEXT NOT NULL DEFAULT '[]',
+                note TEXT,
+                decision_source TEXT NOT NULL,
+                decided_at TEXT NOT NULL,
+                PRIMARY KEY (message_id, rules_fingerprint)
+            );
+            INSERT INTO inbox_scans VALUES ('s1', 'check', '2026-01-01', '2026-01-02', 0, 0);
+            INSERT INTO inbox_decisions VALUES ('<legacy@test>', 'fp', 'inform', '[]', NULL, 'model', '2026-01-03');",
+        )
+        .unwrap();
+
+        let snap = load_inbox_state_snapshot(&conn).unwrap();
+        assert_eq!(snap.decisions.len(), 1);
+        assert_eq!(snap.decisions[0].message_id, "<legacy@test>");
+        assert_eq!(snap.decisions[0].requires_user_action, 0);
+        assert!(snap.decisions[0].action_summary.is_none());
     }
 
     #[test]
