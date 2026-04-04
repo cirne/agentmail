@@ -1,103 +1,154 @@
-# OPP-016: Multi-Inbox — One Install, Home + Work
+# OPP-016: Multi-Inbox — One Install, Many Mailboxes
 
 **Status:** Opportunity.
 
-**CLI note (2026-04):** This doc says **`zmail update`** in places — the shipped command is **`zmail refresh`** (same role: fetch/backfill mail). Treat **`update`** below as **`refresh`** when reading.
+**CLI note (2026-04):** Older drafts referred to **`zmail update`** — the shipped command is **`zmail refresh`** (fetch/backfill). Treat **`update`** as **`refresh`** if you see it in external notes.
 
 ## Context
 
-zmail today is single-inbox: one IMAP identity, one config, one password. Users who want both personal and work email in the same agent experience have to run two installs or switch configs. We want a single installation to support multiple inboxes (e.g. home and work) with a dead-simple agent interface: the user does not manage or think about which mailbox is which; sync and search just work across all of them.
+zmail today is single-inbox: one IMAP identity, one config shape, one password. That is enough for one person and one address, but it breaks down when:
+
+- Someone wants **personal and work** (or school and side project) in one agent workflow without juggling two installs or `ZMAIL_HOME` switches.
+- An **operator or assistant stack** (e.g. **OpenClaw** or similar) needs **many distinct addresses** as first-class inboxes: `info@mycompany.com`, `support@mycompany.com`, `invoices@mycompany.com`, onboarding aliases, founder + shared mailboxes, etc. — **dozens** is a design target, not an edge case.
+
+We want a **single installation** where:
+
+- **Default path is simple:** sync and search see **all configured mailboxes** unless the user or config narrows scope.
+- **Power path is explicit:** filter by **email address** (intuitive id), optional per-mailbox rules, optional “exclude from default search” for archival or low-priority boxes.
+- **One place to reason about policy:** all non-secret mailbox settings live in **one root `config.json`** — no nested `config.json` per mailbox to drift or forget.
 
 ## Design principles
 
-- **Dead simple agent interface** — User does not worry about managing or syncing multiple mailboxes. **`zmail refresh`** should operate on **all** mailboxes by default; optional flags can narrow scope for sync operations for debugging or one-off backfill.
-- **One unified SQLite DB** — One index for all mail. Search, who, thread, read, and MCP tools hit a single database with a mailbox/account identifier on each row. No “which DB” or aggregating across DBs; one `zmail search` sees everything. This drives schema (e.g. `messages.mailbox_id`, `sync_state` keyed by mailbox + folder) and data layout (one `data/` tree).
-- **Config vs secrets** — Config (non-secret) lives in one place; secrets live in .env files. No secrets in config.json.
+- **Scale in the dozens** — Config is a list, not a forest of files. Filesystem layout stays **flat**: no `accounts/` umbrella, no extra `data/` layer under each mailbox for the shared index. Per-mailbox dirs are **only** what must be physically separate: **secrets** and **that mailbox’s maildir**.
+- **Dead-simple agent default** — **`zmail refresh`** runs over **all** mailboxes (respecting optional per-mailbox disable flags if we add them). **`zmail search`** (and MCP equivalents) hit **one** database; default scope is **all mailboxes included in search** (see below).
+- **One unified SQLite DB** — `messages` (and related rows) carry a **`mailbox_id`** (stable string, typically derived from config). **`sync_state`** is keyed by **`(mailbox_id, folder)`** so two Gmail workspaces can both use `[Gmail]/All Mail` without collision. **No** fan-out across multiple DBs for global search — FTS ranking stays coherent.
+- **Identify mailboxes by email in the CLI** — Humans and agents think in **`support@company.com`**. Resolve to **`mailbox_id`** / slug internally; accept email or slug where unambiguous.
+- **Config vs secrets** — **No secrets in `config.json`.** Shared secrets (e.g. OpenAI) in **root `~/.zmail/.env`**; IMAP (and later SMTP) passwords in **per-mailbox `.env`** only.
 
 ## Proposed design
 
-### Config: single hierarchical config.json
+### Config: single root `config.json` (all mailboxes)
 
-- **One `config.json`** at ZMAIL_HOME with config (no secrets) for all mailboxes. JSON is already hierarchical; e.g. a list of mailboxes with per-mailbox overrides:
+- **One file** at `ZMAIL_HOME/config.json` lists every mailbox and global knobs. **No** per-mailbox `config.json` — everything non-secret is here so diffs, reviews, and agent edits stay tractable with **many** entries.
 
 ```json
 {
   "mailboxes": [
-    { "email": "me@gmail.com" },
-    { "email": "me@company.com", "imap": { "host": "imap.company.com", "port": 993 } }
+    {
+      "id": "support_company_com",
+      "email": "support@mycompany.com",
+      "search": { "includeInDefault": true }
+    },
+    {
+      "id": "invoices_company_com",
+      "email": "invoices@mycompany.com",
+      "imap": { "host": "imap.gmail.com", "port": 993 },
+      "search": { "includeInDefault": true }
+    },
+    {
+      "id": "archive_company_com",
+      "email": "legacy@mycompany.com",
+      "search": { "includeInDefault": false }
+    }
   ],
-  "sync": { "defaultSince": "1y", "excludeLabels": ["trash", "spam"] },
+  "sync": { "defaultSince": "1y", "excludeLabels": ["Trash", "Spam"] },
   "attachments": { "cacheExtractedText": false }
 }
 ```
 
-- Defaults (IMAP host/port, sync settings) apply to all; per-mailbox only what’s needed (e.g. work IMAP host). No passwords or API keys in config.
+- **`id`** — Stable **`mailbox_id`** for schema, paths, and compact CLI. Required when email alone is ambiguous or filesystem-safe slugs are needed.
+- **`email`** — Canonical IMAP user / From identity; primary human-facing identifier.
+- **`search.includeInDefault`** — When `false`, **default** search (no mailbox filter) **omits** this mailbox; explicit `mailbox:` / `--mailbox` still includes it. Keeps “search everything I care about daily” clean when some boxes are huge or archival.
+- Defaults (IMAP host/port, sync, attachments) apply globally; per-mailbox blocks override only what differs.
 
-### Mailbox ID from email
+### `mailbox_id` and directory naming
 
-- Map email to a stable subdirectory name with a straightforward, reversible convention: replace `@` with a character (e.g. `_at_` or `-`), and optionally replace `.` (e.g. `me_gmail_com`, `me_company_com`). Ensures one dir per mailbox and no filesystem collisions. Exact mapping TBD (e.g. `@` → `_at_`, `.` → `_`).
+- Prefer an explicit **`id`** in config (e.g. `support_company_com`) over encoding rules alone — **dozens** of addresses make reversible email→path schemes harder to eyeball. Document a **recommended** slug recipe (`@` → `_`, `.` → `_`) for new entries.
+- Code resolves **`email` ↔ `id`** from the single config load; CLI accepts **either** where unique.
 
-### Secrets: root .env + per-mailbox .env
+### Secrets: root `.env` + per-mailbox `.env`
 
-- **Root `.env`** (`~/.zmail/.env`) — shared variables only, e.g. `OPENAI_API_KEY`. No per-mailbox secrets here so one key serves all accounts.
-- **Per-mailbox `.env`** — each mailbox has a subdir under ZMAIL_HOME named by the mailbox id (e.g. `~/.zmail/me_gmail_com/.env`). That file holds that mailbox’s IMAP password (e.g. `ZMAIL_IMAP_PASSWORD=...`). Same variable name in every mailbox .env; the loader knows which file to read based on which mailbox is being used. No flat env proliferation (no `ZMAIL_IMAP_PASSWORD_WORK` etc.).
+- **`~/.zmail/.env`** — Shared only: e.g. `ZMAIL_OPENAI_API_KEY` / `OPENAI_API_KEY`. **No** per-mailbox IMAP passwords here (avoids `PASSWORD_WORK` explosion).
+- **`~/.zmail/<id>/.env`** — That mailbox’s **`ZMAIL_IMAP_PASSWORD`** (same variable name everywhere; loader picks file by `mailbox_id`).
 
-### Data layout (unified DB)
+### Filesystem layout (flat)
 
-Because we use **one unified SQLite DB**, there is a single data tree:
+Unified index at the home root; per-mailbox dirs hold **secrets + maildir** only (no second config file, no per-mailbox DB).
 
-- **`~/.zmail/data/`** — the only data dir:
-  - `data/zmail.db` — single SQLite DB; `messages` (and any other per-message tables) have a `mailbox_id` column; `sync_state` is keyed by `(mailbox_id, folder)` so different accounts can both have e.g. `[Gmail]/All Mail` without collision.
-  - `data/maildir/` — single maildir tree; paths are mailbox-scoped so we don’t mix files: e.g. `maildir/{mailbox_id}/cur/...` so `raw_path` in DB is `{mailbox_id}/cur/123_<msgid>.eml`. Keeps one store, clear ownership, and simple backup/restore per account if ever needed.
-  - `data/vectors/`, `data/embedding-cache/` — shared (embeddings keyed by content; mailbox_id in application layer when needed).
+```text
+~/.zmail/
+  config.json           # all mailboxes + global settings (no secrets)
+  rules.json            # global inbox rules (see below)
+  zmail.db              # single SQLite (+ WAL/SHM alongside)
+  .env                  # shared API keys only
+  logs/                 # optional; sync logs, etc.
+  <mailbox_id>/
+    .env                # IMAP password for this mailbox
+    maildir/            # this mailbox’s on-disk mail (rebuild/sync provenance)
+    rules.json          # optional: per-mailbox rules (override/extension)
+```
 
-- **Mailbox dirs** under `~/.zmail/` (e.g. `~/.zmail/me_gmail_com/`) hold **only identity and secrets**: that mailbox’s `.env` (IMAP password). No DB, no maildir, no vectors. So:
-  - `~/.zmail/config.json` — all mailbox config (no secrets)
-  - `~/.zmail/.env` — shared (e.g. OPENAI_API_KEY)
-  - `~/.zmail/me_gmail_com/.env` — IMAP password for me@gmail.com
-  - `~/.zmail/me_company_com/.env` — IMAP password for me@company.com
-  - `~/.zmail/data/` — one DB, one maildir (with mailbox_id in paths and schema)
+- **`zmail.db`** lives at **`ZMAIL_HOME/zmail.db`** (not under a redundant `data/` segment for the DB — optional `data/` subdir is an implementation detail if we keep compatibility with existing paths during migration).
+- **`raw_path`** / maildir paths in SQLite are scoped under `<mailbox_id>/maildir/...` so ownership is obvious and rebuild walks the right tree.
+- **Optional shared caches** (e.g. future vectors): either under `~/.zmail/cache/` or next to the DB — keyed by content with `mailbox_id` in app logic where needed.
 
-This keeps “one place for all durable data” and “mailbox dirs = config + secrets only.”
+This stays **flat** (no `accounts/` prefix), **one config file**, and scales to **many** sibling `<mailbox_id>/` directories without extra nesting.
+
+### Inbox rules (global + optional per-mailbox)
+
+- **`~/.zmail/rules.json`** — Default rule pack and patterns shared across mailboxes (OTP, generic bulk mail, etc.).
+- **`~/.zmail/<mailbox_id>/rules.json`** — Optional **additions or overrides** for that mailbox (e.g. `support@` triage vs `invoices@` triage).
+- **Evaluation order** should be **documented and fixed** (e.g. global rules first, then per-mailbox appended so mailbox-specific rules can win on first match — matches today’s “ordered list, first match wins” model).
+- **`rules_fingerprint`** for inbox cache invalidation should reflect the **effective** rules for that mailbox (e.g. hash global + hash per-mailbox, or hash merged list).
 
 ### Sync / refresh
 
-- **Default:** `zmail refresh` runs against **all** mailboxes in config (iterate mailboxes, connect with that mailbox’s config + that mailbox dir’s .env, write into the single DB and maildir with that mailbox_id).
-- **Optional narrow scope:** e.g. `zmail refresh --mailbox me@company.com` or `--mailbox me_company_com` to sync only that mailbox (useful for debugging or one-off backfill), if/when mailbox-scoped refresh lands.
+- **Default:** iterate **all** enabled mailboxes in `config.json`, load `<id>/.env`, sync into unified DB + `<id>/maildir/`.
+- **Narrow:** `zmail refresh --mailbox support@mycompany.com` or `--mailbox support_company_com` for one box (debugging, rate limits, backfill).
+- **Ordering:** config list order is a reasonable default; optional **`sync.priority`** (integer) later if some mailboxes should refresh first.
 
-### Query language
+### Search, read, thread, MCP
 
-- Agents and users can **filter on a specific inbox** when they want to. Add an optional **inbox/mailbox filter** in the query language: e.g. `inbox:work` or `mailbox:me_company_com`, supported in query parser + search layer (predicate on `messages.mailbox_id`). Default (no operator) = search all mailboxes.
+- **Default search:** all mailboxes with **`search.includeInDefault !== false`** (missing = true). Single FTS query + `mailbox_id` filter in SQL when narrowing.
+- **Explicit filter:** query operator **`mailbox:`** / **`inbox:`** (exact surface TBD) **or** CLI flag **`--mailbox <email|id>`** on commands that need scope.
+- **JSON rows** should include **`mailboxId`** (and ideally **`email`**) so agents disambiguate when results mix many inboxes.
+- **MCP tools** mirror CLI: optional mailbox parameter; default = same as CLI default search scope.
 
-### zmail status
+### `zmail status`
 
-- **List available inboxes** in `zmail status` — the list is short, so status is the right place. Agents and users can see which mailboxes are configured (and optionally sync state per mailbox) without a separate command.
+- With **many** mailboxes, status should stay readable: **one line per mailbox** (email, id, last sync, message count delta) in text mode; **`--json`** for agents (full list, structured errors per mailbox).
+- Optional **summary line** at top: N configured, M healthy, last global refresh.
 
 ## Schema impact
 
-- **messages:** add `mailbox_id TEXT NOT NULL` (and backfill or default for existing single-inbox DBs).
-- **sync_state:** key by `(mailbox_id, folder)` — e.g. composite primary key or `mailbox_id || '/' || folder` as key. Same for any other sync checkpoint tables.
-- **FTS / search:** filter by `mailbox_id` when `inbox:` operator is present; otherwise search all.
+- **`messages`:** add **`mailbox_id TEXT NOT NULL`** (backfill for legacy single-inbox rows).
+- **`sync_state`:** composite key **`(mailbox_id, folder)`** (or encoded single key). Same idea for any folder-scoped sync tables.
+- **Attachments / threads:** ensure foreign rows either carry **`mailbox_id`** or join through `messages` so cross-mailbox leaks are impossible.
+- **FTS:** join to `messages` and filter on **`mailbox_id`** when the user narrows scope.
+- **`message_id`:** consider composite uniqueness **`(mailbox_id, message_id)`** if the same provider Message-ID could theoretically appear twice across workspaces (defensive; Gmail-style global ids are usually fine).
 
 ## Backward compatibility
 
-- Single-mailbox config today: one `imap.user`, one password in root `.env`. We preserve that: if `config.json` has no `mailboxes` array, treat as one mailbox (current shape). Root `.env` continues to supply `ZMAIL_IMAP_PASSWORD` for that single mailbox. So existing installs keep working without migration; multi-inbox is additive.
+- **Legacy single-mailbox:** no `mailboxes` array — treat current **`imap.user`** + root **`ZMAIL_IMAP_PASSWORD`** as one implicit mailbox; **`mailbox_id`** default e.g. derived from email or a fixed `default`.
+- **Existing paths:** today’s **`data/zmail.db`** + **`data/maildir/`** may migrate to **`zmail.db`** at home + **`{id}/maildir/`** (or keep `data/` as a compat shim during transition — implementation detail; early-dev installs can also wipe and resync per [AGENTS.md](../../AGENTS.md) clean-break norms).
 
 ## Open questions
 
-- Exact mailbox_id mapping: `@` → `_at_`, `.` → `_` (or leave dots and only replace `@`)?
-- CLI flag name: `--mailbox <id|email>` vs `--account`?
-- Default mailbox for “send” (when OPP-011 lands): config order, or explicit `default` in config?
+- **DB path:** keep **`data/zmail.db`** for one release with a symlink or dual-read, vs cut straight to **`~/.zmail/zmail.db`**?
+- **CLI flag name:** standardize on **`--mailbox`** (matches OPP-016 history) vs **`--account`** — pick one, alias the other if needed.
+- **Default send mailbox** ([OPP-011](OPP-011-send-email.md)): explicit **`defaultSendMailbox`** in config vs first in list vs last-used.
+- **Parallel refresh:** one writer on SQLite — serialize sync jobs vs pipeline per mailbox with explicit locking story ([ARCHITECTURE.md](../ARCHITECTURE.md) WAL notes).
 
 ## Summary
 
 | Area | Choice |
 |------|--------|
-| **DB** | One unified SQLite DB; `mailbox_id` on messages and sync_state. |
-| **Config** | Single config.json with `mailboxes` array; config only, no secrets. |
-| **Secrets** | Root .env (shared e.g. OPENAI_API_KEY); per-mailbox dir `.env` (IMAP password). |
-| **Mailbox dirs** | Identity + secrets only (e.g. `~/.zmail/me_gmail_com/.env`). No DB/maildir there. |
-| **Data** | Single `~/.zmail/data/` (zmail.db, maildir with mailbox-scoped paths, vectors, cache). |
-| **Sync** | Default: all mailboxes; optional `--mailbox` to narrow. |
-| **Query** | Can filter on a specific inbox when desired (`inbox:` / `mailbox:` operator); default = all mailboxes. |
-| **Status** | `zmail status` lists available inboxes (short list). |
+| **Scale** | Designed for **many** mailboxes (personal + work + role addresses + operators); one root config, flat dirs. |
+| **DB** | **One** unified SQLite DB; **`mailbox_id`** on messages; **`sync_state`** keyed by mailbox + folder. |
+| **Config** | **Single** `config.json` at `ZMAIL_HOME`; **no** per-mailbox config files; optional **`search.includeInDefault`**. |
+| **Secrets** | Root `.env` (shared API keys); **`<mailbox_id>/.env`** (IMAP password per mailbox). |
+| **Layout** | **`zmail.db`** at home root; **`<mailbox_id>/.env`** + **`<mailbox_id>/maildir/`**; optional **`<mailbox_id>/rules.json`**. |
+| **Rules** | Global **`rules.json`** + optional per-mailbox rules; **composite fingerprint** for inbox cache. |
+| **Sync** | Default: **all** mailboxes; optional **`--mailbox`** to narrow. |
+| **Query / CLI** | Default search = all **included** mailboxes; filter by **email or id**; JSON exposes mailbox fields. |
+| **Status** | Per-mailbox lines + **JSON** for large sets. |
