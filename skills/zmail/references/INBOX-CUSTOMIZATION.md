@@ -2,7 +2,7 @@
 
 This companion to [`../SKILL.md`](../SKILL.md) explains how to make **`zmail check`** and **`zmail review`** smarter over time by giving them **durable memory** about what matters to the mailbox owner.
 
-**Cadence (current behavior):** run **`zmail check`** on a **short loop** (e.g. every 1–5 minutes) to surface **`notify`** only. Run **`zmail review`** **periodically or when asked** to survey the **unarchived** time window with full **notify / inform / ignore** triage (all categories; **`review`** does not sync by default—run **`zmail update`** first when freshness matters). Use **`zmail archive`** when mail no longer needs focused attention; **`search` / `read` / `ask`** still see archived mail. Full table: [Inbox workflow](../SKILL.md#inbox-workflow) in **`SKILL.md`**.
+**Cadence (current behavior):** run **`zmail check`** on a **short loop** (e.g. every 1–5 minutes) to surface **`notify`** only (interrupt path). Check JSON still carries **`requiresUserAction`**, **`actionSummary`**, and **`counts.actionRequired`** for the scanned **unarchived** window—use them to notice **email todos** that are **`inform`** (not listed in the default **`check`** surfaced set). If **`counts.actionRequired`** > 0 but nothing surfaced, read **`hints`** and run **`zmail review`** or **`zmail check --diagnostics`**. Run **`zmail review`** **periodically or when asked** to survey the **unarchived** window with full **notify / inform / ignore** triage (**`review`** does not sync by default—run **`zmail update`** first when freshness matters); **prioritize rows with `requiresUserAction: true`** for actionable follow-up. Use **`zmail archive`** when mail no longer needs focused attention; **`search` / `read` / `ask`** still see archived mail. **Archive does not clear** the stored action-required flag—the flag reflects **what triage decided at classification time**; **open workload** is “unarchived,” so archived action mail drops out of **`check`/`review`** but stays queryable. Full table: [Inbox workflow](../SKILL.md#inbox-workflow) in **`SKILL.md`**.
 
 The core idea: do not force the agent to rediscover the same preferences on every pass. Keep a small, explicit ruleset plus a little background context so inbox triage gets better with use.
 
@@ -21,19 +21,21 @@ Treat the installed **`zmail`** binary as the source of truth:
 
 ## Mental model
 
-Use three layers:
+Use **three layers** plus one **orthogonal classifier output**:
 
 | Layer | Purpose | Example |
 | ----- | ------- | ------- |
 | **Deterministic category** | Fast machine labeling from headers/provider labels | `promotional`, `social`, `list`, `spam` |
 | **Rules** | User preferences for action | "notify on bank security alerts" |
 | **Context** | Background facts that help classification | "Kirsten is my property manager" |
+| **Action required** (JSON) | Separate from **notify / inform / ignore**: “triage thinks the user should **do** something durable (reply, pay, confirm, schedule…).” Persisted as **`requiresUserAction`** + optional **`actionSummary`**. Set at classification time and **left unchanged on archive** so you can still reason about history; **working todos** = **unarchived** ∧ **`requiresUserAction`** in agent workflows. |
 
 The agent should think of this as **mailbox memory**:
 
 - **Category** says what kind of email it is.
 - **Rules** say what the user wants done with it.
 - **Context** says what the user means when the rule is ambiguous.
+- **Action required** says whether this message implied a **task**, independent of whether it was **`notify`** (interrupt now) or **`inform`** (review soon).
 
 That combination is what makes `zmail` improve over time instead of acting like a stateless filter.
 
@@ -91,7 +93,7 @@ Prefer one precise rule over a paragraph of prose.
 
 ## Actions to use
 
-Rules should map to a small action set:
+Rules should map to a small action set (**notify / inform / ignore**). The model **also** emits **`requiresUserAction`** per message: that is **not** a fourth rule action—it is an extra boolean (plus **`actionSummary`**) for “does this imply a **user todo**?” Ephemeral **OTP / magic-link** mail is guided **not** to set **`requiresUserAction`** unless there is a separate durable task.
 
 | Action | Use when | Typical effect |
 | ------ | -------- | -------------- |
@@ -101,8 +103,9 @@ Rules should map to a small action set:
 
 Good examples:
 
-- **`notify`**: fraud alerts, password resets, urgent direct asks, OTP codes.
-- **`inform`**: personal updates, important non-urgent work mail, things the user should hear about at the next review.
+- **`notify`**: fraud alerts, password resets, urgent direct asks; **OTP codes** are often **`notify`** for visibility but **`requiresUserAction`** is usually **false** (read the code, then archive)—still use **`search` + `read`** when the user asks for a code.
+- **`inform`** + **`requiresUserAction`**: “please confirm by Friday,” invoice to pay, scheduling that needs a reply—shows in **`review`**; use **`actionSummary`** to brief the user.
+- **`inform`** without action: FYI threads, low-urgency updates.
 - **`ignore`**: newsletters, recruiting drip campaigns, social digests, routine shipping updates.
 
 Legacy CLI strings **`archive`** and **`suppress`** are accepted when adding rules and map to **`ignore`**.
@@ -208,6 +211,9 @@ When the installed version supports diagnostics, use them to answer:
 - Which rule matched?
 - Was the decision from a rule, model, cache, or fallback?
 - What category did zmail assign?
+- Does triage mark **`requiresUserAction`**, and what **`actionSummary`** did the model give?
+
+Use **`counts.actionRequired`** in **`check`/`review`** JSON to see how many messages in the pass were flagged as needing user follow-up (across **`notify`**, **`inform`**, and **`ignore`** rows in **`review`**).
 
 If the result surprises the user:
 

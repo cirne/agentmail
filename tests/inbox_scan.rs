@@ -69,6 +69,8 @@ async fn returns_rows_picked_by_classifier() {
                 matched_rule_ids: vec![],
                 note: Some("needs reply".into()),
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -95,6 +97,151 @@ async fn returns_rows_picked_by_classifier() {
 }
 
 #[tokio::test]
+async fn scan_increments_action_required_when_classifier_flags_todo() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::hours(2)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<todo@x>",
+        "a@b.com",
+        "Please confirm",
+        "body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339();
+    let mut mock = MockInboxClassifier::new(|batch| {
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("inform".into()),
+                matched_rule_ids: vec![],
+                note: None,
+                decision_source: Some("model".into()),
+                requires_user_action: true,
+                action_summary: Some("Reply to confirm".into()),
+            })
+            .collect()
+    });
+    let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Review,
+        cutoff_iso: cutoff,
+        include_all: true,
+        replay: false,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some("fp-todo".into()),
+        owner_address: None,
+        owner_aliases: vec![],
+        candidate_cap: None,
+        notable_cap: None,
+        batch_size: None,
+    };
+    let r = run_inbox_scan(&conn, &opts, &mut mock).await.unwrap();
+    assert_eq!(r.counts.action_required, 1);
+    assert_eq!(r.counts.inform, 1);
+    let row = r
+        .surfaced
+        .iter()
+        .find(|x| x.message_id == "<todo@x>")
+        .expect("surfaced row");
+    assert!(row.requires_user_action);
+    assert_eq!(row.action_summary.as_deref(), Some("Reply to confirm"));
+}
+
+/// Archiving removes mail from scan candidates but does not clear persisted `requires_user_action`.
+#[tokio::test]
+async fn archive_preserves_inbox_decision_action_flag_and_excludes_from_scan() {
+    let conn = open_memory().unwrap();
+    let recent = (Utc::now() - Duration::hours(2)).to_rfc3339();
+    insert_msg(
+        &conn,
+        "<arch-flag@test>",
+        "a@b.com",
+        "Please reply",
+        "body",
+        &recent,
+        1,
+        None,
+        "[]",
+    );
+    let cutoff = (Utc::now() - Duration::hours(24)).to_rfc3339();
+    let fp = "fp-arch-flag";
+    let mut mock = MockInboxClassifier::new(|batch| {
+        batch
+            .iter()
+            .map(|m| InboxNotablePick {
+                message_id: m.message_id.clone(),
+                action: Some("inform".into()),
+                matched_rule_ids: vec![],
+                note: None,
+                decision_source: Some("model".into()),
+                requires_user_action: true,
+                action_summary: Some("Reply to sender".into()),
+            })
+            .collect()
+    });
+    let opts = RunInboxScanOptions {
+        surface_mode: InboxSurfaceMode::Review,
+        cutoff_iso: cutoff.clone(),
+        include_all: true,
+        replay: false,
+        reapply_llm: false,
+        diagnostics: false,
+        rules_fingerprint: Some(fp.into()),
+        owner_address: None,
+        owner_aliases: vec![],
+        candidate_cap: None,
+        notable_cap: None,
+        batch_size: None,
+    };
+    let r1 = run_inbox_scan(&conn, &opts, &mut mock).await.unwrap();
+    assert_eq!(r1.candidates_scanned, 1);
+
+    let (rua, summ): (i64, Option<String>) = conn
+        .query_row(
+            "SELECT requires_user_action, action_summary FROM inbox_decisions WHERE message_id = '<arch-flag@test>' AND rules_fingerprint = ?1",
+            [fp],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(rua, 1);
+    assert_eq!(summ.as_deref(), Some("Reply to sender"));
+
+    archive_messages_locally(&conn, &["<arch-flag@test>".into()], true).unwrap();
+    let archived: i64 = conn
+        .query_row(
+            "SELECT is_archived FROM messages WHERE message_id = '<arch-flag@test>'",
+            [],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(archived, 1);
+
+    let (rua_after, _): (i64, Option<String>) = conn
+        .query_row(
+            "SELECT requires_user_action, action_summary FROM inbox_decisions WHERE message_id = '<arch-flag@test>'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .unwrap();
+    assert_eq!(rua_after, 1);
+
+    let mut mock_skip = MockInboxClassifier::new(|batch| {
+        assert!(
+            batch.is_empty(),
+            "archived messages must not be inbox candidates"
+        );
+        vec![]
+    });
+    let r2 = run_inbox_scan(&conn, &opts, &mut mock_skip).await.unwrap();
+    assert_eq!(r2.candidates_scanned, 0);
+}
+
+#[tokio::test]
 async fn includes_attachment_metadata_on_notable_rows() {
     let conn = open_memory().unwrap();
     let recent = (Utc::now() - Duration::hours(2)).to_rfc3339();
@@ -117,6 +264,8 @@ async fn includes_attachment_metadata_on_notable_rows() {
                 matched_rule_ids: vec![],
                 note: None,
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -267,6 +416,8 @@ async fn excludes_default_categories_when_include_all_false() {
             matched_rule_ids: vec![],
             note: None,
             decision_source: Some("model".into()),
+            requires_user_action: false,
+            action_summary: None,
         }]
     });
     let opts = RunInboxScanOptions {
@@ -313,6 +464,8 @@ async fn second_scan_dedups_unless_replay_is_enabled() {
                 matched_rule_ids: vec![],
                 note: None,
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -349,6 +502,8 @@ async fn second_scan_dedups_unless_replay_is_enabled() {
                 matched_rule_ids: vec![],
                 note: None,
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -395,6 +550,8 @@ async fn ignore_classifications_archive_and_second_scan_skips_archived_candidate
                 matched_rule_ids: vec!["promo".into()],
                 note: Some("routine promo".into()),
                 decision_source: Some("rule".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -462,6 +619,8 @@ async fn ignore_without_archive_signals_does_not_set_is_archived() {
                 matched_rule_ids: vec![],
                 note: Some("model ignore".into()),
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -530,6 +689,8 @@ async fn reclassify_includes_archived_messages_in_scan() {
                 matched_rule_ids: vec![],
                 note: None,
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -601,6 +762,8 @@ async fn scan_without_reclassify_skips_archived_messages() {
                 matched_rule_ids: vec![],
                 note: None,
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -656,6 +819,8 @@ async fn changed_rules_fingerprint_recomputes_decision() {
                 matched_rule_ids: vec![],
                 note: Some("first".into()),
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -699,6 +864,8 @@ async fn changed_rules_fingerprint_recomputes_decision() {
                 matched_rule_ids: vec!["new".into()],
                 note: Some("second".into()),
                 decision_source: Some("rule".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -755,6 +922,8 @@ async fn reapply_llm_bypasses_cache_even_when_fingerprint_matches() {
                 matched_rule_ids: vec![],
                 note: Some("first".into()),
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -786,6 +955,8 @@ async fn reapply_llm_bypasses_cache_even_when_fingerprint_matches() {
                 matched_rule_ids: vec![],
                 note: Some("second".into()),
                 decision_source: Some("model".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });
@@ -873,6 +1044,8 @@ async fn diagnostics_include_processed_ignore_and_archives_locally() {
                 matched_rule_ids: vec!["ship1".into()],
                 note: Some("Routine shipping update".into()),
                 decision_source: Some("rule".into()),
+                requires_user_action: false,
+                action_summary: None,
             })
             .collect()
     });

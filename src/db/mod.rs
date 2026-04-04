@@ -68,6 +68,8 @@ struct InboxDecisionRow {
     note: Option<String>,
     decision_source: String,
     decided_at: String,
+    requires_user_action: i64,
+    action_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -182,7 +184,8 @@ fn load_inbox_state_snapshot(conn: &Connection) -> Result<InboxStateSnapshot, Db
 
     let decisions = if query_table_exists(conn, "inbox_decisions")? {
         let mut decisions_stmt = conn.prepare(
-            "SELECT message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at
+            "SELECT message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at,
+                    requires_user_action, action_summary
              FROM inbox_decisions
              ORDER BY message_id, rules_fingerprint",
         )?;
@@ -196,6 +199,8 @@ fn load_inbox_state_snapshot(conn: &Connection) -> Result<InboxStateSnapshot, Db
                     note: row.get(4)?,
                     decision_source: row.get(5)?,
                     decided_at: row.get(6)?,
+                    requires_user_action: row.get(7)?,
+                    action_summary: row.get(8)?,
                 })
             })?
             .collect::<Result<Vec<_>, _>>()?;
@@ -293,8 +298,9 @@ fn restore_inbox_state(conn: &Connection, inbox: &InboxStateSnapshot) -> Result<
         let action = normalize_inbox_decision_action(row.action.as_str());
         conn.execute(
             "INSERT OR REPLACE INTO inbox_decisions
-             (message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+             (message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, decided_at,
+              requires_user_action, action_summary)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             (
                 &row.message_id,
                 &row.rules_fingerprint,
@@ -303,6 +309,8 @@ fn restore_inbox_state(conn: &Connection, inbox: &InboxStateSnapshot) -> Result<
                 row.note.as_deref(),
                 &row.decision_source,
                 &row.decided_at,
+                row.requires_user_action,
+                row.action_summary.as_deref(),
             ),
         )?;
     }
@@ -542,6 +550,67 @@ mod tests {
         let tables = list_user_tables(&conn).unwrap();
         assert!(tables.iter().any(|n| n == "messages"));
         assert!(tables.iter().any(|n| n == "messages_fts"));
+    }
+
+    /// Rebuild path restores `inbox_decisions` including `requires_user_action` / `action_summary`.
+    #[test]
+    fn inbox_snapshot_roundtrips_action_required_columns() {
+        use crate::persist_message;
+        use crate::sync::ParsedMessage;
+
+        let conn = open_memory().unwrap();
+        apply_schema(&conn).unwrap();
+        let parsed = ParsedMessage {
+            message_id: "<snap-action@test>".into(),
+            from_address: "a@b.com".into(),
+            from_name: None,
+            to_addresses: vec![],
+            cc_addresses: vec![],
+            subject: "s".into(),
+            date: "2026-01-01T12:00:00Z".into(),
+            body_text: "b".into(),
+            body_html: None,
+            attachments: vec![],
+            category: None,
+        };
+        persist_message(&conn, &parsed, "INBOX", 1, "[]", "x.eml").unwrap();
+        conn.execute(
+            "INSERT INTO inbox_decisions
+             (message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source, requires_user_action, action_summary)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                "<snap-action@test>",
+                "fp-snap",
+                "inform",
+                "[]",
+                None::<String>,
+                "model",
+                1i64,
+                "Pay invoice",
+            ],
+        )
+        .unwrap();
+
+        let snap = load_inbox_state_snapshot(&conn).unwrap();
+        assert_eq!(snap.decisions.len(), 1);
+        assert_eq!(snap.decisions[0].requires_user_action, 1);
+        assert_eq!(
+            snap.decisions[0].action_summary.as_deref(),
+            Some("Pay invoice")
+        );
+
+        conn.execute("DELETE FROM inbox_decisions", []).unwrap();
+        restore_inbox_state(&conn, &snap).unwrap();
+
+        let (rua, summ): (i64, Option<String>) = conn
+            .query_row(
+                "SELECT requires_user_action, action_summary FROM inbox_decisions WHERE message_id = '<snap-action@test>'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(rua, 1);
+        assert_eq!(summ.as_deref(), Some("Pay invoice"));
     }
 
     #[test]

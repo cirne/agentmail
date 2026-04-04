@@ -105,6 +105,9 @@ fn preview_counts(rows: &[RefreshPreviewRow]) -> InboxDispositionCounts {
             Some("ignore") => counts.ignore += 1,
             _ => {}
         }
+        if row.requires_user_action {
+            counts.action_required += 1;
+        }
     }
     counts
 }
@@ -285,4 +288,55 @@ pub(crate) fn run_rules(sub: RulesCmd) -> CliResult {
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod preview_counts_tests {
+    use super::preview_counts;
+    use zmail::RefreshPreviewRow;
+
+    fn row(action: Option<&str>, requires_user_action: bool) -> RefreshPreviewRow {
+        RefreshPreviewRow {
+            message_id: "<x@test>".into(),
+            date: "2026-01-01T00:00:00Z".into(),
+            from_address: "a@b.com".into(),
+            from_name: None,
+            subject: "s".into(),
+            snippet: "b".into(),
+            note: None,
+            attachments: None,
+            category: None,
+            action: action.map(String::from),
+            matched_rule_ids: vec![],
+            decision_source: None,
+            requires_user_action,
+            action_summary: requires_user_action.then(|| "Do the thing".into()),
+        }
+    }
+
+    #[test]
+    fn preview_counts_action_required_independent_of_notify_inform_ignore() {
+        let rows = vec![
+            row(Some("notify"), true),
+            row(Some("inform"), true),
+            row(Some("inform"), false),
+            row(Some("ignore"), true),
+        ];
+        let c = preview_counts(&rows);
+        assert_eq!(c.notify, 1);
+        assert_eq!(c.inform, 2);
+        assert_eq!(c.ignore, 1);
+        assert_eq!(c.action_required, 3);
+    }
+
+    #[test]
+    fn preview_counts_ignores_unknown_action_but_still_counts_action_required() {
+        let mut r = row(None, true);
+        r.action = None;
+        let c = preview_counts(std::slice::from_ref(&r));
+        assert_eq!(c.notify, 0);
+        assert_eq!(c.inform, 0);
+        assert_eq!(c.ignore, 0);
+        assert_eq!(c.action_required, 1);
+    }
 }

@@ -288,12 +288,17 @@ Return strict JSON only:\n\
     {\n\
       \"messageId\": \"exact messageId from each candidate (same string as in the input)\",\n\
       \"action\": \"notify|inform|ignore\",\n\
-      \"matchedRuleIds\": [\"<rule id>\", \"<rule id>\"]\n\
+      \"matchedRuleIds\": [\"<rule id>\", \"<rule id>\"],\n\
+      \"requiresUserAction\": false,\n\
+      \"actionSummary\": \"\"\n\
     }\n\
   ]\n\
 }\n\n\
 Rules:\n\
 - You MUST output exactly one result per input message. Every `action` MUST be exactly one of: notify, inform, ignore — never omit, never leave blank, never use synonyms.\n\
+- Every result MUST include `requiresUserAction` (boolean). When true, set `actionSummary` to one short line (what the user should do: reply, pay, approve, schedule, confirm). When false, use empty string or omit `actionSummary`.\n\
+- Set `requiresUserAction` true for durable tasks: direct questions expecting a reply, requests to confirm/approve/pay/sign up/register, scheduling/coordination that needs the user's response, forms or deadlines that need user follow-up.\n\
+- Set `requiresUserAction` false for FYI mail, read-only alerts, newsletters, receipts/shipping FYI, and ephemeral one-time codes (OTP/login codes, magic links) unless a separate non-ephemeral task is also required.\n\
 - Always populate matchedRuleIds; use [] when no explicit user rule matched.\n\
 - Use `notify` for interruption-worthy items now: OTP/login codes, active security or fraud alerts, same-day deadlines, urgent direct asks, same-day travel/aviation/crew/ops or logistics that affect today.\n\
 - Use `inform` for mail worth a review soon: person-to-person threads, work updates, requests, purchases/receipts/shipping/calendar when not clearly pure marketing, anything ambiguous or thin evidence.\n\
@@ -581,6 +586,7 @@ mod tests {
             build_inbox_rules_prompt(&RulesFile::default(), true, &InboxOwnerContext::default());
         assert!(prompt.contains("Always include a `note` field"));
         assert!(prompt.contains("\"action\": \"notify|inform|ignore\""));
+        assert!(prompt.contains("requiresUserAction"));
         assert!(prompt.contains("choose `inform`"));
     }
 

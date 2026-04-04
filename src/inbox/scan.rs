@@ -70,6 +70,8 @@ pub struct InboxNotablePick {
     pub matched_rule_ids: Vec<String>,
     pub note: Option<String>,
     pub decision_source: Option<String>,
+    pub requires_user_action: bool,
+    pub action_summary: Option<String>,
 }
 
 #[derive(Debug)]
@@ -511,6 +513,23 @@ fn canonical_candidate_message_id<'a>(batch: &'a [InboxCandidate], mid: &str) ->
     None
 }
 
+fn parse_requires_user_action(item: &serde_json::Value) -> bool {
+    match item.get("requiresUserAction") {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => s.eq_ignore_ascii_case("true"),
+        Some(serde_json::Value::Number(n)) => n.as_i64() == Some(1),
+        _ => false,
+    }
+}
+
+fn parse_action_summary(item: &serde_json::Value) -> Option<String> {
+    item.get("actionSummary")
+        .and_then(|x| x.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+}
+
 fn parse_notable_response(
     text: &str,
     batch: &[InboxCandidate],
@@ -521,6 +540,8 @@ fn parse_notable_response(
         matched_rule_ids: vec![],
         note: Some(note.into()),
         decision_source: Some("fallback".into()),
+        requires_user_action: false,
+        action_summary: None,
     };
     let parsed: serde_json::Value = match serde_json::from_str(text) {
         Ok(v) => v,
@@ -605,12 +626,20 @@ fn parse_notable_response(
         } else {
             Some("rule".to_string())
         };
+        let requires_user_action = parse_requires_user_action(item);
+        let action_summary = if requires_user_action {
+            parse_action_summary(item)
+        } else {
+            None
+        };
         out.push(InboxNotablePick {
             message_id: canonical_mid.to_string(),
             action,
             matched_rule_ids,
             note,
             decision_source,
+            requires_user_action,
+            action_summary,
         });
     }
     let seen: HashSet<String> = out.iter().map(|item| item.message_id.clone()).collect();
@@ -625,6 +654,8 @@ fn parse_notable_response(
             matched_rule_ids: vec![],
             note: Some(format!("{} Model response omitted this message.", h.note)),
             decision_source: Some("fallback".into()),
+            requires_user_action: false,
+            action_summary: None,
         });
     }
     Ok(out)
@@ -705,6 +736,9 @@ fn to_preview_row(
     let mut action = normalize_action(pick.action.as_deref()).to_string();
     let mut decision_source = pick.decision_source;
     let mut note = pick.note;
+    // Stripper overrule does not infer user-action todo; keep model `requiresUserAction` as returned.
+    let mut requires_user_action = pick.requires_user_action;
+    let mut action_summary = pick.action_summary.clone();
 
     // If the model says `ignore` but cheap bulk heuristics would not, prefer `inform`.
     // Uses the same signals as parser fallback — no domain-specific keywords.
@@ -725,6 +759,8 @@ fn to_preview_row(
     if is_from_owner(&candidate.from_address, owner_address, owner_aliases) {
         action = "ignore".into();
         decision_source = Some("heuristic".into());
+        requires_user_action = false;
+        action_summary = None;
         let self_note = "Heuristic: message sent from your address; treating as ignore.";
         note = Some(match note {
             Some(n) if !n.trim().is_empty() => format!("{n} ({self_note})"),
@@ -745,6 +781,8 @@ fn to_preview_row(
         action: Some(action),
         matched_rule_ids: pick.matched_rule_ids.clone(),
         decision_source,
+        requires_user_action,
+        action_summary,
     };
     finalize_preview_note(candidate, &mut row, owner_address, owner_aliases);
     row
@@ -956,6 +994,8 @@ pub async fn run_inbox_scan(
                     matched_rule_ids: cached.matched_rule_ids,
                     note: cached.note,
                     decision_source: Some("cached".into()),
+                    requires_user_action: cached.requires_user_action,
+                    action_summary: cached.action_summary.clone(),
                 },
                 options.owner_address.as_deref(),
                 &options.owner_aliases,
@@ -1003,6 +1043,9 @@ pub async fn run_inbox_scan(
             "inform" => counts.inform += 1,
             "ignore" => counts.ignore += 1,
             _ => {}
+        }
+        if row.requires_user_action {
+            counts.action_required += 1;
         }
         let action = normalize_action(row.action.as_deref());
         if surface_matches(options.surface_mode, action) {
@@ -1104,6 +1147,8 @@ mod tests {
             action: Some("ignore".into()),
             matched_rule_ids: matched.iter().map(|s| (*s).to_string()).collect(),
             decision_source: None,
+            requires_user_action: false,
+            action_summary: None,
         }
     }
 
@@ -1185,12 +1230,16 @@ mod tests {
                 matched_rule_ids: vec![],
                 note: Some("model liked it".into()),
                 decision_source: Some("model".into()),
+                requires_user_action: true,
+                action_summary: Some("Reply to Alice".into()),
             },
             Some("lewiscirne@gmail.com"),
             &[],
         );
         assert_eq!(row.action.as_deref(), Some("ignore"));
         assert_eq!(row.decision_source.as_deref(), Some("heuristic"));
+        assert!(!row.requires_user_action);
+        assert!(row.action_summary.is_none());
         assert!(
             row.note
                 .as_deref()
@@ -1221,6 +1270,67 @@ mod tests {
         let n = r[0].note.as_deref().unwrap();
         assert!(n.contains("Heuristic:"), "{n}");
         assert!(n.contains("Fallback: model returned invalid JSON."), "{n}");
+    }
+
+    #[test]
+    fn parse_notable_reads_requires_user_action_and_summary() {
+        let batch = vec![InboxCandidate {
+            message_id: "m1".into(),
+            date: "2025-01-01".into(),
+            from_address: "a@b.com".into(),
+            from_name: None,
+            to_addresses: vec![],
+            cc_addresses: vec![],
+            subject: "s".into(),
+            snippet: "x".into(),
+            category: None,
+            attachments: vec![],
+        }];
+        let j = r#"{"results":[{"messageId":"m1","action":"inform","matchedRuleIds":[],"requiresUserAction":true,"actionSummary":"  Confirm attendance  "}]}"#;
+        let r = parse_notable_response(j, &batch).unwrap();
+        assert_eq!(r.len(), 1);
+        assert!(r[0].requires_user_action);
+        assert_eq!(r[0].action_summary.as_deref(), Some("Confirm attendance"));
+    }
+
+    #[test]
+    fn parse_notable_false_requires_user_action_drops_summary() {
+        let batch = vec![InboxCandidate {
+            message_id: "m1".into(),
+            date: "2025-01-01".into(),
+            from_address: "a@b.com".into(),
+            from_name: None,
+            to_addresses: vec![],
+            cc_addresses: vec![],
+            subject: "s".into(),
+            snippet: "x".into(),
+            category: None,
+            attachments: vec![],
+        }];
+        let j = r#"{"results":[{"messageId":"m1","action":"inform","matchedRuleIds":[],"requiresUserAction":false,"actionSummary":"ignored"}]}"#;
+        let r = parse_notable_response(j, &batch).unwrap();
+        assert!(!r[0].requires_user_action);
+        assert!(r[0].action_summary.is_none());
+    }
+
+    #[test]
+    fn parse_notable_invalid_requires_user_action_type_defaults_false() {
+        let batch = vec![InboxCandidate {
+            message_id: "m1".into(),
+            date: "2025-01-01".into(),
+            from_address: "a@b.com".into(),
+            from_name: None,
+            to_addresses: vec![],
+            cc_addresses: vec![],
+            subject: "s".into(),
+            snippet: "x".into(),
+            category: None,
+            attachments: vec![],
+        }];
+        let j = r#"{"results":[{"messageId":"m1","action":"inform","matchedRuleIds":[],"requiresUserAction":"maybe","actionSummary":"x"}]}"#;
+        let r = parse_notable_response(j, &batch).unwrap();
+        assert!(!r[0].requires_user_action);
+        assert!(r[0].action_summary.is_none());
     }
 
     #[test]
@@ -1326,6 +1436,8 @@ mod tests {
                     } else {
                         "model".into()
                     }),
+                    requires_user_action: false,
+                    action_summary: None,
                 })
                 .collect()
         });

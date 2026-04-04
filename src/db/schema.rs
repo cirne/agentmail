@@ -1,6 +1,6 @@
 //! SQL schema — mirrors `src/db/schema.ts` in the TypeScript tree.
 
-pub const SCHEMA_VERSION: i32 = 16;
+pub const SCHEMA_VERSION: i32 = 17;
 
 pub const SCHEMA: &str = r#"
   CREATE TABLE IF NOT EXISTS messages (
@@ -115,13 +115,15 @@ pub const SCHEMA: &str = r#"
   );
 
   CREATE TABLE IF NOT EXISTS inbox_decisions (
-    message_id         TEXT NOT NULL REFERENCES messages(message_id),
-    rules_fingerprint  TEXT NOT NULL,
-    action             TEXT NOT NULL CHECK(action IN ('notify', 'inform', 'ignore')),
-    matched_rule_ids   TEXT NOT NULL DEFAULT '[]',
-    note               TEXT,
-    decision_source    TEXT NOT NULL,
-    decided_at         TEXT NOT NULL DEFAULT (datetime('now')),
+    message_id              TEXT NOT NULL REFERENCES messages(message_id),
+    rules_fingerprint       TEXT NOT NULL,
+    action                  TEXT NOT NULL CHECK(action IN ('notify', 'inform', 'ignore')),
+    matched_rule_ids        TEXT NOT NULL DEFAULT '[]',
+    note                    TEXT,
+    decision_source         TEXT NOT NULL,
+    decided_at              TEXT NOT NULL DEFAULT (datetime('now')),
+    requires_user_action    INTEGER NOT NULL DEFAULT 0,
+    action_summary          TEXT,
     PRIMARY KEY (message_id, rules_fingerprint)
   );
 

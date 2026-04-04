@@ -17,6 +17,8 @@ pub struct CachedInboxDecision {
     pub matched_rule_ids: Vec<String>,
     pub note: Option<String>,
     pub decision_source: String,
+    pub requires_user_action: bool,
+    pub action_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -148,7 +150,8 @@ pub fn load_cached_inbox_decisions(
         .collect::<Vec<_>>()
         .join(", ");
     let sql = format!(
-        "SELECT message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source
+        "SELECT message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source,
+                requires_user_action, action_summary
          FROM inbox_decisions
          WHERE rules_fingerprint = ?1 AND message_id IN ({placeholders})"
     );
@@ -163,6 +166,7 @@ pub fn load_cached_inbox_decisions(
     let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map(rusqlite::params_from_iter(values.iter()), |row| {
         let matched_rule_ids_json: String = row.get(3)?;
+        let requires_raw: i64 = row.get(6)?;
         Ok(CachedInboxDecision {
             message_id: row.get(0)?,
             rules_fingerprint: row.get(1)?,
@@ -170,6 +174,8 @@ pub fn load_cached_inbox_decisions(
             matched_rule_ids: serde_json::from_str(&matched_rule_ids_json).unwrap_or_default(),
             note: row.get(4)?,
             decision_source: row.get(5)?,
+            requires_user_action: requires_raw != 0,
+            action_summary: row.get(7)?,
         })
     })?;
     rows.collect()
@@ -183,8 +189,9 @@ pub fn persist_inbox_decisions(
     for row in rows {
         conn.execute(
             "INSERT OR REPLACE INTO inbox_decisions
-             (message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             (message_id, rules_fingerprint, action, matched_rule_ids, note, decision_source,
+              requires_user_action, action_summary)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 row.message_id,
                 rules_fingerprint,
@@ -192,6 +199,8 @@ pub fn persist_inbox_decisions(
                 serde_json::to_string(&row.matched_rule_ids).unwrap_or_else(|_| "[]".into()),
                 row.note,
                 row.decision_source.as_deref().unwrap_or("fallback"),
+                row.requires_user_action as i64,
+                row.action_summary,
             ],
         )?;
     }
@@ -278,11 +287,18 @@ mod tests {
             action: Some("ignore".into()),
             matched_rule_ids: vec!["r1".into()],
             decision_source: Some("rule".into()),
+            requires_user_action: true,
+            action_summary: Some("Reply to confirm".into()),
         };
         persist_inbox_decisions(&conn, "fp1", &[row]).unwrap();
         let loaded = load_cached_inbox_decisions(&conn, "fp1", &["m1".into()]).unwrap();
         assert_eq!(loaded.len(), 1);
         assert_eq!(loaded[0].action, "ignore");
         assert_eq!(loaded[0].matched_rule_ids, vec!["r1".to_string()]);
+        assert!(loaded[0].requires_user_action);
+        assert_eq!(
+            loaded[0].action_summary.as_deref(),
+            Some("Reply to confirm")
+        );
     }
 }

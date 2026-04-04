@@ -169,6 +169,8 @@ zmail mcp  # Start MCP server (stdio)
 
 **`zmail check` / `zmail review` — fast vs thorough:** Default is the **fast** path (category filter on candidates, cached LLM decisions when fingerprint matches, skip already-surfaced ids, `check` may **early-exit** IMAP forward sync when STATUS says nothing new). **`--thorough`** is the **slow/complete** path: no forward-sync early exit (`check` only), **all** categories, **rerun** the LLM (bypass cache), **include archived** mail in the window, **replay** (ignore prior surfaced dedup). Hidden compatibility flags `--force`, `--include-all`, `--reclassify`, `--replay` still work and combine with `OR` semantics against the same toggles.
 
+**Inbox JSON (agents):** `check` / `review` include per-row **`requiresUserAction`**, **`actionSummary`**, and **`counts.actionRequired`** (triage todo hint, orthogonal to **`notify`/`inform`/`ignore`**). **`zmail archive`** drops mail from the unarchived scan window; it does **not** clear the persisted action-required columns on **`inbox_decisions`**. End-user workflow: [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md).
+
 **Archived mail in the scan:** included when **`--thorough`** or **`--reclassify`** (hidden). **`search` / `read`** always see archived mail.
 
 See [`docs/ASK.md`](docs/ASK.md) for **`zmail ask`** vs primitives and for the **compose loop** (`zmail draft` → **`zmail draft edit`** / **`rewrite`** → **`zmail send <draft-id>`**). Publishable playbook: [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md).

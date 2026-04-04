@@ -42,6 +42,13 @@ struct InboxPreviewRowSlim {
     action: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     category: Option<String>,
+    #[serde(
+        rename = "requiresUserAction",
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    requires_user_action: bool,
+    #[serde(rename = "actionSummary", skip_serializing_if = "Option::is_none")]
+    action_summary: Option<String>,
 }
 
 impl From<&RefreshPreviewRow> for InboxPreviewRowSlim {
@@ -55,6 +62,8 @@ impl From<&RefreshPreviewRow> for InboxPreviewRowSlim {
             snippet: r.snippet.clone(),
             action: r.action.clone(),
             category: r.category.clone(),
+            requires_user_action: r.requires_user_action,
+            action_summary: r.action_summary.clone(),
         }
     }
 }
@@ -98,6 +107,14 @@ pub struct RefreshPreviewRow {
     pub matched_rule_ids: Vec<String>,
     #[serde(rename = "decisionSource", skip_serializing_if = "Option::is_none")]
     pub decision_source: Option<String>,
+    #[serde(
+        rename = "requiresUserAction",
+        default,
+        skip_serializing_if = "std::ops::Not::not"
+    )]
+    pub requires_user_action: bool,
+    #[serde(rename = "actionSummary", skip_serializing_if = "Option::is_none")]
+    pub action_summary: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, serde::Serialize, PartialEq, Eq)]
@@ -105,6 +122,8 @@ pub struct InboxDispositionCounts {
     pub notify: usize,
     pub inform: usize,
     pub ignore: usize,
+    #[serde(rename = "actionRequired")]
+    pub action_required: usize,
 }
 
 fn strip_html_tags(s: &str) -> String {
@@ -174,6 +193,8 @@ pub fn load_refresh_new_mail(
                 action: None,
                 matched_rule_ids: vec![],
                 decision_source: None,
+                requires_user_action: false,
+                action_summary: None,
             },
         )
         .collect();
@@ -259,6 +280,12 @@ pub fn inbox_json_hints(
 ) -> Vec<String> {
     let mut hints = Vec::new();
     if surfaced.is_empty() {
+        if counts.action_required > 0 {
+            hints.push(format!(
+                "{} message(s) need your action — run `zmail review` or `zmail check --diagnostics` for full rows (requiresUserAction / actionSummary). Archive when done.",
+                counts.action_required
+            ));
+        }
         return hints;
     }
 
@@ -315,6 +342,13 @@ pub fn inbox_json_hints(
         }
         InboxSurfaceMode::Check => hints
             .push("For non-urgent follow-up across the window, run `zmail review`.".to_string()),
+    }
+
+    if counts.action_required > 0 {
+        hints.push(format!(
+            "{} message(s) need your action (see requiresUserAction / actionSummary in JSON); archive when done.",
+            counts.action_required
+        ));
     }
 
     hints
@@ -530,6 +564,7 @@ fn print_counts(counts: &InboxDispositionCounts) {
     println!("  notify:   {}", counts.notify);
     println!("  inform:   {}", counts.inform);
     println!("  ignore:   {}", counts.ignore);
+    println!("  action:   {}", counts.action_required);
 }
 
 pub fn print_check_text(
@@ -599,6 +634,14 @@ pub fn print_check_text(
             if let Some(ref action) = m.action {
                 println!("Action:  {action}");
             }
+            if m.requires_user_action {
+                match &m.action_summary {
+                    Some(s) if !s.trim().is_empty() => {
+                        println!("Action required: {s}");
+                    }
+                    _ => println!("Action required: yes"),
+                }
+            }
             if let Some(ref category) = m.category {
                 println!("Category:{category}");
             }
@@ -648,6 +691,14 @@ pub fn print_review_text(
             println!("Id:      {}", m.message_id);
             if let Some(ref action) = m.action {
                 println!("Action:  {action}");
+            }
+            if m.requires_user_action {
+                match &m.action_summary {
+                    Some(s) if !s.trim().is_empty() => {
+                        println!("Action required: {s}");
+                    }
+                    _ => println!("Action required: yes"),
+                }
             }
             if let Some(ref atts) = m.attachments {
                 if !atts.is_empty() {
@@ -710,6 +761,8 @@ mod inbox_json_hints_tests {
             action: None,
             matched_rule_ids: vec![],
             decision_source: None,
+            requires_user_action: false,
+            action_summary: None,
         }
     }
 
@@ -740,6 +793,25 @@ mod inbox_json_hints_tests {
     }
 
     #[test]
+    fn empty_surfaced_still_hints_when_action_required() {
+        let hints = inbox_json_hints(
+            InboxSurfaceMode::Check,
+            &[],
+            &InboxDispositionCounts {
+                notify: 0,
+                inform: 3,
+                ignore: 0,
+                action_required: 2,
+            },
+            3,
+            false,
+        );
+        assert_eq!(hints.len(), 1);
+        assert!(hints[0].contains("need your action"));
+        assert!(hints[0].contains("zmail review"));
+    }
+
+    #[test]
     fn concentration_hint_when_one_sender_dominates() {
         let mut rows: Vec<RefreshPreviewRow> = (0..10)
             .map(|i| sample_row("bulk@corp.com", &format!("m{i}")))
@@ -752,6 +824,7 @@ mod inbox_json_hints_tests {
                 notify: 2,
                 inform: 8,
                 ignore: 1,
+                action_required: 0,
             },
             50,
             true,
@@ -772,6 +845,7 @@ mod inbox_json_hints_tests {
                 notify: 1,
                 inform: 0,
                 ignore: 0,
+                action_required: 0,
             },
             1,
             false,
@@ -789,6 +863,7 @@ mod inbox_json_hints_tests {
                 notify: 1,
                 inform: 0,
                 ignore: 0,
+                action_required: 0,
             },
             1,
             true,
@@ -863,6 +938,53 @@ mod inbox_json_hints_tests {
             .map(|s| s.as_str())
             .collect();
         assert_eq!(keys.last().copied(), Some("hints"));
+    }
+
+    #[test]
+    fn review_json_slim_includes_requires_user_action_when_true() {
+        let mut row = sample_row("a@b.com", "x");
+        row.action = Some("inform".into());
+        row.requires_user_action = true;
+        row.action_summary = Some("Pay invoice".into());
+        let v = build_review_json(
+            std::slice::from_ref(&row),
+            None,
+            &InboxDispositionCounts::default(),
+            1,
+            0,
+            &[],
+            false,
+        );
+        let item = v["items"][0].as_object().expect("item object");
+        assert_eq!(
+            item.get("requiresUserAction").and_then(|x| x.as_bool()),
+            Some(true)
+        );
+        assert_eq!(
+            item.get("actionSummary").and_then(|x| x.as_str()),
+            Some("Pay invoice")
+        );
+    }
+
+    #[test]
+    fn action_required_hint_when_counts_nonzero() {
+        let rows = vec![sample_row("a@b.com", "one")];
+        let hints = inbox_json_hints(
+            InboxSurfaceMode::Review,
+            &rows,
+            &InboxDispositionCounts {
+                notify: 1,
+                inform: 0,
+                ignore: 0,
+                action_required: 2,
+            },
+            1,
+            true,
+        );
+        assert!(
+            hints.iter().any(|h| h.contains("need your action")),
+            "{hints:?}"
+        );
     }
 
     #[test]

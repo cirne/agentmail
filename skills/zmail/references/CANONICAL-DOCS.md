@@ -46,7 +46,7 @@ Paths below are relative to the **repository root** or, if you use the legacy np
 | **`ask` vs primitives** — orchestration, hybrid patterns | `docs/ASK.md` | When `zmail ask` wins vs `search`/`read`/…; complements `--help`. |
 | **Draft + send** — agent compose/reply/forward, CLI vs MCP | `skills/zmail/references/DRAFT-AND-SEND.md` | Shipped with the skill; high-level in `SKILL.md` § Agent workflow. |
 | **Login / OTP / verification codes** — update + search + read, MCP | `skills/zmail/references/AUTH-CODES.md` | Shipped with the skill; high-level in `SKILL.md` § Login / OTP / verification codes. |
-| **Inbox customization** — durable rules, context, triage memory | `skills/zmail/references/INBOX-CUSTOMIZATION.md` | How agents should maintain inbox rules/context so `zmail check` and `zmail review` get smarter over time. |
+| **Inbox customization** — durable rules, context, triage memory, action-required JSON | `skills/zmail/references/INBOX-CUSTOMIZATION.md` | How agents should maintain rules/context, poll with `check` / `review`, use `requiresUserAction` / `actionSummary` / `counts.actionRequired`, and archive when done. |
 | **Architecture** — SQLite, sync, indexing decisions | `docs/ARCHITECTURE.md` | Read before changing storage or sync behavior. |
 | **MCP** — tools, params, token-efficient patterns | `docs/MCP.md` | Same index as CLI; hints in JSON sometimes align with MCP batch patterns. |
 | **Skill packaging** — spec, hosts, `skills/zmail/` layout | `docs/opportunities/OPP-025-cross-platform-agent-skills-packaging.md` | Strategy for `/zmail` vs internal Cursor skills. |
