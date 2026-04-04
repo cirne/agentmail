@@ -1,13 +1,17 @@
 Commands:
 
-Setup & sync
+Setup and management
   zmail setup [--email <e>] [--password <p>] [--openai-key <k>] [--no-validate]
   zmail wizard [--no-validate] [--clean] [--yes]
-  zmail update [--force] [--text]               # freshness-first: fetch only new mail since last sync
-  zmail update [--since <spec>] [--foreground]  # backfill older mail without re-fetching what is already local
-  zmail status [--json]
-  zmail stats [--json]
+  zmail refresh [--since <spec>] [--foreground]  # initial history / backfill (long-running; --foreground waits; else background + log path)
   zmail rebuild-index
+
+Monitor & manage inbox
+  zmail refresh [--force] [--text]               # day-to-day: fetch new mail since last sync (forward sync)
+  zmail ask "<question>" [--verbose]
+  zmail inbox [<window>] [--since YYYY-MM-DD] [--thorough] [--text]
+    # LLM triage over mail already in the local index (requires API key). Run zmail refresh first when recency matters.
+  zmail archive <message_id> … [--undo]
 
 Search & read
   zmail search <query> [flags]
@@ -17,15 +21,13 @@ Search & read
   zmail attachment list <message_id>
   zmail attachment read <message_id> <index>|<filename>
 
-Assistants
-  zmail ask "<question>" [--verbose]
-  zmail check [<window>] [--since YYYY-MM-DD] [--thorough] [--no-update] [--text] [--verbose]  # updates first by default
-  zmail review [<window>] [--since ...] [--thorough] [--text]
-  zmail archive <message_id> … [--undo]
-
-Send & integration
+Sending mail
   zmail send [--to ... --subject ...] [<draft-id>]
   zmail draft list|view|new|reply|forward|edit|rewrite  (see zmail draft --help)
+
+Other
+  zmail status [--json]
+  zmail stats [--json]
   zmail mcp
 
 Upgrade / reinstall (prebuilt binary):

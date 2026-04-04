@@ -58,17 +58,17 @@ This layout applies to **both Phase 1 and Phase 2 (open source)**. Each user run
 
 **See also:** [SYNC.md](./SYNC.md) — Current sync implementation and optimization history.
 
-**Decision:** Sync state is tracked per folder as `{ folder, uidvalidity, last_uid }`. The public command is unified as `zmail update`, but it still uses two distinct internal sync strategies for different use cases:
+**Decision:** Sync state is tracked per folder as `{ folder, uidvalidity, last_uid }`. The public command is unified as `zmail refresh`, but it still uses two distinct internal sync strategies for different use cases:
 
-1. **Incremental update (`zmail update`):** Uses the forward sync path to fetch only new messages since last sync. This is the default, freshness-first path and is intended to make the newest unseen mail searchable as quickly as possible.
-2. **Backfill update (`zmail update --since …`):** Uses the backward sync path, resumes from oldest synced date, and uses UID filtering to skip already-synced messages. This is the explicit coverage-expansion path for initial setup and history backfill.
+1. **Incremental update (`zmail refresh`):** Uses the forward sync path to fetch only new messages since last sync. This is the default, freshness-first path and is intended to make the newest unseen mail searchable as quickly as possible.
+2. **Backfill update (`zmail refresh --since …`):** Uses the backward sync path, resumes from oldest synced date, and uses UID filtering to skip already-synced messages. This is the explicit coverage-expansion path for initial setup and history backfill.
 
 **Rationale:** IMAP UIDs are stable, monotonically increasing identifiers. Checkpointing the last-seen UID per folder allows sync to resume exactly where it left off after a redeploy, crash, or restart — without re-downloading previously synced messages. `UIDVALIDITY` detects the rare case where a folder was wiped and recreated, triggering a full re-sync of that folder.
 
 **Operational contract:**
 
-- Plain `zmail update` should prioritize freshness over completeness. It should fetch the newest unseen mail first and make it available to `search`, `read`, `check`, and `review` as soon as it is indexed.
-- `zmail update --since …` should prioritize historical coverage. It should walk backward only as far as needed to satisfy the requested window.
+- Plain `zmail refresh` should prioritize freshness over completeness. It should fetch the newest unseen mail first and make it available to `search`, `read`, and `inbox` as soon as it is indexed.
+- `zmail refresh --since …` should prioritize historical coverage. It should walk backward only as far as needed to satisfy the requested window.
 - Neither path should re-fetch or re-index messages already present locally except for narrow same-day safety overlap during backward resumption; UID filtering and duplicate checks are the guardrails.
 
 **Efficiency optimizations:**
@@ -99,7 +99,7 @@ This layout applies to **both Phase 1 and Phase 2 (open source)**. Each user run
 **CLI commands:**
 
 ```text
-zmail update [--since <spec>]    ← Update local mail index; `--since` backfills older mail
+zmail refresh [--since <spec>]    ← Update local mail index; `--since` backfills older mail
 zmail search <query> [flags]    ← FTS5 full-text search
                                   Query supports inline operators: from:, to:, subject:, after:, before:
                                   Example: zmail search "from:alice@example.com invoice OR receipt"
@@ -113,8 +113,8 @@ zmail mcp                       ← start MCP server (stdio)
 
 **Sync modes:**
 
-- **`zmail update --since …`** (backward path): Initial setup and backfill. Resumes from oldest synced date, fills gaps going backward. Uses date-based search with UID filtering to skip already-synced messages.
-- **`zmail update`** (forward path): Frequent updates. Uses UID range search (`UID ${last_uid + 1}:*`) to fetch only new messages. Much faster than date-based search for incremental updates.
+- **`zmail refresh --since …`** (backward path): Initial setup and backfill. Resumes from oldest synced date, fills gaps going backward. Uses date-based search with UID filtering to skip already-synced messages.
+- **`zmail refresh`** (forward path): Frequent updates. Uses UID range search (`UID ${last_uid + 1}:*`) to fetch only new messages. Much faster than date-based search for incremental updates.
 
 **Rationale:** Agents like Claude Code and OpenClaw can invoke shell commands directly. A subprocess call to `zmail search` is faster than an MCP HTTP round-trip, requires no running server, and has no port management. The CLI defaults to JSON for structured commands (`search`, `who`, `attachment list`) so agents can consume output directly. See [ADR-022](#adr-022-cli-output-format--json-default-for-structured-commands-text-for-progressivecontent-commands) for output format decisions.
 
@@ -319,9 +319,9 @@ Window 5:  remaining to target date
 
 Each window fetches, parses, and indexes completely before the next begins. IMAP `UID SEARCH SINCE <date>` defines each window; UIDs are fetched highest-first within the window so most recent messages arrive first.
 
-**Default backfill:** 1 year. Set via CLI: `zmail update --since 7d | 5w | 3m | 2y` (default: 1y). Override default via `sync.defaultSince` in config.json.
+**Default backfill:** 1 year. Set via CLI: `zmail refresh --since 7d | 5w | 3m | 2y` (default: 1y). Override default via `sync.defaultSince` in config.json.
 
-**Resume behavior:** When running `zmail update --since …` with a longer date range than previously synced, it automatically resumes from the oldest synced date and continues backward. For example, if you've synced 7 days and run `zmail update --since 14d`, it will only fetch messages from days 8-14, skipping the already-synced first 7 days entirely.
+**Resume behavior:** When running `zmail refresh --since …` with a longer date range than previously synced, it automatically resumes from the oldest synced date and continues backward. For example, if you've synced 7 days and run `zmail refresh --since 14d`, it will only fetch messages from days 8-14, skipping the already-synced first 7 days entirely.
 
 **Crash recovery:** Each window is atomic — if sync crashes mid-window, it restarts from the beginning of the incomplete window. No partial state to reconcile.
 
@@ -419,7 +419,7 @@ Single Bun process
 
 We do **not** introduce async job IDs or a job queue for sync unless we later need multiple concurrent syncs or very long-running jobs that must outlive a single CLI invocation.
 
-**Rationale:** Agent-first (VISION) means the primary consumers of the CLI are agents (Claude Code, OpenClaw, Pi, etc.). They invoke `zmail update` as a subprocess. Some environments stream stdout, so periodic progress lines give live feedback; others only return output on exit, so the final metrics block is still available. A pollable source (file or DB + `zmail status`) lets a *different* agent or process observe “sync in progress” without depending on streaming. Keeping sync synchronous avoids job storage, lifecycle, and daemon complexity for the common case (single-user, single sync at a time).
+**Rationale:** Agent-first (VISION) means the primary consumers of the CLI are agents (Claude Code, OpenClaw, Pi, etc.). They invoke `zmail refresh` as a subprocess. Some environments stream stdout, so periodic progress lines give live feedback; others only return output on exit, so the final metrics block is still available. A pollable source (file or DB + `zmail status`) lets a *different* agent or process observe “sync in progress” without depending on streaming. Keeping sync synchronous avoids job storage, lifecycle, and daemon complexity for the common case (single-user, single sync at a time).
 
 **Result:** Sync is fast, accurate, and reports how fast it was (ADR-016/017). It also makes progress observable so other agents can inspect and report status as it goes.
 
@@ -457,13 +457,13 @@ We do **not** introduce async job IDs or a job queue for sync unless we later ne
 2. **Indexing** (removed): Had claimed pending messages from SQLite → generate embeddings via OpenAI → write to LanceDB. Embedding API responses were cached on disk (by model and input hash). Cache lived under `ZMAIL_HOME/data/embedding-cache`.
 
 ```text
-zmail update --since <spec>  (backward path)
+zmail refresh --since <spec>  (backward path)
 └── Sync:     IMAP → maildir + SQLite  (bandwidth-bound)
               - Resumes from oldest synced date
               - Uses UID filtering to skip already-synced messages
               - Searches before oldest synced date when all messages from a day are synced
 
-zmail update  (forward path)
+zmail refresh  (forward path)
 └── Sync:     IMAP → maildir + SQLite  (bandwidth-bound)
               - Uses UID range search (UID ${last_uid + 1}:*)
               - Only fetches new messages since last sync
@@ -478,7 +478,7 @@ This replaces an earlier multi-worker design that used Bun Workers. That design 
 **PID-based advisory locks.** Each subsystem has a singleton status row (`sync_summary`, `indexing_status`) with `is_running` and `owner_pid` columns. Sync also stores `sync_lock_started_at` (UTC `datetime('now')` when the lock is taken) for hung-process recovery.
 
 1. Read `is_running`, `owner_pid`, and `sync_lock_started_at` (see `~/lib/process-lock`: `isSyncLockHeld`, `acquireLock`).
-2. If locked and `owner_pid` is alive and the lock is younger than **one hour**, exit early — another instance is running (`zmail update` / `runSync` pre-check and background update use the same rule as `acquireLock`).
+2. If locked and `owner_pid` is alive and the lock is younger than **one hour**, exit early — another instance is running (`zmail refresh` / `runSync` pre-check and background update use the same rule as `acquireLock`).
 3. If locked but `owner_pid` is dead, take over the lock (log a warning, reset stale state).
 4. If locked, `owner_pid` is alive, but the lock is **older than one hour**, signal the prior owner (`SIGTERM`, then `SIGKILL` after a short wait) and take over the lock.
 5. On completion or error, clear `is_running`, `owner_pid`, and `sync_lock_started_at`.
@@ -496,7 +496,7 @@ PID checks catch exited/crashed owners immediately. The one-hour cap catches hun
 - Agents and remote clients can poll status at any time without depending on stdout.
 - Stdout progress lines are emitted periodically for environments that stream output.
 
-**Ingestion from IMAP:** `zmail update` is the user-facing entry point for fetching mail, with `--since` selecting the backfill path. **Local index rebuild:** `zmail rebuild-index` wipes SQLite and reindexes from `maildir/cur/` using the same path as a schema version bump (dev/test; no IMAP). Before delete, `sync_state` is read from the old DB and written back after reindex with `last_uid` at least `MAX(uid)` per folder in the rebuilt index so incremental update can resume from UID range instead of a huge date-based search.
+**Ingestion from IMAP:** `zmail refresh` is the user-facing entry point for fetching mail, with `--since` selecting the backfill path. **Local index rebuild:** `zmail rebuild-index` wipes SQLite and reindexes from `maildir/cur/` using the same path as a schema version bump (dev/test; no IMAP). Before delete, `sync_state` is read from the old DB and written back after reindex with `last_uid` at least `MAX(uid)` per folder in the rebuilt index so incremental update can resume from UID range instead of a huge date-based search.
 
 ---
 
@@ -508,7 +508,7 @@ PID checks catch exited/crashed owners immediately. The one-hour cap catches hun
 
 **Sidecar metadata:** EML files lack IMAP-only data (e.g. Gmail labels/categories). During sync, a companion `.meta.json` sidecar is written alongside each `.eml` (same basename, e.g. `100_msg.meta.json`) containing a JSON catch-all for non-standard metadata (`{ "labels": [...] }`). Rebuild reads sidecars to restore label-based noise classification and any future metadata. The sidecar format is extensible — add new fields without creating additional files.
 
-**Result:** Fresh environments bootstrap directly from source schema. Stale local DBs trigger an automatic rebuild from maildir (typically under 20s for moderate mailboxes). If maildir is empty or missing, rebuild completes with 0 messages and the user can run `zmail update --since …` to fetch from IMAP.
+**Result:** Fresh environments bootstrap directly from source schema. Stale local DBs trigger an automatic rebuild from maildir (typically under 20s for moderate mailboxes). If maildir is empty or missing, rebuild completes with 0 messages and the user can run `zmail refresh --since …` to fetch from IMAP.
 
 **Rebuild throughput:** Reindex parses `.eml` files in parallel using Node `worker_threads` — **one OS process**, not multiple Node binaries; each worker is a separate **V8 isolate** (parallel JS requires that; a single isolate stays single-threaded for JS execution). SQLite writes run only on the main thread inside one `BEGIN IMMEDIATE` … `COMMIT` transaction with reused prepared statements (`INSERT OR IGNORE` for idempotent message rows, then thread and attachment rows). Workers load from `dist/db/rebuild-parse-worker.js` after `npm run build` (plain Node ESM). Optional env `ZMAIL_WORKER_CONCURRENCY` sets the worker count (non-negative integer; **default 8** when unset; Vitest defaults to 1 unless set). Legacy: `ZMAIL_REBUILD_PARSE_CONCURRENCY` if the new var is unset. This is intentionally **not** multi-writer SQLite: it avoids the contention that motivated retiring an earlier multi-worker *sync* design (see observability section above).
 
@@ -596,7 +596,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Decision:** Maintain a **Rust** implementation at the **repository root** (`Cargo.toml`, `src/`, `tests/`) alongside **Node + TypeScript** under **`node/`**. Both target the same **agent contract**: `ZMAIL_HOME` / `~/.zmail` (`config.json`, `.env`, `data/`, maildir layout), FTS5 SQLite schema semantics, CLI subcommands, and MCP stdio tools. **`/target/`** at the repo root is gitignored; CI/dev run **`cargo test`** from the **repository root**.
 
-**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), **`imap`** (TLS IMAP client) for the two internal `zmail update` paths (incremental and backfill), `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests in **`tests/*.rs`** named by area (e.g. `config_schema_status`, `sync_parse_maildir`, `sync_run_fake_imap`, `search_fts`, `who_identity`, `setup_read_rebuild`, `attachments_extract`, `send_drafts`, `mcp_stdio`, `ask_inbox_guards`) covering config/DB through MCP, IMAP-shaped sync, and ask-shaped flows.
+**Stack (Rust):** `clap` CLI, **`rusqlite`** with the **`bundled`** feature (embedded SQLite, no separate Node ABI story; compare ADR-023 for Node), **`imap`** (TLS IMAP client) for the two internal `zmail refresh` paths (incremental and backfill), `mail-parser`, attachment extractors aligned with TS (PDF, DOCX, XLSX, HTML, CSV, TXT), integration tests in **`tests/*.rs`** named by area (e.g. `config_schema_status`, `sync_parse_maildir`, `sync_run_fake_imap`, `search_fts`, `who_identity`, `setup_read_rebuild`, `attachments_extract`, `send_drafts`, `mcp_stdio`, `ask_inbox_guards`) covering config/DB through MCP, IMAP-shaped sync, and ask-shaped flows.
 
 **Checkpoint (in-repo):** Area-named integration tests under **`tests/`** (plus `#[cfg(test)]` unit tests in **`src/`**) run via **`cargo test`** — sync/index/search/who/attachments/send-drafts/MCP/ask-shaped coverage against temp dirs; not a substitute for production bakeoffs on real mailboxes.
 
@@ -636,7 +636,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 **Context:** A `zmail daemon` would own the refresh cycle, maintain scan state, accept feedback, learn over time, and push notifications proactively. This is the natural architecture for a self-sufficient notification system.
 
-**Decision:** Do not introduce a daemon. Add scan state to SQLite (`inbox_alerts`, `inbox_reviews`, `inbox_scans`, `inbox_handled`) so `zmail check` and `zmail review` can deduplicate across invocations. Offer `zmail check --watch` as a long-running foreground subprocess (not a daemon) for agent harnesses that want continuous urgent scanning.
+**Decision:** Do not introduce a daemon. Add scan state to SQLite (`inbox_alerts`, `inbox_reviews`, `inbox_scans`, `inbox_handled`) so inbox scan passes (e.g. `zmail inbox`) can deduplicate surfaced messages across invocations.
 
 **Tradeoffs considered:**
 
@@ -644,7 +644,7 @@ Agents today parse the text output of `status` without difficulty. Text stays th
 
 *Daemon cons:* Daemon lifecycle is significant engineering tax (start/stop/restart, crash recovery, PID files, launchd/systemd integration). Creates parallel state alongside SQLite — risk of split brain, unclear reset semantics. Overlaps with the agent harness (OpenClaw, Claude Code), which is already a daemon-like scheduler. Pushes zmail toward being an email client rather than an intelligence layer ([STRATEGY.md](STRATEGY.md)). LLM cost on a schedule regardless of listeners. Notification transport is an open question (file? webhook? desktop notification?) that couples the daemon to infrastructure.
 
-*Why no daemon wins:* Most daemon benefits come from persistent state, not a persistent process. SQLite tables provide persistent state. A `--watch` foreground subprocess provides daemon-like continuous scanning without lifecycle management — the calling agent runs it as a subprocess and restarts it if it dies. The full daemon is deferred until Phases 1-3 (stateful scan → rules → watch) are validated and prove insufficient.
+*Why no daemon wins:* Most daemon benefits come from persistent state, not a persistent process. SQLite tables provide persistent state. The calling agent can schedule `zmail refresh` and `zmail inbox` on a loop without zmail owning a long-lived process. The full daemon is deferred until later phases are validated and prove insufficient.
 
 #### Part 2: Soft state — lose scan state on schema bump
 

@@ -53,8 +53,9 @@ pub(crate) enum Commands {
         #[arg(long)]
         yes: bool,
     },
-    /// Bring the local index up to date; use --since to backfill older mail
-    Update {
+    /// Fetch mail from IMAP: forward sync by default; use --since for backfill / initial history
+    #[command(name = "refresh")]
+    Refresh {
         /// Positional duration (e.g. `7d`, `180d`, `1y`) — same as `--since`
         duration: Option<String>,
         /// Rolling window — overrides `sync.defaultSince` when set
@@ -139,10 +140,8 @@ pub(crate) enum Commands {
         #[arg(long, short = 'v')]
         verbose: bool,
     },
-    /// Fetch new mail and surface urgent messages right now
-    Check(CheckArgs),
-    /// Review notable recent mail without urgent-only filtering
-    Review(ReviewArgs),
+    /// LLM inbox triage over the local index (no IMAP sync; run `zmail refresh` when recency matters)
+    Inbox(InboxArgs),
     /// Archive messages locally (`is_archived`); optional IMAP when mailboxManagement is enabled
     Archive {
         /// One or more RFC Message-IDs
@@ -211,38 +210,7 @@ pub(crate) enum AttachmentCmd {
 }
 
 #[derive(Args, Debug, Clone, Default)]
-pub(crate) struct CheckArgs {
-    /// Rolling window e.g. `24h`, `7d` (optional; overrides `inbox.defaultWindow` in config; use `--since` for `YYYY-MM-DD`)
-    pub(crate) window: Option<String>,
-    #[arg(long)]
-    pub(crate) since: Option<String>,
-    #[arg(long)]
-    pub(crate) no_update: bool,
-    /// Slow path: when syncing, no IMAP early-exit; scan all categories; rerun LLM (bypass cache); include archived; ignore prior surfaced dedup
-    #[arg(long)]
-    pub(crate) thorough: bool,
-    #[arg(long, hide = true)]
-    pub(crate) force: bool,
-    #[arg(long, hide = true)]
-    pub(crate) include_all: bool,
-    #[arg(long, hide = true)]
-    pub(crate) replay: bool,
-    #[arg(long, hide = true)]
-    pub(crate) reclassify: bool,
-    #[arg(long)]
-    pub(crate) diagnostics: bool,
-    #[arg(long)]
-    pub(crate) text: bool,
-    #[arg(long, short = 'v')]
-    pub(crate) verbose: bool,
-    #[arg(long)]
-    pub(crate) watch: bool,
-    #[arg(long, default_value_t = 60)]
-    pub(crate) watch_interval_seconds: u64,
-}
-
-#[derive(Args, Debug, Clone, Default)]
-pub(crate) struct ReviewArgs {
+pub(crate) struct InboxArgs {
     /// Rolling window e.g. 24h, 3d (optional; use `--since` or config default for YYYY-MM-DD)
     pub(crate) window: Option<String>,
     #[arg(long)]

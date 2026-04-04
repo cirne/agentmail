@@ -155,40 +155,25 @@ fn archive_cli_sets_is_archived_json() {
 }
 
 #[test]
-fn check_and_review_help_expose_new_cli_surface() {
+fn inbox_help_exposes_expected_flags() {
     let dir = tempdir().unwrap();
     let bin = env!("CARGO_BIN_EXE_zmail");
-    let check = Command::new(bin)
+    let out = Command::new(bin)
         .env("ZMAIL_HOME", dir.path())
-        .args(["check", "--help"])
+        .args(["inbox", "--help"])
         .output()
         .unwrap();
     assert!(
-        check.status.success(),
+        out.status.success(),
         "stderr: {}",
-        String::from_utf8_lossy(&check.stderr)
+        String::from_utf8_lossy(&out.stderr)
     );
-    let check_stdout = String::from_utf8_lossy(&check.stdout);
-    assert!(check_stdout.contains("--no-update"));
-    assert!(check_stdout.contains("--thorough"));
-    assert!(!check_stdout.contains("--replay"));
-    assert!(!check_stdout.contains("--reclassify"));
-    assert!(!check_stdout.contains("--refresh"));
-
-    let review = Command::new(bin)
-        .env("ZMAIL_HOME", dir.path())
-        .args(["review", "--help"])
-        .output()
-        .unwrap();
-    assert!(
-        review.status.success(),
-        "stderr: {}",
-        String::from_utf8_lossy(&review.stderr)
-    );
-    let review_stdout = String::from_utf8_lossy(&review.stdout);
-    assert!(review_stdout.contains("--thorough"));
-    assert!(!review_stdout.contains("--replay"));
-    assert!(!review_stdout.contains("--reclassify"));
-    assert!(!review_stdout.contains("--refresh"));
-    assert!(!review_stdout.contains("inbox replay"));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("--thorough"));
+    assert!(stdout.contains("--diagnostics"));
+    assert!(stdout.contains("--text"));
+    assert!(!stdout.contains("--no-update"));
+    assert!(!stdout.contains("--urgent-only"));
+    assert!(!stdout.contains("--replay"));
+    assert!(!stdout.contains("--reclassify"));
 }

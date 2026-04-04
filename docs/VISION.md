@@ -322,7 +322,7 @@ Examples:
 
 Today zmail covers **read + write** for the core loop: sync and index (IMAP), search and read locally, then **draft and send** (SMTP send-as-user through the same provider). The product end state is unchanged: the agent is the complete interface. You never open your inbox. You never open a compose window.
 
-**How it works:** zmail updates mail from IMAP into a local index, exposes search + read to the agent, and adds higher-level `check` / `review` / `ask` flows on top. SMTP (same credentials as IMAP where the provider supports it) closes the loop: the agent can draft and send on your behalf. Notification → intent → draft → confirm → send. All through the agent.
+**How it works:** zmail updates mail from IMAP into a local index, exposes search + read to the agent, and adds higher-level `inbox` / `ask` flows on top. SMTP (same credentials as IMAP where the provider supports it) closes the loop: the agent can draft and send on your behalf. Notification → intent → draft → confirm → send. All through the agent.
 
 **Killer differentiators** (beyond "agent can send"):
 

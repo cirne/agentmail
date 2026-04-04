@@ -26,7 +26,7 @@ zmail is designed so **the tool teaches its own capabilities** as you use it.
   - **`hint`** — short guidance (narrower query, attachments, pagination, batch-style follow-ups, etc.).
   - **`truncated`**, **`totalMatched`**, **`returned`** — whether you are seeing a slice of a larger result set; combine with **`--limit`** / flags from **`zmail search --help`**.
 - **Text / table mode (`--text`):** Some commands print a **trailing tip** after results (same ideas as JSON hints).
-- **Typos / wrong verbs:** Unknown subcommands get a **compact correction** (e.g. suggesting `update`, `read`, `search`, `ask`, `check`, `review`).
+- **Typos / wrong verbs:** Unknown subcommands get a **compact correction** (e.g. suggesting `refresh`, `inbox`, `read`, `search`, `ask`).
 - **Missing config:** You get an explicit pointer to **`zmail setup`** / **`zmail wizard`** — no silent failure.
 
 **Agent habit:** After every `zmail` call, if the payload includes **`hint`**, follow it before guessing a new command.
@@ -45,8 +45,8 @@ Paths below are relative to the **repository root** or, if you use the legacy np
 | **Vision** — agent-first product goals | `docs/VISION.md` | Why zmail exists; not a command reference. |
 | **`ask` vs primitives** — orchestration, hybrid patterns | `docs/ASK.md` | When `zmail ask` wins vs `search`/`read`/…; complements `--help`. |
 | **Draft + send** — agent compose/reply/forward, CLI vs MCP | `skills/zmail/references/DRAFT-AND-SEND.md` | Shipped with the skill; high-level in `SKILL.md` § Agent workflow. |
-| **Login / OTP / verification codes** — update + search + read, MCP | `skills/zmail/references/AUTH-CODES.md` | Shipped with the skill; high-level in `SKILL.md` § Login / OTP / verification codes. |
-| **Inbox customization** — durable rules, context, triage memory, action-required JSON | `skills/zmail/references/INBOX-CUSTOMIZATION.md` | How agents should maintain rules/context, poll with `check` / `review`, use `requiresUserAction` / `actionSummary` / `counts.actionRequired`, and archive when done. |
+| **Login / OTP / verification codes** — refresh + search + read, MCP | `skills/zmail/references/AUTH-CODES.md` | Shipped with the skill; high-level in `SKILL.md` § Login / OTP / verification codes. |
+| **Inbox customization** — durable rules, context, triage memory, action-required JSON | `skills/zmail/references/INBOX-CUSTOMIZATION.md` | How agents should maintain rules/context, run `refresh` + `inbox`, use `requiresUserAction` / `actionSummary` / `counts.actionRequired`, and archive when done. |
 | **Architecture** — SQLite, sync, indexing decisions | `docs/ARCHITECTURE.md` | Read before changing storage or sync behavior. |
 | **MCP** — tools, params, token-efficient patterns | `docs/MCP.md` | Same index as CLI; hints in JSON sometimes align with MCP batch patterns. |
 | **Skill packaging** — spec, hosts, `skills/zmail/` layout | `docs/opportunities/OPP-025-cross-platform-agent-skills-packaging.md` | Strategy for `/zmail` vs internal Cursor skills. |

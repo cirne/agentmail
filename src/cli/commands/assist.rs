@@ -1,4 +1,4 @@
-use crate::cli::args::{CheckArgs, ReviewArgs};
+use crate::cli::args::InboxArgs;
 use crate::cli::triage::run_triage_command;
 use crate::cli::util::load_cfg;
 use crate::cli::CliResult;
@@ -54,12 +54,7 @@ pub(crate) fn run_ask(mut question: Vec<String>, verbose: bool) -> CliResult {
     Ok(())
 }
 
-pub(crate) fn run_check(args: CheckArgs) -> CliResult {
-    let cfg = load_cfg();
-    run_triage_command(&cfg, &args)
-}
-
-pub(crate) fn run_review(args: ReviewArgs) -> CliResult {
+pub(crate) fn run_inbox(args: InboxArgs) -> CliResult {
     let cfg = load_cfg();
     run_triage_command(&cfg, &args)
 }

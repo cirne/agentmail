@@ -15,12 +15,12 @@ This document describes how email sync works today, the optimizations that were 
 
 The current public contract is:
 
-- `zmail update` is the default freshness-first operation
-- `zmail update --since <spec>` is the explicit backfill operation
+- `zmail refresh` is the default freshness-first operation
+- `zmail refresh --since <spec>` is the explicit backfill operation
 - both paths avoid re-fetching messages already copied locally
 - the default agent expectation is that the most recent unseen mail becomes searchable first
 
-**Incremental update (`zmail update`):**
+**Incremental refresh (`zmail refresh`):**
 
 1. Connect to IMAP (parallel with lock acquisition)
 2. Call `STATUS` to check `UIDNEXT` — early exit if no new messages
@@ -32,7 +32,7 @@ The current public contract is:
 
 This is the path used when the caller wants the newest mail indexed fast. It does not walk backward through older history.
 
-**Backfill update (`zmail update --since <spec>`):**
+**Backfill refresh (`zmail refresh --since <spec>`):**
 
 1. Connect to IMAP (parallel with lock acquisition)
 2. Call `STATUS` (no early exit for backward sync)
@@ -309,5 +309,5 @@ See [OPP-010](./opportunities/OPP-010-sync-performance.md) for detailed roadmap.
 
 **CLI entry points:** `src/cli/index.ts`
 
-- `zmail update --since …` — Backfill update command
-- `zmail update` — Incremental update command
+- `zmail refresh --since …` — Backfill command
+- `zmail refresh` — Incremental forward sync command

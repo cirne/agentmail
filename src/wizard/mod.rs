@@ -319,7 +319,7 @@ pub fn run_wizard(opts: WizardOptions) -> Result<(), Box<dyn std::error::Error>>
         println!("\nTry a search while it syncs:");
         println!("  zmail search \"purchase or invoices\"");
     } else {
-        println!("Run `zmail sync --since 7d` to start initial sync, then `zmail refresh` for frequent updates.");
+        println!("Run `zmail refresh --since 7d` to start initial backfill, then `zmail refresh` for frequent updates.");
     }
     println!();
     Ok(())

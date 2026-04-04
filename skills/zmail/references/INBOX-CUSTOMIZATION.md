@@ -1,8 +1,8 @@
 # Inbox customization and durable rules
 
-This companion to [`../SKILL.md`](../SKILL.md) explains how to make **`zmail check`** and **`zmail review`** smarter over time by giving them **durable memory** about what matters to the mailbox owner.
+This companion to [`../SKILL.md`](../SKILL.md) explains how to make **`zmail inbox`** smarter over time by giving it **durable memory** about what matters to the mailbox owner.
 
-**Cadence (current behavior):** run **`zmail check`** on a **short loop** (e.g. every 1–5 minutes) to surface **`notify`** only (interrupt path). Check JSON still carries **`requiresUserAction`**, **`actionSummary`**, and **`counts.actionRequired`** for the scanned **unarchived** window—use them to notice **email todos** that are **`inform`** (not listed in the default **`check`** surfaced set). If **`counts.actionRequired`** > 0 but nothing surfaced, read **`hints`** and run **`zmail review`** or **`zmail check --diagnostics`**. Run **`zmail review`** **periodically or when asked** to survey the **unarchived** window with full **notify / inform / ignore** triage (**`review`** does not sync by default—run **`zmail update`** first when freshness matters); **prioritize rows with `requiresUserAction: true`** for actionable follow-up. Use **`zmail archive`** when mail no longer needs focused attention; **`search` / `read` / `ask`** still see archived mail. **Archive does not clear** the stored action-required flag—the flag reflects **what triage decided at classification time**; **open workload** is “unarchived,” so archived action mail drops out of **`check`/`review`** but stays queryable. Full table: [Inbox workflow](../SKILL.md#inbox-workflow) in **`SKILL.md`**.
+**Cadence (current behavior):** schedule **`zmail refresh`** so the local index stays current. Run **`zmail inbox`** on a cadence or when the user asks for triage—**`inbox`** reads the **already-indexed** unarchived window only; run **`zmail refresh`** first when **recency** matters. JSON carries **`requiresUserAction`**, **`actionSummary`**, **`counts.actionRequired`**, **`notify` / `inform` / `ignore`**, and optional **`hints`**. Use **`zmail inbox --diagnostics`** or **`--thorough`** when you need full rows or a complete rescan. **Prioritize rows with `requiresUserAction: true`** for actionable follow-up. Use **`zmail archive`** when mail no longer needs focused attention; **`search` / `read` / `ask`** still see archived mail. **Archive does not clear** the stored action-required flag—the flag reflects **what triage decided at classification time**; **open workload** is “unarchived,” so archived action mail drops out of **`inbox`** candidate sets but stays queryable. Full table: [Inbox workflow](../SKILL.md#inbox-workflow) in **`SKILL.md`**.
 
 The core idea: do not force the agent to rediscover the same preferences on every pass. Keep a small, explicit ruleset plus a little background context so inbox triage gets better with use.
 
@@ -12,7 +12,7 @@ The core idea: do not force the agent to rediscover the same preferences on ever
 
 Treat the installed **`zmail`** binary as the source of truth:
 
-1. Run **`zmail check --help`**, **`zmail review --help`**, and **`zmail search --help`** to see what triage/category flags exist in this version.
+1. Run **`zmail inbox --help`** and **`zmail search --help`** to see what triage/category flags exist in this version.
 2. If the installed version exposes **`zmail rules ...`**, prefer that over editing files directly.
 3. If the installed version documents **`~/.zmail/rules.json`**, keep the file small, explicit, and human-auditable.
 4. If neither exists yet, treat this file as the **target workflow** for future personalization and do not invent unsupported commands.
@@ -97,14 +97,14 @@ Rules should map to a small action set (**notify / inform / ignore**). The model
 
 | Action | Use when | Typical effect |
 | ------ | -------- | -------------- |
-| **`notify`** | Missing this right now would be costly | Surface it in `check` immediately |
-| **`inform`** | Worth mentioning, but not interrupting for | Surface it at the next `review` |
+| **`notify`** | Missing this right now would be costly | Treat as high-attention in **`inbox`** output and agent briefing |
+| **`inform`** | Worth mentioning, but not interrupting for | Include in **`inbox`** output; use **`actionSummary`** when briefing |
 | **`ignore`** | Routine noise or low-value mail the user does not want in proactive triage | Classifier skips surfacing. **Local auto-archive** applies when a user rule matched, the message is in an excluded provider category, the sender looks like **no-reply**, or body/subject has **unsubscribe** boilerplate — otherwise mail stays in the working set (still searchable). Use **`zmail archive`** for **`notify`** / **`inform`** mail once handled |
 
 Good examples:
 
 - **`notify`**: fraud alerts, password resets, urgent direct asks; **OTP codes** are often **`notify`** for visibility but **`requiresUserAction`** is usually **false** (read the code, then archive)—still use **`search` + `read`** when the user asks for a code.
-- **`inform`** + **`requiresUserAction`**: “please confirm by Friday,” invoice to pay, scheduling that needs a reply—shows in **`review`**; use **`actionSummary`** to brief the user.
+- **`inform`** + **`requiresUserAction`**: “please confirm by Friday,” invoice to pay, scheduling that needs a reply—shows in **`inbox`**; use **`actionSummary`** to brief the user.
 - **`inform`** without action: FYI threads, low-urgency updates.
 - **`ignore`**: newsletters, recruiting drip campaigns, social digests, routine shipping updates.
 
@@ -160,7 +160,7 @@ Rule of thumb: if the statement implies **what to do**, it is probably a rule. I
 
 Use a write loop instead of ad hoc memory:
 
-1. Run normal `check`, `review`, and search workflows.
+1. Run normal **`inbox`** and **`search`** workflows (after **`refresh`** when the index must be fresh).
 2. Notice repeat behavior from the user or agent.
 3. Propose a durable rule or context entry.
 4. Get confirmation before changing the ruleset.
@@ -213,13 +213,13 @@ When the installed version supports diagnostics, use them to answer:
 - What category did zmail assign?
 - Does triage mark **`requiresUserAction`**, and what **`actionSummary`** did the model give?
 
-Use **`counts.actionRequired`** in **`check`/`review`** JSON to see how many messages in the pass were flagged as needing user follow-up (across **`notify`**, **`inform`**, and **`ignore`** rows in **`review`**).
+Use **`counts.actionRequired`** in **`inbox`** JSON to see how many messages in the pass were flagged as needing user follow-up (across **`notify`**, **`inform`**, and **`ignore`** rows).
 
 If the result surprises the user:
 
 1. inspect the rule or context that likely fired
 2. tighten or remove it
-3. rerun the relevant `check` or `review`
+3. rerun **`zmail inbox`** (or **`zmail inbox --thorough`** if you need a full rescan)
 
 Personalization is only trustworthy if the user can understand and edit it.
 

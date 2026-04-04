@@ -2,107 +2,31 @@ use regex::Regex;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use crate::cli::args::{CheckArgs, ReviewArgs};
+use crate::cli::args::InboxArgs;
 use crate::cli::util::zmail_home_path;
 use crate::cli::CliResult;
 use zmail::{
-    build_check_json, build_review_json, connect_imap_session, db, inbox_json_hints,
-    load_rules_file, parse_inbox_window_to_iso_cutoff, print_check_text, print_review_text,
-    resolve_openai_api_key, resolve_sync_mailbox, resolve_sync_since_ymd, run_inbox_scan,
-    InboxSurfaceMode, LoadConfigOptions, OpenAiInboxClassifier, RunInboxScanOptions, SyncDirection,
-    SyncFileLogger, SyncOptions, SyncResult,
+    build_review_json, connect_imap_session, db, inbox_json_hints, load_rules_file,
+    parse_inbox_window_to_iso_cutoff, print_review_text, resolve_openai_api_key,
+    resolve_sync_mailbox, resolve_sync_since_ymd, run_inbox_scan, InboxSurfaceMode,
+    LoadConfigOptions, OpenAiInboxClassifier, RunInboxScanOptions, SyncDirection, SyncFileLogger,
+    SyncOptions, SyncResult,
 };
 
 pub(crate) trait InboxCliArgs {
     fn surface_mode(&self) -> InboxSurfaceMode;
     fn window(&self) -> Option<String>;
     fn since(&self) -> Option<String>;
-    fn refresh(&self) -> bool;
     fn replay(&self) -> bool;
-    fn force(&self) -> bool;
     fn include_all(&self) -> bool;
     fn diagnostics(&self) -> bool;
     /// Full per-row fields (note, decisionSource, attachments, matchedRuleIds) for JSON output.
     fn inbox_json_full_detail(&self) -> bool;
     fn text(&self) -> bool;
-    fn verbose(&self) -> bool {
-        false
-    }
-    fn watch(&self) -> bool {
-        false
-    }
-    fn watch_interval_seconds(&self) -> u64 {
-        60
-    }
-    fn reclassify(&self) -> bool {
-        false
-    }
+    fn reclassify(&self) -> bool;
 }
 
-impl InboxCliArgs for CheckArgs {
-    fn surface_mode(&self) -> InboxSurfaceMode {
-        InboxSurfaceMode::Check
-    }
-
-    fn window(&self) -> Option<String> {
-        self.window.clone()
-    }
-
-    fn since(&self) -> Option<String> {
-        self.since.clone()
-    }
-
-    fn refresh(&self) -> bool {
-        !self.no_update
-    }
-
-    fn replay(&self) -> bool {
-        self.thorough || self.replay
-    }
-
-    fn force(&self) -> bool {
-        self.thorough || self.force
-    }
-
-    fn include_all(&self) -> bool {
-        self.thorough || self.include_all
-    }
-
-    fn diagnostics(&self) -> bool {
-        self.diagnostics
-    }
-
-    fn inbox_json_full_detail(&self) -> bool {
-        self.diagnostics
-            || self.thorough
-            || self.replay
-            || self.include_all
-            || self.reclassify
-            || self.verbose
-    }
-
-    fn text(&self) -> bool {
-        self.text
-    }
-
-    fn verbose(&self) -> bool {
-        self.verbose
-    }
-
-    fn watch(&self) -> bool {
-        self.watch
-    }
-
-    fn watch_interval_seconds(&self) -> u64 {
-        self.watch_interval_seconds
-    }
-
-    fn reclassify(&self) -> bool {
-        self.thorough || self.reclassify
-    }
-}
-
-impl InboxCliArgs for ReviewArgs {
+impl InboxCliArgs for InboxArgs {
     fn surface_mode(&self) -> InboxSurfaceMode {
         InboxSurfaceMode::Review
     }
@@ -115,20 +39,12 @@ impl InboxCliArgs for ReviewArgs {
         self.since.clone()
     }
 
-    fn refresh(&self) -> bool {
-        false
-    }
-
     fn replay(&self) -> bool {
         self.thorough || self.replay
     }
 
-    fn force(&self) -> bool {
-        false
-    }
-
     fn include_all(&self) -> bool {
-        // Review lists the full inbox window (all Gmail/label categories), not only primary-tab mail.
+        // Full inbox window (all Gmail/label categories), not only primary-tab mail.
         true
     }
 
@@ -160,20 +76,6 @@ fn resolve_inbox_window_spec(since: Option<String>, window: Option<String>) -> O
         return Some(s);
     }
     window.filter(|w| inbox_rolling_window_re().is_match(w.trim()))
-}
-
-pub(crate) fn empty_sync_result() -> SyncResult {
-    SyncResult {
-        synced: 0,
-        messages_fetched: 0,
-        bytes_downloaded: 0,
-        duration_ms: 0,
-        bandwidth_bytes_per_sec: 0.0,
-        messages_per_minute: 0.0,
-        log_path: String::new(),
-        early_exit: None,
-        new_message_ids: None,
-    }
 }
 
 pub(crate) fn print_sync_foreground_metrics(r: &SyncResult) {
@@ -278,10 +180,7 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
         home: std::env::var("ZMAIL_HOME").ok().map(PathBuf::from),
         env: None,
     }) else {
-        eprintln!(
-            "zmail {} requires an LLM API key.",
-            args.surface_mode().as_str()
-        );
+        eprintln!("zmail inbox requires an LLM API key.");
         eprintln!("Set ZMAIL_OPENAI_API_KEY or run 'zmail setup' with --openai-key.");
         std::process::exit(1);
     };
@@ -296,12 +195,7 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
         }
     };
 
-    let mut sync_result = empty_sync_result();
-    if args.refresh() {
-        sync_result = run_sync_foreground_refresh(cfg, args.force(), args.verbose())?;
-    }
-
-    let print_scan = |sync_result: &SyncResult, scan: &zmail::RunInboxScanResult| -> CliResult {
+    let print_scan = |scan: &zmail::RunInboxScanResult| -> CliResult {
         let hints = inbox_json_hints(
             args.surface_mode(),
             &scan.surfaced,
@@ -309,60 +203,23 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
             scan.candidates_scanned,
             args.diagnostics(),
         );
-        match args.surface_mode() {
-            InboxSurfaceMode::Check => {
-                let json = build_check_json(
-                    sync_result,
-                    &scan.surfaced,
-                    args.diagnostics().then_some(scan.processed.as_slice()),
-                    &scan.counts,
-                    scan.candidates_scanned,
-                    scan.llm_duration_ms,
-                    !args.refresh(),
-                    &hints,
-                    args.inbox_json_full_detail(),
-                );
-                if args.text() {
-                    print_check_text(
-                        sync_result,
-                        &scan.surfaced,
-                        args.diagnostics().then_some(scan.processed.as_slice()),
-                        &scan.counts,
-                        if args.replay() {
-                            "Urgent messages (replay):"
-                        } else {
-                            "Urgent messages:"
-                        },
-                        !args.refresh(),
-                    );
-                } else if args.watch() {
-                    println!("{}", serde_json::to_string(&json)?);
-                } else {
-                    println!("{}", serde_json::to_string_pretty(&json)?);
-                }
-            }
-            InboxSurfaceMode::Review => {
-                let json = build_review_json(
-                    &scan.surfaced,
-                    args.diagnostics().then_some(scan.processed.as_slice()),
-                    &scan.counts,
-                    scan.candidates_scanned,
-                    scan.llm_duration_ms,
-                    &hints,
-                    args.inbox_json_full_detail(),
-                );
-                if args.text() {
-                    print_review_text(
-                        &scan.surfaced,
-                        args.diagnostics().then_some(scan.processed.as_slice()),
-                        &scan.counts,
-                    );
-                } else if args.watch() {
-                    println!("{}", serde_json::to_string(&json)?);
-                } else {
-                    println!("{}", serde_json::to_string_pretty(&json)?);
-                }
-            }
+        let json = build_review_json(
+            &scan.surfaced,
+            args.diagnostics().then_some(scan.processed.as_slice()),
+            &scan.counts,
+            scan.candidates_scanned,
+            scan.llm_duration_ms,
+            &hints,
+            args.inbox_json_full_detail(),
+        );
+        if args.text() {
+            print_review_text(
+                &scan.surfaced,
+                args.diagnostics().then_some(scan.processed.as_slice()),
+                &scan.counts,
+            );
+        } else {
+            println!("{}", serde_json::to_string_pretty(&json)?);
         }
         Ok(())
     };
@@ -383,24 +240,8 @@ pub(crate) fn run_triage_command(cfg: &zmail::Config, args: &impl InboxCliArgs) 
         batch_size: None,
     };
 
-    if args.watch() {
-        let scan = run_triage_scan(cfg, args, &api_key, &opts)?;
-        print_scan(&sync_result, &scan)?;
-        loop {
-            std::thread::sleep(std::time::Duration::from_secs(
-                args.watch_interval_seconds().max(1),
-            ));
-            let mut loop_sync = empty_sync_result();
-            if args.refresh() {
-                loop_sync = run_sync_foreground_refresh(cfg, args.force(), args.verbose())?;
-            }
-            let scan = run_triage_scan(cfg, args, &api_key, &opts)?;
-            print_scan(&loop_sync, &scan)?;
-        }
-    } else {
-        let scan = run_triage_scan(cfg, args, &api_key, &opts)?;
-        print_scan(&sync_result, &scan)?;
-    }
+    let scan = run_triage_scan(cfg, args, &api_key, &opts)?;
+    print_scan(&scan)?;
 
     Ok(())
 }

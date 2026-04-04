@@ -89,20 +89,20 @@ fn status_exits_zero() {
 }
 
 #[test]
-fn check_help_mentions_verbose_flag() {
+fn inbox_help_mentions_diagnostics_and_thorough() {
     let bin = env!("CARGO_BIN_EXE_zmail");
     let out = Command::new(bin)
-        .args(["check", "--help"])
+        .args(["inbox", "--help"])
         .output()
-        .expect("spawn zmail check --help");
+        .expect("spawn zmail inbox --help");
     assert!(
         out.status.success(),
         "stderr: {}",
         String::from_utf8_lossy(&out.stderr)
     );
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("--verbose"));
-    assert!(stdout.contains("--watch"));
+    assert!(stdout.contains("--diagnostics"));
+    assert!(stdout.contains("--thorough"));
 }
 
 #[test]

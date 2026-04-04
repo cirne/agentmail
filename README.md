@@ -41,20 +41,20 @@ Modern email systems are human-first — designed around inbox browsing and manu
 
 3. **Bring the local index up to date**
    ```bash
-   zmail update --since 7d --foreground
+   zmail refresh --since 7d --foreground
    ```
    Or from the repo (Node):
    ```bash
-   cd node && npm run zmail -- update --since 7d --foreground
+   cd node && npm run zmail -- sync --since 7d --foreground
    ```
    
-   **Fetch new mail and surface urgent items:**
+   **LLM triage over the local index** (run `zmail refresh` first when you need the latest mail):
    ```bash
-   zmail check
+   zmail inbox
    ```
    Or from the repo (Node):
    ```bash
-   cd node && npm run zmail -- check
+   cd node && npm run zmail -- inbox
    ```
 
 4. **Search (header-first default)**
@@ -69,12 +69,11 @@ Modern email systems are human-first — designed around inbox browsing and manu
 ## CLI
 
 ```bash
-zmail update [--since <spec>] [--foreground] [--force] [--text]
+zmail refresh [--since <spec>] [--foreground] [--force] [--text]
 zmail search <query> [--limit <n>] [--from <addr>] [--after <date>] [--before <date>]
                   [--include-noise] [--result-format auto|full|slim] [--timings]
                   [--json|--text]
-zmail check [<window>] [--since YYYY-MM-DD] [--no-update] [--thorough] [--text] [--verbose]
-zmail review [<window>] [--since <window>] [--thorough] [--text]
+zmail inbox [<window>] [--since YYYY-MM-DD] [--thorough] [--text]
 zmail archive <id>... [--undo]
 zmail status [--json] [--imap]
 zmail stats
@@ -110,14 +109,14 @@ zmail intentionally does not run automatic migrations on existing local DBs. If 
 
 ```bash
 rm -rf ~/.zmail/data/
-zmail update --since 7d --foreground
+zmail refresh --since 7d --foreground
 ```
 
 For a **maildir-only** SQLite reindex without deleting raw email (same steps as a schema bump), use `zmail rebuild-index` — see [AGENTS.md](AGENTS.md).
 
 ## Architecture
 
-**Primary implementation:** Rust at the workspace root — IMAP sync, SQLite + FTS5, CLI, MCP (stdio), attachments, SMTP/drafts, and LLM-shaped commands (`zmail ask`, `zmail check`, `zmail review`). Uses the same **`ZMAIL_HOME`** / **`~/.zmail`** layout as the TypeScript reference under **`node/`**. **Reference / npm:** Node.js 20+ under **`node/`** (published as `@cirne/zmail`). All data stays on your machine — no cloud sync service, no third-party access to your email.
+**Primary implementation:** Rust at the workspace root — IMAP sync, SQLite + FTS5, CLI, MCP (stdio), attachments, SMTP/drafts, and LLM-shaped commands (`zmail ask`, `zmail inbox`). Uses the same **`ZMAIL_HOME`** / **`~/.zmail`** layout as the TypeScript reference under **`node/`**. **Reference / npm:** Node.js 20+ under **`node/`** (published as `@cirne/zmail`). All data stays on your machine — no cloud sync service, no third-party access to your email.
 
 **Documentation:**
 - [`AGENTS.md`](AGENTS.md) — installation, commands, and development
@@ -138,8 +137,8 @@ cargo run -- --help
 cargo build --release
 ./target/release/zmail status
 # IMAP sync (same ZMAIL_HOME / credentials as Node)
-cargo run -- update --foreground --since 7d
-cargo run -- check
+cargo run -- refresh --foreground --since 7d
+cargo run -- inbox
 # Natural-language Q&A (OpenAI; same key as `zmail ask` via Node)
 cargo run -- ask "summarize invoices from last week" --verbose
 ```

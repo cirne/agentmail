@@ -125,7 +125,7 @@ See `.cursor/skills/process-feedback/SKILL.md` for the complete workflow. The `d
 ```bash
 cargo test
 cargo run -- --help
-cargo run -- check 7d --no-update --thorough   # iterate on inbox scan without release build
+cargo run -- inbox 24h --thorough   # iterate on inbox scan without release build
 cargo build --release
 ./target/release/zmail status
 ```
@@ -153,9 +153,8 @@ zmail who [query] [--limit n] [--text]  (omit query for top contacts)
 zmail read <message_id> [--raw] [--json] [--text]
 zmail thread <thread_id> [--json] [--text]
 zmail ask "<question>" [--verbose]  # Answer a question about your email (requires ZMAIL_OPENAI_API_KEY); -v logs pipeline progress
-zmail update [--since <window>] [--foreground] [--force] [--text]  # sync local mail; use --foreground when backfilling older mail
-zmail check [<window>] [--since YYYY-MM-DD] [--thorough] [--no-update] [--text] [--verbose]  # update first by default, then surface urgent mail
-zmail review [<window>] [--since <window>] [--thorough] [--text]  # review notable recent mail without urgent-only filtering
+zmail refresh [--since <window>] [--foreground] [--force] [--text]  # sync local mail; --since backfills; use --foreground when blocking on backfill
+zmail inbox [<window>] [--since YYYY-MM-DD] [--thorough] [--text]  # LLM triage over the local index (no IMAP); run refresh first when recency matters
 zmail archive <message_id>... [--undo]  # local is_archived; optional IMAP when mailboxManagement enabled; JSON stdout
 zmail status [--json] [--imap]
 zmail stats [--json]
@@ -167,9 +166,9 @@ zmail draft new|reply|forward|list|view|edit|rewrite [--help]   # Local drafts (
 zmail mcp  # Start MCP server (stdio)
 ```
 
-**`zmail check` / `zmail review` — fast vs thorough:** Default is the **fast** path (category filter on candidates, cached LLM decisions when fingerprint matches, skip already-surfaced ids, `check` may **early-exit** IMAP forward sync when STATUS says nothing new). **`--thorough`** is the **slow/complete** path: no forward-sync early exit (`check` only), **all** categories, **rerun** the LLM (bypass cache), **include archived** mail in the window, **replay** (ignore prior surfaced dedup). Hidden compatibility flags `--force`, `--include-all`, `--reclassify`, `--replay` still work and combine with `OR` semantics against the same toggles.
+**`zmail inbox` — fast vs thorough:** Default is the **fast** path (category filter on candidates, cached LLM decisions when fingerprint matches). **`--thorough`** is the **slow/complete** path: **all** categories, **rerun** the LLM (bypass cache), **include archived** mail in the window, **replay** (ignore prior surfaced dedup). Hidden compatibility flags `--include-all`, `--reclassify`, `--replay` still work and combine with `OR` semantics against the same toggles.
 
-**Inbox JSON (agents):** `check` / `review` include per-row **`requiresUserAction`**, **`actionSummary`**, and **`counts.actionRequired`** (triage todo hint, orthogonal to **`notify`/`inform`/`ignore`**). **`zmail archive`** drops mail from the unarchived scan window; it does **not** clear the persisted action-required columns on **`inbox_decisions`**. End-user workflow: [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md).
+**Inbox JSON (agents):** `inbox` includes per-row **`requiresUserAction`**, **`actionSummary`**, and **`counts.actionRequired`** (triage todo hint, orthogonal to **`notify`/`inform`/`ignore`**). **`zmail archive`** drops mail from the unarchived scan window; it does **not** clear the persisted action-required columns on **`inbox_decisions`**. End-user workflow: [`skills/zmail/SKILL.md`](skills/zmail/SKILL.md).
 
 **Archived mail in the scan:** included when **`--thorough`** or **`--reclassify`** (hidden). **`search` / `read`** always see archived mail.
 
@@ -181,7 +180,7 @@ See [`docs/ASK.md`](docs/ASK.md) for **`zmail ask`** vs primitives and for the *
 
 ```bash
 # Run sync in background
-zmail update --since 1y &
+zmail refresh --since 1y &
 
 # Check sync status
 zmail status
@@ -252,7 +251,7 @@ Search JSON includes attachment info: **full** rows list per-file metadata (`id`
 
 zmail stores configuration in `~/.zmail/` (or `$ZMAIL_HOME` if set):
 
-- `~/.zmail/config.json` — non-secret settings (IMAP host/port/user, sync settings, optional `attachments.cacheExtractedText`, optional `inbox.defaultWindow` for `zmail review` when no window is passed — default `24h`)
+- `~/.zmail/config.json` — non-secret settings (IMAP host/port/user, sync settings, optional `attachments.cacheExtractedText`, optional `inbox.defaultWindow` for `zmail inbox` when no window is passed — default `24h`)
 - `~/.zmail/.env` — secrets (ZMAIL_IMAP_PASSWORD, ZMAIL_OPENAI_API_KEY)
 
 Attachment extracted-text cache is **off by default** (each read re-extracts). To use cached extraction on repeat reads, set `"attachments": { "cacheExtractedText": true }` in config.json.

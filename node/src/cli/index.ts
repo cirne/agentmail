@@ -649,11 +649,10 @@ function parseRawFlag(rawArgs: string[], usage: string): { id: string; raw: bool
 
 /** Token-efficient hint for unknown command so the agent can self-correct. */
 function getUnknownCommandHint(unknownCommand: string): string {
-  // Handle common typos/variations
-  if (unknownCommand === "refresh" || unknownCommand === "update") {
-    return "Did you mean 'zmail refresh'?";
-  }
   const c = unknownCommand.toLowerCase();
+  if (c === "update" || c === "check" || c === "review") {
+    return "That subcommand was removed. Use 'zmail refresh' to sync mail and 'zmail inbox' for LLM triage.";
+  }
   if (c === "show" || c === "get" || c === "open" || c === "view") {
     return "Use: zmail read <message_id>, zmail search \"<query>\", or zmail ask \"<question>\" for a summarized answer.";
   }

@@ -4,7 +4,7 @@ zmail exposes an MCP (Model Context Protocol) server for agent access to your em
 
 ## Overview
 
-The MCP server provides programmatic access to zmail's search, message retrieval, attachment extraction, **local archive** (`archive_mail`), and (when configured) **outbound SMTP** (`send_email`, `create_draft`, `send_draft`, `list_drafts`). It shares the same underlying SQLite index as the CLI, so all data synced via `zmail update` is immediately available through MCP tools.
+The MCP server provides programmatic access to zmail's search, message retrieval, attachment extraction, **local archive** (`archive_mail`), and (when configured) **outbound SMTP** (`send_email`, `create_draft`, `send_draft`, `list_drafts`). It shares the same underlying SQLite index as the CLI, so all data synced via `zmail refresh` is immediately available through MCP tools.
 
 **Draft + send (core agent loop):** create or update drafts with **`create_draft`**, list with **`list_drafts`**, send with **`send_draft`** (mirrors **`zmail draft …`** and **`zmail send <draft-id>`**). Draft files are **`{id}.md`** under `data/drafts/` (`id` is a subject slug plus an 8-character suffix). **`send_draft`** accepts that id with or without **`.md`**. For kind **`new`**, omit **`subject`** and pass **`instruction`** to have the LLM generate subject and body (requires OpenAI key). Natural-language revision of an existing draft is still **CLI-only** (`zmail draft edit <id> "…"`); in MCP, revise the body in the outer agent and call **`create_draft`** again.
 
@@ -398,7 +398,7 @@ No additional MCP-specific configuration is required. The server reads the datab
 | **Output** | Human-readable + JSON flag | Structured JSON only |
 | **Transport** | Process invocation | Persistent stdio connection |
 
-Both interfaces share the same underlying index and data. A message pulled in via `zmail update` is immediately available via MCP `search_mail`, and vice versa.
+Both interfaces share the same underlying index and data. A message pulled in via `zmail refresh` is immediately available via MCP `search_mail`, and vice versa.
 
 ### CLI arguments (quick reference)
 

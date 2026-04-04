@@ -21,7 +21,7 @@ pub(crate) fn handle_command(command: Commands) -> CliResult {
             clean,
             yes,
         } => setup::run_wizard_command(no_validate, clean, yes),
-        Commands::Update {
+        Commands::Refresh {
             duration,
             since,
             foreground,
@@ -96,8 +96,7 @@ pub(crate) fn handle_command(command: Commands) -> CliResult {
         Commands::Draft { sub } => mail::run_draft(sub),
         Commands::Rules { sub } => rules::run_rules(sub),
         Commands::Ask { question, verbose } => assist::run_ask(question, verbose),
-        Commands::Check(args) => assist::run_check(args),
-        Commands::Review(args) => assist::run_review(args),
+        Commands::Inbox(args) => assist::run_inbox(args),
         Commands::Archive { message_ids, undo } => archive::run_archive(message_ids, undo),
     }
 }

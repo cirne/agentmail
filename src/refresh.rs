@@ -269,7 +269,7 @@ pub fn build_refresh_json_value_with_extras(
     v
 }
 
-/// Short, actionable strings for agents when `zmail check` / `zmail review` JSON is large or skewed.
+/// Short, actionable strings for agents when `zmail inbox` JSON is large or skewed.
 /// Omit the `hints` field in JSON when this returns empty.
 pub fn inbox_json_hints(
     mode: InboxSurfaceMode,
@@ -282,7 +282,7 @@ pub fn inbox_json_hints(
     if surfaced.is_empty() {
         if counts.action_required > 0 {
             hints.push(format!(
-                "{} message(s) need your action — run `zmail review` or `zmail check --diagnostics` for full rows (requiresUserAction / actionSummary). Archive when done.",
+                "{} message(s) need your action — run `zmail inbox --diagnostics` for full rows (requiresUserAction / actionSummary). Archive when done.",
                 counts.action_required
             ));
         }
@@ -340,8 +340,9 @@ pub fn inbox_json_hints(
         InboxSurfaceMode::Review => {
             hints.push("Archive handled items with `zmail archive <messageId>…`".to_string())
         }
-        InboxSurfaceMode::Check => hints
-            .push("For non-urgent follow-up across the window, run `zmail review`.".to_string()),
+        InboxSurfaceMode::Check => {
+            hints.push("For non-urgent follow-up across the window, run `zmail inbox`.".to_string())
+        }
     }
 
     if counts.action_required > 0 {
@@ -354,7 +355,7 @@ pub fn inbox_json_hints(
     hints
 }
 
-/// JSON for `zmail check` with sync metrics; key order is stable and `hints` is last when present.
+/// JSON for urgent-style inbox output with sync metrics (internal / tests); key order is stable and `hints` is last when present.
 #[allow(clippy::too_many_arguments)]
 fn build_check_json_with_sync_ordered(
     sync: &SyncResult,
@@ -808,7 +809,7 @@ mod inbox_json_hints_tests {
         );
         assert_eq!(hints.len(), 1);
         assert!(hints[0].contains("need your action"));
-        assert!(hints[0].contains("zmail review"));
+        assert!(hints[0].contains("zmail inbox"));
     }
 
     #[test]
